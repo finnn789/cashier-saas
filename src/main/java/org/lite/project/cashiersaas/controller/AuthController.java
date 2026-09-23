@@ -5,6 +5,8 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.dto.request.identity.LoginRequest;
 import org.lite.project.cashiersaas.dto.request.identity.RegisterUserRequest;
+import org.lite.project.cashiersaas.dto.request.identity.SelectMerchantRequest;
+import org.lite.project.cashiersaas.component.AccountPrincipal;
 import org.lite.project.cashiersaas.dto.response.identity.LoginResponse;
 import org.lite.project.cashiersaas.dto.response.identity.RegisterUserResponse;
 import org.lite.project.cashiersaas.service.LoginService;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -34,5 +37,11 @@ public class AuthController {
     @SecurityRequirements
     public ApiResponse<RegisterUserResponse> register(@Valid @RequestBody RegisterUserRequest request) {
         return ApiResponse.created("Registrasi akun berhasil.", registerService.register(request));
+    }
+
+    @PostMapping("/select-merchant")
+    public ApiResponse<LoginResponse> selectMerchant(@AuthenticationPrincipal AccountPrincipal principal,
+                                                      @Valid @RequestBody SelectMerchantRequest request) {
+        return ApiResponse.success("Merchant dipilih.", loginService.selectMerchant(principal, request.getTenantId()));
     }
 }

@@ -44,7 +44,7 @@ CREATE TABLE plan_prices (
     plan_version_id UUID NOT NULL REFERENCES plan_versions(id),
     currency_code CHAR(3) NOT NULL,
     billing_interval VARCHAR(16) NOT NULL CHECK (billing_interval IN ('MONTHLY','YEARLY')),
-    amount NUMERIC(19,2) NOT NULL CHECK (amount > 0),
+    amount NUMERIC(19,2) NOT NULL CHECK (amount >= 0),
     effective_from TIMESTAMPTZ NOT NULL,
     effective_until TIMESTAMPTZ,
     UNIQUE (plan_version_id, id),

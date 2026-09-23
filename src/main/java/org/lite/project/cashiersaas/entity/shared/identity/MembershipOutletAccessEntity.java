@@ -21,4 +21,12 @@ public class MembershipOutletAccessEntity extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "outlet_id")
     private OutletEntity outlet;
+
+    public static MembershipOutletAccessEntity grant(TenantMembershipEntity membership, OutletEntity outlet) {
+        MembershipOutletAccessEntity access = new MembershipOutletAccessEntity();
+        access.tenant = membership.getTenant();
+        access.membership = membership;
+        access.outlet = outlet;
+        return access;
+    }
 }

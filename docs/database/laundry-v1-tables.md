@@ -7,7 +7,7 @@ Status: desain referensi untuk PostgreSQL, belum diterapkan. Berkas SQL pasangan
 - Semua ID adalah UUID yang dibuat aplikasi. Waktu disimpan `TIMESTAMPTZ`; uang `NUMERIC(19,2)`; jumlah/berat `NUMERIC(14,3)`.
 - `tenant_id` selalu diambil dari principal terautentikasi. FK komposit `(tenant_id, id)` mencegah hubungan lintas tenant; akses outlet tetap diperiksa aplikasi melalui `membership_outlet_access`.
 - `version` disediakan untuk optimistic locking. Kolom snapshot tidak boleh diperbarui setelah transaksi bisnis diposting.
-- Tidak ada harga paket, alokasi fitur, kontrak gateway, ataupun token mentah yang disediakan oleh desain ini.
+- Freetier memakai harga nol dan aktivasi tanpa pembayaran platform. Harga paket berbayar, alokasi fitur lengkap, kontrak gateway, dan token mentah belum disediakan oleh desain ini.
 
 ## Platform, paket, dan identitas
 
@@ -18,7 +18,7 @@ Status: desain referensi untuk PostgreSQL, belum diterapkan. Berkas SQL pasangan
 | `plan_versions` | Versi paket yang dapat dipublikasikan. | Langganan menyimpan versi, agar perubahan masa depan tidak mengubah kontrak lama. |
 | `features` | Katalog kemampuan platform. | Tidak mengasumsikan feature mana masuk paket mana atau jenis bisnis mana yang dapat memakainya. |
 | `plan_features` | Hak/limit per versi paket. | Satu feature per versi paket. |
-| `plan_prices` | Harga per versi, mata uang, dan periode. | Tidak ada seed harga; nilai harus positif dan relasi eksplisit ke `plan_versions`. |
+| `plan_prices` | Harga per versi, mata uang, dan periode. | Harga nol hanya untuk Freetier; harga paket berbayar harus positif. Relasi ke `plan_versions` eksplisit; tidak ada seed harga. |
 | `tenants` | Merchant dan profil situs bermerek. | `DRAFT → PENDING_SUBSCRIPTION → PENDING_PROFILE → ACTIVE`; provisioning dideduplikasi per pembuat + key dan fingerprint. |
 | `staff_users` | Identitas login global, termasuk akun sebelum merchant dibuat. | Password hash dan status akun; role merchant tetap berada di membership tenant. |
 | `tenant_memberships` | Keanggotaan user pada merchant. | Role tepat `OWNERMERCHANT` atau `CASHIER`; satu user sekali per tenant. |
@@ -32,11 +32,11 @@ Status: desain referensi untuk PostgreSQL, belum diterapkan. Berkas SQL pasangan
 | Tabel | Tujuan | Kunci aturan |
 |---|---|---|
 | `subscriptions` | Masa berlangganan merchant pada versi/harga paket. | Partial unique index membatasi satu subscription hidup per tenant. |
-| `platform_invoices` | Tagihan SaaS kepada merchant. | Terpisah total dari invoice pelanggan laundry; nilai positif, tanpa alur gratis implisit. |
+| `platform_invoices` | Tagihan SaaS kepada merchant berbayar. | Terpisah total dari invoice pelanggan laundry; nilai positif. Freetier tidak membuat invoice platform. |
 | `platform_payment_attempts` | Percobaan bayar ke gateway platform. | Idempotency tenant dan referensi provider unik. |
 | `gateway_events` | Inbox webhook gateway yang dideduplikasi. | Unique provider/account/event; simpan digest payload, bukan rahasia. |
 
-Alur aktivasi: tenant/profil dapat dibuat `DRAFT`, subscription dibuat `PENDING_PAYMENT`, event payment terverifikasi mengaktifkan subscription, lalu profil lengkap mengaktifkan tenant. Retry onboarding dengan key yang sama harus memakai fingerprint identik; fingerprint berbeda ditolak. Detail provider dan kebijakan masa aktif tetap keputusan produk/integrasi.
+Alur aktivasi: tenant/profil dapat dibuat `DRAFT`. Freetier membuat subscription `ACTIVE` langsung tanpa invoice, payment attempt, atau webhook platform. Paket berbayar membuat subscription `PENDING_PAYMENT`; event payment terverifikasi mengaktifkannya. Profil lengkap kemudian mengaktifkan tenant. Service wajib memvalidasi bahwa harga nol hanya milik Freetier; `CHECK` satu baris tidak dapat membuktikan kode paket pada tabel lain. Retry onboarding dengan key yang sama harus memakai fingerprint identik; fingerprint berbeda ditolak. Detail provider dan kebijakan masa aktif tetap keputusan produk/integrasi.
 
 ## Pelanggan dan katalog Laundry
 

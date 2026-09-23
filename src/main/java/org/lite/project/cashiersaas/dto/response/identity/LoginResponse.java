@@ -6,6 +6,7 @@ import lombok.Setter;
 import org.lite.project.cashiersaas.enums.Role;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -16,4 +17,5 @@ public class LoginResponse {
     private String tokenType;
     private Instant expiresAt;
     private Role role;
+    private UUID tenantId;
 }

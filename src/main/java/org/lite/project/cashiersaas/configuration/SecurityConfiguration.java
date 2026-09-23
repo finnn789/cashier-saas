@@ -28,7 +28,8 @@ public class SecurityConfiguration {
                 .exceptionHandling(exception ->
                         exception.authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint())
                                 .accessDeniedHandler(new BearerTokenAccessDeniedHandler())).authorizeHttpRequests(authorize -> authorize
-                                .requestMatchers(HttpMethod.POST, "/api/v1/auth/**").permitAll()
+                                .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/register").permitAll()
+                                .requestMatchers(HttpMethod.POST, "/api/v1/auth/select-merchant").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/api/v1/onboarding/**").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/api/v1/public/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                                 .requestMatchers("/api/v1/platform/**").hasRole(Role.SUPERADMIN.name())

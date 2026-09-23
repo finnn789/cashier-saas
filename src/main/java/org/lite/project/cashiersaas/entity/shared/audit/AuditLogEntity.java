@@ -38,4 +38,30 @@ public class AuditLogEntity extends BaseEntity {
     private String reason;
     @Column(columnDefinition = "TEXT")
     private String details;
+
+    public enum Action {
+        CASHIER_PAYMENT_RECORDED("CASHIER_SALE"),
+        CASHIER_PRICE_CHANGED("CASHIER_CATALOG_ITEM"),
+        CASHIER_ITEM_ARCHIVED("CASHIER_CATALOG_ITEM");
+
+        private final String entityType;
+
+        Action(String entityType) {
+            this.entityType = entityType;
+        }
+    }
+
+    public static AuditLogEntity recordAction(TenantEntity tenant, OutletEntity outlet, StaffUserEntity actor,
+                                              Action action, UUID entityId, String reason, String details) {
+        AuditLogEntity log = new AuditLogEntity();
+        log.tenant = tenant;
+        log.outlet = outlet;
+        log.actor = actor;
+        log.action = action.name();
+        log.entityType = action.entityType;
+        log.entityId = entityId;
+        log.reason = reason;
+        log.details = details;
+        return log;
+    }
 }

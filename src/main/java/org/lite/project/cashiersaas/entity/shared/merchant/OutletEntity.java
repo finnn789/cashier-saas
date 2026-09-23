@@ -23,4 +23,14 @@ public class OutletEntity extends MutableBaseEntity {
     private String phoneNumber;
     @Column(nullable = false)
     private boolean active = true;
+
+    public static OutletEntity open(TenantEntity tenant, String name, String timeZone, String address, String phoneNumber) {
+        OutletEntity outlet = new OutletEntity();
+        outlet.tenant = tenant;
+        outlet.name = name;
+        outlet.timeZone = timeZone;
+        outlet.address = address;
+        outlet.phoneNumber = phoneNumber;
+        return outlet;
+    }
 }

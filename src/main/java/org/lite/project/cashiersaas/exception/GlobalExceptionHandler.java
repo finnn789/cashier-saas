@@ -5,8 +5,12 @@ import org.lite.project.cashiersaas.exception.runtime.BusinessProfileAlreadyComp
 import org.lite.project.cashiersaas.exception.runtime.DataIntegrityViolationRuntimeException;
 import org.lite.project.cashiersaas.exception.runtime.EmailAlreadyRegisteredException;
 import org.lite.project.cashiersaas.exception.runtime.InvalidCredentialsException;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.shared.response.ApiResponse;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -40,6 +44,13 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(HttpStatus.CONFLICT.value(), exception.getMessage());
     }
 
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiResponse<Object> handleDatabaseConflict(DataIntegrityViolationException exception) {
+        log.warn("Operation rejected by a database integrity rule.");
+        return ApiResponse.error(HttpStatus.CONFLICT.value(), "Data sudah berubah atau terjadi duplikasi.");
+    }
+
     @ExceptionHandler(BusinessProfileAlreadyCompletedException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public ApiResponse<Object> handleBusinessProfileAlreadyCompleted(BusinessProfileAlreadyCompletedException exception) {
@@ -56,6 +67,24 @@ public class GlobalExceptionHandler {
 
         log.warn("Request validation failed: fieldErrorCount={}", errors.size());
         return ApiResponse.validationError(HttpStatus.BAD_REQUEST.value(), "Request tidak valid.", errors);
+    }
+
+    @ExceptionHandler(InvalidOperationException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Object> handleInvalidOperation(InvalidOperationException exception) {
+        return ApiResponse.error(HttpStatus.BAD_REQUEST.value(), exception.getMessage());
+    }
+
+    @ExceptionHandler(OperationConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiResponse<Object> handleOperationConflict(OperationConflictException exception) {
+        return ApiResponse.error(HttpStatus.CONFLICT.value(), exception.getMessage());
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiResponse<Object> handleResourceNotFound(ResourceNotFoundException exception) {
+        return ApiResponse.error(HttpStatus.NOT_FOUND.value(), exception.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

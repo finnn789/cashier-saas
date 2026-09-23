@@ -2,6 +2,8 @@
 
 > Catatan arah produk, 16 September 2026: pengguna menetapkan platform multi-bisnis dengan Laundry sebagai produk pertama. [Rancangan database Laundry v1](docs/database/README.md) mendokumentasikan scope dan model data baru untuk pekerjaan desain ini. Isi F&B di bawah dipertahankan sebagai referensi bisnis berikutnya; belum menjadi PRD laundry dan bukan tanda fitur laundry sudah diimplementasikan. Untuk desain database baru, keputusan laundry terbaru tersebut menggantikan batas scope F&B lama (termasuk langganan gateway, antar-jemput, dan inventory dasar).
 
+> Keputusan Freetier, 23 September 2026: Freetier adalah paket gratis untuk pencatatan kasir biasa. Kasir memasukkan transaksi dan nama pelanggan secara manual, lalu mencatat uang yang diterima dari pelanggan secara manual. Data transaksi disimpan di database SaaS dan dapat dibuka kembali setelah login, termasuk dari perangkat lain yang diizinkan. Aktivasi Freetier tidak memerlukan invoice atau pembayaran langganan melalui gateway platform. Batas fitur lain masih perlu dipastikan; aturan F&B di bawah tidak otomatis menjadi hak Freetier Laundry.
+
 **Versi:** 0.1  
 **Status:** Draft awal  
 **Tanggal:** 13 September 2026  

@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.lite.project.cashiersaas.shared.StatusConstants;
 
 @Getter
 @Entity
@@ -26,26 +27,32 @@ public class StaffUserEntity extends MutableBaseEntity {
         staffUser.email = normalizedEmail;
         staffUser.passwordHash = passwordHash;
         staffUser.fullName = fullName;
-        staffUser.status = "PENDING_PROFILE";
+        staffUser.status = StatusConstants.PENDING_PROFILE;
+        return staffUser;
+    }
+
+    public static StaffUserEntity createCashier(String normalizedEmail, String passwordHash, String fullName) {
+        StaffUserEntity staffUser = registerWithPassword(normalizedEmail, passwordHash, fullName);
+        staffUser.status = StatusConstants.ACTIVE;
         return staffUser;
     }
 
     public boolean isActive() {
-        return "ACTIVE".equals(status);
+        return StatusConstants.ACTIVE.equals(status);
     }
 
     public boolean isPendingProfile() {
-        return "PENDING_PROFILE".equals(status);
+        return StatusConstants.PENDING_PROFILE.equals(status);
     }
 
     public boolean isDisabled() {
-        return "DISABLED".equals(status);
+        return StatusConstants.DISABLED.equals(status);
     }
 
     public void completeBusinessProfile() {
         if (!isPendingProfile()) {
             throw new IllegalStateException("Business profile must be pending before it can be completed.");
         }
-        status = "ACTIVE";
+        status = StatusConstants.ACTIVE;
     }
 }

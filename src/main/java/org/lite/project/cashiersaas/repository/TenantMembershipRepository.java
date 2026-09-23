@@ -7,6 +7,7 @@ import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntit
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -25,5 +26,13 @@ public class TenantMembershipRepository {
 
     public void persist(TenantMembershipEntity membership) {
         entityManager.persist(membership);
+    }
+
+    public Optional<TenantMembershipEntity> findActive(UUID userId, UUID tenantId) {
+        return criteriaBuilderFactory.create(entityManager, TenantMembershipEntity.class, "membership")
+                .where("membership.user.id").eq(userId)
+                .where("membership.tenant.id").eq(tenantId)
+                .where("membership.active").eq(true)
+                .setMaxResults(1).getResultList().stream().findFirst();
     }
 }

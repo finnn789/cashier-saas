@@ -16,12 +16,14 @@ public class RegisterOwnerResponse {
     private String tokenType;
     private Instant expiresAt;
     private UUID tenantId;
+    private UUID outletId;
     private String role;
 
     public static RegisterOwnerResponse fromBusinessProfile(
             String accessToken,
             Instant expiresAt,
             UUID tenantId,
+            UUID outletId,
             String role
     ) {
         RegisterOwnerResponse response = new RegisterOwnerResponse();
@@ -29,6 +31,7 @@ public class RegisterOwnerResponse {
         response.setTokenType("Bearer");
         response.setExpiresAt(expiresAt);
         response.setTenantId(tenantId);
+        response.setOutletId(outletId);
         response.setRole(role);
         return response;
     }

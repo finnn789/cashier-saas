@@ -32,4 +32,13 @@ public class TenantMembershipEntity extends MutableBaseEntity {
         membership.active = true;
         return membership;
     }
+
+    public static TenantMembershipEntity grantCashier(StaffUserEntity user, TenantEntity tenant) {
+        TenantMembershipEntity membership = new TenantMembershipEntity();
+        membership.user = user;
+        membership.tenant = tenant;
+        membership.role = Role.CASHIER;
+        membership.active = true;
+        return membership;
+    }
 }

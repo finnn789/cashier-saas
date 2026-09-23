@@ -11,7 +11,9 @@ Arah produk dari percakapan terbaru adalah platform SaaS untuk beberapa jenis bi
 - [SQL referensi PostgreSQL](laundry-v1.sql): struktur target untuk database kosong terpisah; bukan migration Flyway aplikasi saat ini.
 - [Pemetaan entity lama](legacy-mapping.md): pemakaian kembali, pemisahan, dan tahapan perpindahan data.
 
-SQL referensi Laundry di dokumen ini belum dijalankan sebagai migration aplikasi. Fondasi identitas kini memakai `StaffUserEntity` dan `tenant_memberships` melalui Flyway V4; katalog paket tersedia sebagai API kode tetap. Modul operasional Laundry, harga paket, dan alur langganan belum tersedia.
+SQL referensi Laundry di dokumen ini belum dijalankan sebagai migration aplikasi. Fondasi identitas memakai `StaffUserEntity` dan `tenant_memberships` melalui Flyway V4; katalog paket tersedia sebagai API kode tetap. Flyway V5 menambah onboarding dan kasir dasar Freetier. Workflow pengerjaan Laundry lengkap, harga paket berbayar, dan pembayaran langganan gateway belum tersedia.
+
+Implementasi kasir Freetier memakai Flyway V5 dan model yang lebih kecil daripada SQL referensi ini. Sesuai keputusan terbaru, hanya `SubscriptionEntity` menyimpan `plan_code = FREETIER`; entity Plan/PlanVersion/PlanPrice tidak digunakan. Kasir Freetier memakai `cashier_catalog_items`, `cashier_sales`, dan `cashier_sale_items` untuk penjualan manual yang langsung dibayar. SQL referensi di bawah masih menggambarkan rancangan Laundry lengkap dan **bukan kontrak skema runtime Freetier**; model paket berbayar perlu dirancang ulang sebelum diimplementasikan.
 
 ## Sasaran dan batas rilis pertama
 
@@ -24,6 +26,12 @@ SQL referensi Laundry di dokumen ini belum dijalankan sebagai migration aplikasi
 7. Owner melihat tagihan, penerimaan pembayaran, antrean, dan audit yang konsisten untuk tenant/outlet miliknya.
 
 Tidak ada tabel operasional F&B, retail, jasa booking, marketplace, atau distributor pada rilis ini. Belum ada mesin workflow generik, resep, procurement, payroll, komisi kurir, cicilan, deposit pelanggan, refund otomatis, atau integrasi kanal eksternal. Pembayaran gateway dalam desain ini adalah **pembayaran langganan ke platform**; pembayaran pelanggan laundry pertama dicatat manual, tunai atau non-tunai.
+
+### Aturan Freetier
+
+Freetier adalah paket gratis untuk kasir biasa: staf memasukkan transaksi dan nama pelanggan secara manual, lalu mencatat penerimaan uang pelanggan secara manual. Data transaksi disimpan di database SaaS dan dapat dibuka kembali setelah login dari perangkat lain yang diizinkan; pencatatan manual tidak berarti penyimpanan lokal di satu komputer. Memilih Freetier membuat subscription aktif tanpa menerbitkan `platform_invoices`, `platform_payment_attempts`, atau `gateway_events`. Profil merchant dan outlet tetap harus lengkap sebelum tenant menjadi `ACTIVE` dan token operasional diterbitkan. Pembayaran pelanggan tetap masuk domain transaksi merchant, terpisah dari pembayaran langganan platform.
+
+Batas fitur Freetier selain pencatatan kasir manual belum diputuskan. Desain ini belum mengasumsikan QR pelanggan, antar-jemput, inventori, atau fitur paket lain sebagai hak Freetier.
 
 ## Keputusan rancangan
 
@@ -41,7 +49,7 @@ Tenant memiliki slug, nama, logo, dan pengaturan. Contoh alamat: `/m/laundry-ber
 
 `platform_invoices` dan `platform_payment_attempts` mencatat owner membayar platform. `customer_invoices` dan `customer_payments` mencatat pelanggan membayar jasa laundry. Keduanya tidak digabung ke satu tabel payment dengan `entity_type/entity_id` yang kehilangan foreign key.
 
-Harga serta fitur paket dipublikasikan sebagai versi. Perubahan harga/fitur menghasilkan versi penawaran baru, bukan mengubah histori subscription secara diam-diam. Katalog aplikasi saat ini hanya menyediakan identitas Freetier/Premium/Pro; belum ada harga atau matriks fitur yang diasumsikan oleh desain.
+Harga serta fitur paket dipublikasikan sebagai versi. Perubahan harga/fitur menghasilkan versi penawaran baru, bukan mengubah histori subscription secara diam-diam. Freetier memiliki harga nol dan aktivasi tanpa pembayaran platform; harga paket berbayar dan matriks fitur lengkap belum ditentukan.
 
 Hak akses efektif merupakan pertemuan jenis bisnis yang tersedia, entitlement langganan, membership/role, dan akses outlet. Paket tidak otomatis menyediakan semua jenis bisnis: ketersediaan jenis bisnis dan entitlement paket akan ditentukan kemudian. Cek tersebut dilakukan pada API dan service, bukan hanya melalui menu frontend.
 
@@ -72,9 +80,9 @@ Untuk awal, progres produksi dikelola per order. Semua item harus selesai sebelu
 ### Pembelian paket dan onboarding
 
 1. Autentikasi user global, lalu simpan tenant provisional yang profilnya belum lengkap, membership owner, pilihan paket, serta subscription pending.
-2. Terbitkan invoice platform dan payment attempt dengan idempotency key. Tutup browser atau retry tidak boleh membuat subscription aktif kedua.
-3. Server memverifikasi webhook gateway: signature, akun provider, payment reference, nominal, mata uang, dan status pembayaran. Redirect browser bukan bukti pembayaran.
-4. Catat event provider dengan key unik; kunci invoice/subscription, rekonsiliasi pembayaran, dan aktifkan periode berlangganan satu kali. Event duplikat atau datang terlambat tidak mengulang provisioning.
+2. Untuk Freetier, aktifkan subscription tanpa invoice atau payment attempt platform. Untuk paket berbayar, terbitkan invoice platform dan payment attempt dengan idempotency key. Tutup browser atau retry tidak boleh membuat subscription aktif kedua.
+3. Khusus paket berbayar, server memverifikasi webhook gateway: signature, akun provider, payment reference, nominal, mata uang, dan status pembayaran. Redirect browser bukan bukti pembayaran.
+4. Khusus paket berbayar, catat event provider dengan key unik; kunci invoice/subscription, rekonsiliasi pembayaran, dan aktifkan periode berlangganan satu kali. Event duplikat atau datang terlambat tidak mengulang provisioning.
 5. Owner melengkapi profil dan outlet. Aktifkan penggunaan aplikasi setelah onboarding valid dan hak langganan berlaku. Pembayaran sukses tetapi profil belum lengkap harus dapat dilanjutkan.
 
 Token akses operasional baru dapat dibuat setelah server memverifikasi membership tenant. Login sebelum tenant siap hanya memberi akses onboarding/akun terkait.
