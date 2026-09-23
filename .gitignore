@@ -1,6 +1,10 @@
 HELP.md
 target/
+backups/
 .env
+.agents/
+.codex/
+.codebase-memory/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
