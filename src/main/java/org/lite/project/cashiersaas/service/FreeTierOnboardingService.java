@@ -112,9 +112,9 @@ public class FreeTierOnboardingService {
             throw new OperationConflictException("Langganan tidak aktif.");
         }
         if (tenant.isActive()) {
-            OutletEntity existingOutlet = accessRepository.listActiveForMembership(tenantId,
-                    ownerMembership.getId()).stream().map(MembershipOutletAccessEntity::getOutlet)
-                    .findFirst().orElseThrow(ResourceNotFoundException::new);
+            OutletEntity existingOutlet = accessRepository.findFirstActiveForMembership(tenantId,
+                    ownerMembership.getId()).map(MembershipOutletAccessEntity::getOutlet)
+                    .orElseThrow(ResourceNotFoundException::new);
             if (!tenant.getName().equals(businessName)
                     || !java.util.Objects.equals(tenant.getAddress(), request.getAddress().trim())
                     || !java.util.Objects.equals(tenant.getPhoneNumber(), trimmedOrNull(request.getPhoneNumber()))

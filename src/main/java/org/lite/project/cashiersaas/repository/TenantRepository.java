@@ -8,7 +8,6 @@ import org.lite.project.cashiersaas.entity.shared.merchant.QTenantEntity;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
-import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -44,13 +43,13 @@ public class TenantRepository {
         entityManager.persist(tenant);
     }
 
-    public List<TenantEntity> listPendingOwnedBy(UUID userId) {
+    public Optional<TenantEntity> findLatestPendingOwnedBy(UUID userId) {
         return criteriaBuilderFactory.create(entityManager, TenantEntity.class, TENANT.getMetadata().getName())
                 .where(TENANT.createdByUser.id.toString()).eq(userId)
                 .where(TENANT.status.toString()).eq("PENDING_PROFILE")
-                .where("tenant.businessType.code").eq("FNB")
-                .where("tenant.businessType.active").eq(true)
+                .where(TENANT.businessType.code.toString()).eq("FNB")
+                .where(TENANT.businessType.active.toString()).eq(true)
                 .orderByDesc(TENANT.createdAt.toString())
-                .getResultList();
+                .setMaxResults(1).getResultList().stream().findFirst();
     }
 }

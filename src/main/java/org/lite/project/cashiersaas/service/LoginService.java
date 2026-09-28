@@ -15,10 +15,7 @@ import org.lite.project.cashiersaas.exception.runtime.AccessForbiddenException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.StaffUserRepository;
-import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
-import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
-import org.lite.project.cashiersaas.repository.OutletRepository;
 import org.lite.project.cashiersaas.repository.MerchantSelectionRepository;
 import org.lite.project.cashiersaas.shared.AuthenticationConstants;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -35,10 +32,7 @@ import java.util.UUID;
 public class LoginService {
 
     private final StaffUserRepository staffUserRepository;
-    private final TenantMembershipRepository tenantMembershipRepository;
-    private final SubscriptionRepository subscriptionRepository;
     private final MembershipOutletAccessRepository accessRepository;
-    private final OutletRepository outletRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthSessionService authSessionService;
     private final MerchantSelectionRepository merchantSelectionRepository;
@@ -95,13 +89,7 @@ public class LoginService {
     @Transactional(readOnly = true)
     public List<MerchantOutletChoiceResponse> listChoices(AccountPrincipal principal) {
         StaffUserEntity user = requireActiveAccount(principal);
-        return tenantMembershipRepository.findActiveByStaffUserId(user.getId()).stream()
-                .filter(membership -> membership.getTenant().isActive())
-                .filter(membership -> membership.getTenant().isFnbEnabled())
-                .filter(membership -> subscriptionRepository.findActiveForTenant(membership.getTenant().getId())
-                        .map(subscription -> subscription.isActiveAt(Instant.now())).orElse(false))
-                .flatMap(membership -> accessRepository.listActiveForMembership(
-                        membership.getTenant().getId(), membership.getId()).stream())
+        return accessRepository.listActiveChoices(user.getId(), Instant.now()).stream()
                 .map(IdentityMapper::toChoice).toList();
     }
 

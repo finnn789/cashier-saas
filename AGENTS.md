@@ -26,6 +26,7 @@ For this project, work directly in the main Codex session. This project-specific
 - Follow the existing top-level package layout: `controller`, `service`, `repository`, `dto`, and the established entity/shared packages. Put each new class in the matching existing package; do not create feature root packages such as `membership`. Controllers adapt HTTP, services own use cases and transaction boundaries, repositories own persistence, and explicit mappers translate entities and DTOs.
 - Use Strategy plus a narrow factory only when an actual variation exists, such as payment methods or pricing rules. Use policy/guard classes for reusable authorization and tenant-access checks.
 - Prefer composition and focused services over generic `BaseService`, `AbstractCrudService`, utility catch-alls, or premature interfaces. Keep business transitions as named domain/service methods rather than public mutable setters.
+- Do not add `@Deprecated` methods or compatibility overloads for unused APIs. Update callers to the current contract and remove obsolete methods instead, unless the user explicitly requests a compatibility period.
 - Do not introduce wildcard generic types (`<?>`, `? extends`, or `? super`) in application code. Use a concrete type at each application boundary. If an external framework makes a wildcard unavoidable, isolate it in the smallest adapter/configuration boundary and explicitly document why before introducing it.
 
 ## Authentication and authorization

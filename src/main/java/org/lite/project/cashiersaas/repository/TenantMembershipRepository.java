@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,13 +15,6 @@ public class TenantMembershipRepository {
 
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
-
-    public List<TenantMembershipEntity> findActiveByStaffUserId(UUID staffUserId) {
-        return criteriaBuilderFactory.create(entityManager, TenantMembershipEntity.class, "membership")
-                .where("membership.user.id").eq(staffUserId)
-                .where("membership.active").eq(true)
-                .getResultList();
-    }
 
     public void persist(TenantMembershipEntity membership) {
         entityManager.persist(membership);

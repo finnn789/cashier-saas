@@ -29,8 +29,11 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -52,6 +55,11 @@ public class CashierSaleService {
             return toResponse(existing);
         }
 
+        Set<UUID> requestedIds = request.getItems().stream()
+                .map(CashierSaleLineRequest::getCatalogItemId).collect(Collectors.toSet());
+        Map<UUID, CashierCatalogItemEntity> activeItems = catalogRepository
+                .findActiveByIds(principal.getTenantId(), outletId, requestedIds).stream()
+                .collect(Collectors.toMap(CashierCatalogItemEntity::getId, Function.identity()));
         Set<UUID> distinctIds = new HashSet<>();
         List<CashierCatalogItemEntity> catalogItems = new ArrayList<>();
         List<BigDecimal> quantities = new ArrayList<>();
@@ -59,9 +67,10 @@ public class CashierSaleService {
         BigDecimal total = BigDecimal.ZERO.setScale(2);
         for (CashierSaleLineRequest line : request.getItems()) {
             validateDistinctItem(distinctIds, line.getCatalogItemId());
-            CashierCatalogItemEntity item = catalogRepository.findActive(principal.getTenantId(), outletId,
-                    line.getCatalogItemId()).orElseThrow(() -> new ResourceNotFoundException(
-                            "Layanan tidak ditemukan atau tidak tersedia untuk transaksi ini."));
+            CashierCatalogItemEntity item = activeItems.get(line.getCatalogItemId());
+            if (item == null) {
+                throw new ResourceNotFoundException("Layanan tidak ditemukan atau tidak tersedia untuk transaksi ini.");
+            }
             BigDecimal quantity = line.getQuantity();
             validateQuantity(item, quantity);
             BigDecimal lineTotal = item.getUnitPrice().multiply(quantity).setScale(2, RoundingMode.HALF_UP);
@@ -136,8 +145,17 @@ public class CashierSaleService {
     @Transactional(readOnly = true)
     public List<CashierSaleResponse> list(TenantPrincipal principal, UUID outletId) {
         merchantAccessGuard.requireOutlet(principal, outletId);
-        return saleRepository.listRecent(principal.getTenantId(), outletId).stream()
-                .map(this::toResponse).toList();
+        List<CashierSaleEntity> sales = saleRepository.listRecent(principal.getTenantId(), outletId);
+        if (sales.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> saleIds = sales.stream().map(CashierSaleEntity::getId).toList();
+        Map<UUID, List<CashierSaleItemEntity>> itemsBySale = saleRepository
+                .listItemsForSales(principal.getTenantId(), outletId, saleIds).stream()
+                .collect(Collectors.groupingBy(item -> item.getSale().getId()));
+        return sales.stream()
+                .map(sale -> CashierMapper.toSaleResponse(sale, itemsBySale.getOrDefault(sale.getId(), List.of())))
+                .toList();
     }
 
     private CashierSaleResponse toResponse(CashierSaleEntity sale) {

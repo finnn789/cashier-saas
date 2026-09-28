@@ -10,6 +10,7 @@ import org.lite.project.cashiersaas.entity.laundry.QCashierSaleItemEntity;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +51,18 @@ public class CashierSaleRepository {
                 .where(LINE.tenant.id.toString()).eq(tenantId)
                 .where(LINE.outlet.id.toString()).eq(outletId)
                 .where(LINE.sale.id.toString()).eq(saleId)
+                .getResultList();
+    }
+
+    public List<CashierSaleItemEntity> listItemsForSales(UUID tenantId, UUID outletId,
+                                                          Collection<UUID> saleIds) {
+        if (saleIds.isEmpty()) {
+            return List.of();
+        }
+        return criteriaBuilderFactory.create(entityManager, CashierSaleItemEntity.class, LINE.getMetadata().getName())
+                .where(LINE.tenant.id.toString()).eq(tenantId)
+                .where(LINE.outlet.id.toString()).eq(outletId)
+                .where(LINE.sale.id.toString()).in(saleIds)
                 .getResultList();
     }
 
