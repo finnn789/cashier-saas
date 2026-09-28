@@ -2,6 +2,10 @@ package org.lite.project.cashiersaas.exception.runtime;
 
 public class ResourceNotFoundException extends RuntimeException {
     public ResourceNotFoundException() {
-        super("Data tidak ditemukan.");
+        this("Data tidak ditemukan.");
+    }
+
+    public ResourceNotFoundException(String message) {
+        super(message);
     }
 }

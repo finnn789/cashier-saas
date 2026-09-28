@@ -4,8 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.CashierMapper;
 import org.lite.project.cashiersaas.dto.response.OutletResponse;
-import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
-import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
+import org.lite.project.cashiersaas.repository.OutletRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,14 +13,14 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class OutletService {
-    private final MerchantAccessGuard accessGuard;
-    private final MembershipOutletAccessRepository accessRepository;
+    private final OutletRepository outletRepository;
+    private final MerchantAccessGuard merchantAccessGuard;
 
     @Transactional(readOnly = true)
     public List<OutletResponse> listAccessible(TenantPrincipal principal) {
-        TenantMembershipEntity membership = accessGuard.requireMember(principal);
-        return accessRepository.listActiveForMembership(principal.getTenantId(), membership.getId()).stream()
-                .map(access -> CashierMapper.toOutletResponse(access.getOutlet()))
-                .toList();
+        merchantAccessGuard.requireOutlet(principal, principal.getOutletId());
+        return outletRepository.findActive(principal.getTenantId(), principal.getOutletId())
+                .map(outlet -> List.of(CashierMapper.toOutletResponse(outlet)))
+                .orElseGet(List::of);
     }
 }

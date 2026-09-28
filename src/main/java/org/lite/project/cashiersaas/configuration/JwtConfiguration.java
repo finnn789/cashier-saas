@@ -11,6 +11,8 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -59,7 +61,17 @@ public class JwtConfiguration {
     @Primary
     public JwtDecoder jwtDecoder(SecretKey jwtSigningKey, JwtProperties jwtProperties) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(jwtSigningKey).macAlgorithm(MacAlgorithm.HS256).build();
-        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(jwtProperties.getIssuer()), new AudienceValidator(jwtProperties.getAudience()));
+        OAuth2TokenValidator<Jwt> requiredClaims = jwt -> {
+            if (jwt.getExpiresAt() == null || jwt.getIssuedAt() == null || jwt.getId() == null
+                    || jwt.getId().isBlank() || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
+                return OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token",
+                        "Required JWT claims are missing.", null));
+            }
+            return OAuth2TokenValidatorResult.success();
+        };
+        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefaultWithIssuer(jwtProperties.getIssuer()),
+                new AudienceValidator(jwtProperties.getAudience()), requiredClaims);
         decoder.setJwtValidator(validator);
         return decoder;
     }

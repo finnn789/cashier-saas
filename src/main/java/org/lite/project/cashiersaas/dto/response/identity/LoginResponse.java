@@ -1,6 +1,7 @@
 package org.lite.project.cashiersaas.dto.response.identity;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
 import org.lite.project.cashiersaas.enums.Role;
@@ -18,4 +19,8 @@ public class LoginResponse {
     private Instant expiresAt;
     private Role role;
     private UUID tenantId;
+    private UUID outletId;
+    private String nextStep;
+    @JsonIgnore
+    private String refreshToken;
 }

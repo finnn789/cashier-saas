@@ -8,6 +8,7 @@ import org.lite.project.cashiersaas.entity.shared.merchant.QTenantEntity;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -41,5 +42,15 @@ public class TenantRepository {
 
     public void persist(TenantEntity tenant) {
         entityManager.persist(tenant);
+    }
+
+    public List<TenantEntity> listPendingOwnedBy(UUID userId) {
+        return criteriaBuilderFactory.create(entityManager, TenantEntity.class, TENANT.getMetadata().getName())
+                .where(TENANT.createdByUser.id.toString()).eq(userId)
+                .where(TENANT.status.toString()).eq("PENDING_PROFILE")
+                .where("tenant.businessType.code").eq("FNB")
+                .where("tenant.businessType.active").eq(true)
+                .orderByDesc(TENANT.createdAt.toString())
+                .getResultList();
     }
 }

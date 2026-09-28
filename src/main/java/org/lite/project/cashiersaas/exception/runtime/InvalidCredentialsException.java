@@ -1,8 +1,14 @@
 package org.lite.project.cashiersaas.exception.runtime;
 
+import org.lite.project.cashiersaas.exception.ErrorMessage;
+
 public class InvalidCredentialsException extends RuntimeException {
 
     public InvalidCredentialsException() {
-        super("Email atau kata sandi tidak valid.");
+        this(ErrorMessage.INVALID_CREDENTIALS.getMessage());
+    }
+
+    public InvalidCredentialsException(String message) {
+        super(message);
     }
 }

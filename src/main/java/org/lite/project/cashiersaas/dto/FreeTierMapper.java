@@ -16,7 +16,7 @@ public final class FreeTierMapper {
         FreeTierStartResponse response = new FreeTierStartResponse();
         response.setTenantId(tenant.getId());
         response.setPlanCode("FREETIER");
-        response.setBusinessType("LAUNDRY");
+        response.setBusinessType(tenant.getBusinessType().getCode());
         response.setTenantStatus(tenant.getStatus());
         return response;
     }

@@ -3,6 +3,10 @@ package org.lite.project.cashiersaas.exception.runtime;
 public class BusinessProfileAlreadyCompletedException extends RuntimeException {
 
     public BusinessProfileAlreadyCompletedException() {
-        super("Profil bisnis akun sudah selesai.");
+        this("Profil bisnis akun sudah selesai.");
+    }
+
+    public BusinessProfileAlreadyCompletedException(String message) {
+        super(message);
     }
 }

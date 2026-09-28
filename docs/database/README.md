@@ -1,6 +1,6 @@
 # Rancangan database Laundry v1
 
-Tanggal: 16 September 2026. Status: **rancangan referensi; baru fondasi identitas yang sebagian diterapkan, operasional Laundry belum**.
+Tanggal: 16 September 2026. Status: **rancangan referensi Laundry; pengembangan dan akses operasional Laundry ditunda sejak 28 September 2026, tanpa menghapus data historis**.
 
 Arah produk dari percakapan terbaru adalah platform SaaS untuk beberapa jenis bisnis, dengan **laundry sebagai produk pertama**. Paket Freetier/Premium/Pro adalah katalog platform bersama yang tidak khusus Laundry atau F&B. PRD F&B yang lama menjadi referensi untuk pengembangan bisnis berikutnya. Rancangan ini mencakup fondasi berlangganan, merchant, operasional laundry, tagihan pelanggan, antar-jemput, dan persediaan dasar.
 

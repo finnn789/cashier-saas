@@ -7,6 +7,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.lite.project.cashiersaas.shared.StatusConstants;
+import org.lite.project.cashiersaas.enums.OnboardingIntent;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 
 @Getter
 @Entity
@@ -21,6 +24,9 @@ public class StaffUserEntity extends MutableBaseEntity {
     private String fullName;
     @Column(nullable = false, length = 16)
     private String status;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "onboarding_intent", length = 20)
+    private OnboardingIntent onboardingIntent;
 
     public static StaffUserEntity registerWithPassword(String normalizedEmail, String passwordHash, String fullName) {
         StaffUserEntity staffUser = new StaffUserEntity();
@@ -52,6 +58,20 @@ public class StaffUserEntity extends MutableBaseEntity {
     public void completeBusinessProfile() {
         if (!isPendingProfile()) {
             throw new IllegalStateException("Business profile must be pending before it can be completed.");
+        }
+        status = StatusConstants.ACTIVE;
+    }
+
+    public void chooseOnboardingIntent(OnboardingIntent intent) {
+        if (!isPendingProfile() || (onboardingIntent != null && onboardingIntent != intent)) {
+            throw new IllegalStateException("Onboarding intent cannot be changed for this account.");
+        }
+        onboardingIntent = intent;
+    }
+
+    public void activateInvitedCashier() {
+        if (!isPendingProfile() || onboardingIntent != OnboardingIntent.CASHIER_ONLY) {
+            throw new IllegalStateException("Cashier account is not ready for invitation claim.");
         }
         status = StatusConstants.ACTIVE;
     }

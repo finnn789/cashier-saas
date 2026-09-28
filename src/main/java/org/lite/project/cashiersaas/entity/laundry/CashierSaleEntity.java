@@ -58,7 +58,8 @@ public class CashierSaleEntity extends BaseEntity {
     private Instant paidAt;
 
     public static CashierSaleEntity createPaidSale(TenantEntity tenant, OutletEntity outlet, String customerName,
-                                                   BigDecimal total, PaymentDetails payment, CheckoutMetadata metadata) {
+                                                   BigDecimal total, String currencyCode,
+                                                   PaymentDetails payment, CheckoutMetadata metadata) {
         CashierSaleEntity sale = new CashierSaleEntity();
         sale.tenant = tenant;
         sale.outlet = outlet;
@@ -66,7 +67,7 @@ public class CashierSaleEntity extends BaseEntity {
         sale.customerName = customerName;
         sale.subtotalAmount = total;
         sale.totalAmount = total;
-        sale.currencyCode = tenant.getCurrency();
+        sale.currencyCode = currencyCode;
         sale.paymentMethod = payment.getMethod();
         sale.tenderedAmount = payment.getTenderedAmount();
         sale.changeAmount = payment.getTenderedAmount().subtract(total);

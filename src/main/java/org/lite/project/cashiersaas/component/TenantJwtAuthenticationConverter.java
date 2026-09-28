@@ -18,21 +18,28 @@ public class TenantJwtAuthenticationConverter implements Converter<Jwt, Abstract
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
         UUID userId = requiredUuidClaim(jwt, "sub");
+        UUID sessionId = requiredUuidClaim(jwt, "session_id");
         if ("ACCOUNT".equals(jwt.getClaimAsString("scope"))) {
-            AccountPrincipal principal = new AccountPrincipal(userId, requiredEmail(jwt));
+            AccountPrincipal principal = new AccountPrincipal(userId, requiredEmail(jwt), sessionId);
             Set<SimpleGrantedAuthority> authorities = Set.of(new SimpleGrantedAuthority("SCOPE_ACCOUNT"));
-            return new UsernamePasswordAuthenticationToken(principal, jwt.getTokenValue(), authorities);
+            return new UsernamePasswordAuthenticationToken(principal, null, authorities);
+        }
+
+        if (!"MERCHANT".equals(jwt.getClaimAsString("scope"))) {
+            throw new BadCredentialsException("JWT scope is invalid.");
         }
 
         UUID tenantId = requiredUuidClaim(jwt, "tenant_id");
+        UUID outletId = requiredUuidClaim(jwt, "outlet_id");
+        UUID membershipId = requiredUuidClaim(jwt, "membership_id");
         Set<Role> roles = requiredRoles(jwt);
 
-        TenantPrincipal principal = new TenantPrincipal(userId, tenantId, roles);
+        TenantPrincipal principal = new TenantPrincipal(userId, tenantId, outletId, membershipId, sessionId, roles);
         Set<SimpleGrantedAuthority> authorities = roles.stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
-        return new UsernamePasswordAuthenticationToken(principal, jwt.getTokenValue(), authorities);
+        return new UsernamePasswordAuthenticationToken(principal, null, authorities);
     }
 
     private String requiredEmail(Jwt jwt) {

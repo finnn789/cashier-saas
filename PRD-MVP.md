@@ -1,5 +1,7 @@
 # Product Requirements Document — SaaS Cashier MVP
 
+> Keputusan prioritas, 28 September 2026: F&B kembali menjadi produk pertama dan alur MVP di dokumen ini menjadi target implementasi aktif. Pengembangan Laundry ditunda; onboarding dan akses operasional Laundry dinonaktifkan tanpa menghapus data historis. Catatan arah Laundry di bawah dipertahankan sebagai riwayat keputusan.
+
 > Catatan arah produk, 16 September 2026: pengguna menetapkan platform multi-bisnis dengan Laundry sebagai produk pertama. [Rancangan database Laundry v1](docs/database/README.md) mendokumentasikan scope dan model data baru untuk pekerjaan desain ini. Isi F&B di bawah dipertahankan sebagai referensi bisnis berikutnya; belum menjadi PRD laundry dan bukan tanda fitur laundry sudah diimplementasikan. Untuk desain database baru, keputusan laundry terbaru tersebut menggantikan batas scope F&B lama (termasuk langganan gateway, antar-jemput, dan inventory dasar).
 
 > Keputusan Freetier, 23 September 2026: Freetier adalah paket gratis untuk pencatatan kasir biasa. Kasir memasukkan transaksi dan nama pelanggan secara manual, lalu mencatat uang yang diterima dari pelanggan secara manual. Data transaksi disimpan di database SaaS dan dapat dibuka kembali setelah login, termasuk dari perangkat lain yang diizinkan. Aktivasi Freetier tidak memerlukan invoice atau pembayaran langganan melalui gateway platform. Batas fitur lain masih perlu dipastikan; aturan F&B di bawah tidak otomatis menjadi hak Freetier Laundry.

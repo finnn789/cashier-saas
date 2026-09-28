@@ -24,6 +24,7 @@ public class MerchantAccessGuard {
     private final MembershipOutletAccessRepository accessRepository;
 
     public MerchantAccessContext requireOutlet(TenantPrincipal principal, UUID outletId) {
+        principal.requireOutlet(outletId);
         TenantMembershipEntity membership = requireMember(principal);
         var outlet = outletRepository.findActive(principal.getTenantId(), outletId)
                 .orElseThrow(ResourceNotFoundException::new);
@@ -36,6 +37,7 @@ public class MerchantAccessGuard {
         TenantMembershipEntity membership = membershipRepository.findActive(principal.getUserId(), principal.getTenantId())
                 .filter(value -> value.getUser().isActive())
                 .filter(value -> value.getTenant().isActive())
+                .filter(value -> value.getTenant().isFnbEnabled())
                 .filter(value -> principal.getRoles().contains(value.getRole()))
                 .orElseThrow(ResourceNotFoundException::new);
         boolean subscribed = subscriptionRepository.findActiveForTenant(principal.getTenantId())

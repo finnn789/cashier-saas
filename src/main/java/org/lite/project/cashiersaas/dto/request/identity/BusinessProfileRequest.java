@@ -17,6 +17,7 @@ public class BusinessProfileRequest {
     @Size(max = 120, message = "Nama outlet maksimal 120 karakter.")
     private String outletName;
 
+    @NotBlank(message = "Alamat usaha wajib diisi.")
     @Size(max = 255, message = "Alamat maksimal 255 karakter.")
     private String address;
 

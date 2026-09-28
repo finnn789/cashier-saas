@@ -11,7 +11,6 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -23,25 +22,24 @@ public class JwtTokenService {
     private final JwtEncoder jwtEncoder;
     private final JwtProperties jwtProperties;
 
-    public String generateAccessToken(
-            UUID userId,
-            UUID tenantId,
-            String email,
-            Collection<Role> roles
-    ) {
-        requireTokenSubject(userId, tenantId, email, roles);
+    public String generateAccessToken(MerchantTokenContext context) {
+        requireTokenSubject(context);
 
         Instant issuedAt = Instant.now();
-        List<String> roleNames = roles.stream().map(Role::name).distinct().toList();
+        List<String> roleNames = context.getRoles().stream().map(Role::name).distinct().toList();
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(jwtProperties.getIssuer())
                 .audience(List.of(jwtProperties.getAudience()))
-                .subject(userId.toString())
+                .subject(context.getUserId().toString())
                 .issuedAt(issuedAt)
-                .expiresAt(issuedAt.plus(jwtProperties.getAccessTokenTtl()))
+                .expiresAt(context.getExpiresAt())
                 .id(UUID.randomUUID().toString())
-                .claim("tenant_id", tenantId.toString())
-                .claim("email", email)
+                .claim("tenant_id", context.getTenantId().toString())
+                .claim("outlet_id", context.getOutletId().toString())
+                .claim("membership_id", context.getMembershipId().toString())
+                .claim("session_id", context.getSessionId().toString())
+                .claim("scope", "MERCHANT")
+                .claim("email", context.getEmail())
                 .claim("roles", roleNames)
                 .build();
 
@@ -52,9 +50,16 @@ public class JwtTokenService {
         return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
-    public String generateAccountAccessToken(UUID userId, String email) {
+    public String generateAccountAccessToken(UUID userId, String email, UUID sessionId) {
+        return generateAccountAccessToken(userId, email, sessionId,
+                Instant.now().plus(jwtProperties.getAccessTokenTtl()));
+    }
+
+    public String generateAccountAccessToken(UUID userId, String email, UUID sessionId, Instant expiresAt) {
         Objects.requireNonNull(userId, "userId is required.");
         Objects.requireNonNull(email, "email is required.");
+        Objects.requireNonNull(sessionId, "sessionId is required.");
+        Objects.requireNonNull(expiresAt, "expiresAt is required.");
         if (email.isBlank()) {
             throw new IllegalArgumentException("email is required.");
         }
@@ -65,10 +70,11 @@ public class JwtTokenService {
                 .audience(List.of(jwtProperties.getAudience()))
                 .subject(userId.toString())
                 .issuedAt(issuedAt)
-                .expiresAt(issuedAt.plus(jwtProperties.getAccessTokenTtl()))
+                .expiresAt(expiresAt)
                 .id(UUID.randomUUID().toString())
                 .claim("email", email)
                 .claim("scope", "ACCOUNT")
+                .claim("session_id", sessionId.toString())
                 .build();
 
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256)
@@ -78,15 +84,20 @@ public class JwtTokenService {
         return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
-    private void requireTokenSubject(UUID userId, UUID tenantId, String email, Collection<Role> roles) {
-        Objects.requireNonNull(userId, "userId is required.");
-        Objects.requireNonNull(tenantId, "tenantId is required.");
-        Objects.requireNonNull(email, "email is required.");
+    private void requireTokenSubject(MerchantTokenContext context) {
+        Objects.requireNonNull(context, "context is required.");
+        Objects.requireNonNull(context.getUserId(), "userId is required.");
+        Objects.requireNonNull(context.getTenantId(), "tenantId is required.");
+        Objects.requireNonNull(context.getOutletId(), "outletId is required.");
+        Objects.requireNonNull(context.getMembershipId(), "membershipId is required.");
+        Objects.requireNonNull(context.getSessionId(), "sessionId is required.");
+        Objects.requireNonNull(context.getEmail(), "email is required.");
+        Objects.requireNonNull(context.getExpiresAt(), "expiresAt is required.");
 
-        if (email.isBlank()) {
+        if (context.getEmail().isBlank()) {
             throw new IllegalArgumentException("email is required.");
         }
-        if (roles == null || roles.isEmpty()) {
+        if (context.getRoles() == null || context.getRoles().isEmpty()) {
             throw new IllegalArgumentException("At least one role is required.");
         }
     }

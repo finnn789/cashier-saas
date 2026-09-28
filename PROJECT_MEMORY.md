@@ -1,6 +1,10 @@
 # Project Memory — SaaS Cashier
 
-## Arah terbaru — 16 September 2026
+## Prioritas aktif — 28 September 2026
+
+Pengguna mengubah prioritas kembali ke **F&B sebagai produk pertama**. Laundry ditunda dan fiturnya dinonaktifkan untuk penggunaan operasional baru; data tenant dan transaksi Laundry lama tidak dihapus. PRD F&B di `PRD-MVP.md` kembali menjadi target MVP aktif. Freetier F&B tahap awal memakai fondasi autentikasi dan kasir sederhana yang sudah ada, sementara kategori/produk, meja/QR, antrean dapur, pembayaran order, dan laporan masih memerlukan implementasi sesuai milestone PRD. Ketentuan Freetier Laundry sebelumnya hanya berlaku sebagai riwayat.
+
+## Riwayat arah — 16 September 2026
 
 Pengguna menetapkan platform SaaS multi-bisnis dengan **Laundry sebagai produk pertama**. Fondasi mencakup akun owner, katalog paket platform Freetier/Premium/Pro yang berlaku untuk semua jenis bisnis, pembayaran langganan gateway, onboarding merchant, serta aplikasi merchant dengan branding sendiri. Operasional pertama mencakup layanan kiloan/satuan, pelanggan, proses cucian, tagihan saat siap, pembayaran pelanggan, antar-jemput, dan inventory dasar. Role merchant adalah Owner/Cashier; desain mempertahankan kode `OWNERMERCHANT`/`CASHIER`, dengan administrasi platform terpisah.
 

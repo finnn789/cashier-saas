@@ -53,7 +53,7 @@ public class TenantEntity extends MutableBaseEntity {
 
     public static TenantEntity startFreeTier(StaffUserEntity owner, BusinessTypeEntity type, String key, String fingerprint) {
         TenantEntity tenant = new TenantEntity();
-        tenant.name = "Pending Laundry merchant";
+        tenant.name = "Pending merchant";
         tenant.status = StatusConstants.PENDING_PROFILE;
         tenant.businessType = type;
         tenant.createdByUser = owner;
@@ -64,6 +64,10 @@ public class TenantEntity extends MutableBaseEntity {
 
     public boolean isActive() {
         return StatusConstants.ACTIVE.equals(status);
+    }
+
+    public boolean isFnbEnabled() {
+        return businessType != null && businessType.isActive() && "FNB".equals(businessType.getCode());
     }
 
     public void completeFreeTierProfile(String businessName, String address, String phoneNumber) {

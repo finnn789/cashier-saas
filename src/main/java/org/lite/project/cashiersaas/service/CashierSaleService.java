@@ -1,7 +1,6 @@
 package org.lite.project.cashiersaas.service;
 
 import lombok.RequiredArgsConstructor;
-import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.CashierMapper;
 import org.lite.project.cashiersaas.dto.request.CashierSaleLineRequest;
@@ -17,6 +16,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.CashierCatalogRepository;
 import org.lite.project.cashiersaas.repository.CashierSaleRepository;
+import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,14 +35,15 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class CashierSaleService {
-    private final MerchantAccessGuard accessGuard;
+    private final MerchantReferenceRepository references;
     private final CashierCatalogRepository catalogRepository;
     private final CashierSaleRepository saleRepository;
     private final AuditLogRepository auditLogRepository;
+    private final MerchantAccessGuard merchantAccessGuard;
 
     @Transactional
     public CashierSaleResponse checkout(TenantPrincipal principal, UUID outletId, String key, CashierSaleRequest request) {
-        MerchantAccessContext context = accessGuard.requireOutlet(principal, outletId);
+        merchantAccessGuard.requireOutlet(principal, outletId);
         String validatedKey = validatedKey(key);
         String fingerprint = fingerprint(outletId, request);
         CashierSaleEntity existing = saleRepository.findByKey(principal.getTenantId(), validatedKey).orElse(null);
@@ -51,7 +52,6 @@ public class CashierSaleService {
             return toResponse(existing);
         }
 
-        validateCurrency(context);
         Set<UUID> distinctIds = new HashSet<>();
         List<CashierCatalogItemEntity> catalogItems = new ArrayList<>();
         List<BigDecimal> quantities = new ArrayList<>();
@@ -60,7 +60,8 @@ public class CashierSaleService {
         for (CashierSaleLineRequest line : request.getItems()) {
             validateDistinctItem(distinctIds, line.getCatalogItemId());
             CashierCatalogItemEntity item = catalogRepository.findActive(principal.getTenantId(), outletId,
-                    line.getCatalogItemId()).orElseThrow(ResourceNotFoundException::new);
+                    line.getCatalogItemId()).orElseThrow(() -> new ResourceNotFoundException(
+                            "Layanan tidak ditemukan atau tidak tersedia untuk transaksi ini."));
             BigDecimal quantity = line.getQuantity();
             validateQuantity(item, quantity);
             BigDecimal lineTotal = item.getUnitPrice().multiply(quantity).setScale(2, RoundingMode.HALF_UP);
@@ -75,9 +76,9 @@ public class CashierSaleService {
         CashierSaleEntity.PaymentDetails payment = new CashierSaleEntity.PaymentDetails(
                 request.getPaymentMethod(), tendered, trimmedOrNull(request.getPaymentReference()));
         CashierSaleEntity.CheckoutMetadata metadata = new CashierSaleEntity.CheckoutMetadata(
-                context.getMembership().getId(), validatedKey, fingerprint);
-        CashierSaleEntity sale = CashierSaleEntity.createPaidSale(context.getTenant(), context.getOutlet(),
-                request.getCustomerName().trim(), total, payment, metadata);
+                principal.getMembershipId(), validatedKey, fingerprint);
+        CashierSaleEntity sale = CashierSaleEntity.createPaidSale(references.tenant(principal.getTenantId()),
+                references.outlet(outletId), request.getCustomerName().trim(), total, "IDR", payment, metadata);
         saleRepository.persist(sale);
         List<CashierSaleItemEntity> lines = new ArrayList<>();
         for (int index = 0; index < catalogItems.size(); index++) {
@@ -86,8 +87,9 @@ public class CashierSaleService {
             saleRepository.persist(line);
             lines.add(line);
         }
-        auditLogRepository.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(),
-                context.getMembership().getUser(), AuditLogEntity.Action.CASHIER_PAYMENT_RECORDED, sale.getId(), null,
+        auditLogRepository.persist(AuditLogEntity.recordAction(references.tenant(principal.getTenantId()),
+                references.outlet(outletId), references.user(principal.getUserId()),
+                AuditLogEntity.Action.CASHIER_PAYMENT_RECORDED, sale.getId(), null,
                 "amount=" + total.toPlainString() + ";method=" + request.getPaymentMethod()));
         return CashierMapper.toSaleResponse(sale, lines);
     }
@@ -95,12 +97,6 @@ public class CashierSaleService {
     private void validateReplay(CashierSaleEntity existing, String fingerprint, UUID outletId) {
         if (!existing.getRequestFingerprint().equals(fingerprint) || !existing.getOutlet().getId().equals(outletId)) {
             throw new OperationConflictException("Idempotency key telah dipakai untuk transaksi berbeda.");
-        }
-    }
-
-    private void validateCurrency(MerchantAccessContext context) {
-        if (!"IDR".equals(context.getTenant().getCurrency())) {
-            throw new InvalidOperationException("Mata uang outlet belum didukung untuk kasir Freetier.");
         }
     }
 
@@ -131,15 +127,15 @@ public class CashierSaleService {
 
     @Transactional(readOnly = true)
     public CashierSaleResponse get(TenantPrincipal principal, UUID outletId, UUID saleId) {
-        accessGuard.requireOutlet(principal, outletId);
+        merchantAccessGuard.requireOutlet(principal, outletId);
         CashierSaleEntity sale = saleRepository.findById(principal.getTenantId(), outletId, saleId)
-                .orElseThrow(ResourceNotFoundException::new);
+                .orElseThrow(() -> new ResourceNotFoundException("Transaksi tidak ditemukan atau tidak dapat diakses."));
         return toResponse(sale);
     }
 
     @Transactional(readOnly = true)
     public List<CashierSaleResponse> list(TenantPrincipal principal, UUID outletId) {
-        accessGuard.requireOutlet(principal, outletId);
+        merchantAccessGuard.requireOutlet(principal, outletId);
         return saleRepository.listRecent(principal.getTenantId(), outletId).stream()
                 .map(this::toResponse).toList();
     }

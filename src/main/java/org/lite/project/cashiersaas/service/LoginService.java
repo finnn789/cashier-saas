@@ -1,17 +1,26 @@
 package org.lite.project.cashiersaas.service;
 
 import lombok.RequiredArgsConstructor;
-import org.lite.project.cashiersaas.component.JwtTokenService;
 import org.lite.project.cashiersaas.component.AccountPrincipal;
-import org.lite.project.cashiersaas.configuration.JwtProperties;
 import org.lite.project.cashiersaas.dto.request.identity.LoginRequest;
 import org.lite.project.cashiersaas.dto.response.identity.LoginResponse;
+import org.lite.project.cashiersaas.dto.response.identity.MerchantOutletChoiceResponse;
+import org.lite.project.cashiersaas.dto.IdentityMapper;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.exception.runtime.InvalidCredentialsException;
+import org.lite.project.cashiersaas.exception.ErrorMessage;
+import org.lite.project.cashiersaas.exception.runtime.AuthenticationRequiredException;
+import org.lite.project.cashiersaas.exception.runtime.AccessForbiddenException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.StaffUserRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
+import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
+import org.lite.project.cashiersaas.repository.OutletRepository;
+import org.lite.project.cashiersaas.repository.MerchantSelectionRepository;
+import org.lite.project.cashiersaas.shared.AuthenticationConstants;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,11 +37,13 @@ public class LoginService {
     private final StaffUserRepository staffUserRepository;
     private final TenantMembershipRepository tenantMembershipRepository;
     private final SubscriptionRepository subscriptionRepository;
+    private final MembershipOutletAccessRepository accessRepository;
+    private final OutletRepository outletRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JwtProperties jwtProperties;
-    private final JwtTokenService jwtTokenService;
+    private final AuthSessionService authSessionService;
+    private final MerchantSelectionRepository merchantSelectionRepository;
 
-    @Transactional(readOnly = true)
+    @Transactional
     public LoginResponse login(LoginRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase(Locale.ROOT);
         StaffUserEntity staffUser = staffUserRepository.findByNormalizedEmail(normalizedEmail)
@@ -42,57 +53,80 @@ public class LoginService {
             throw new InvalidCredentialsException();
         }
 
-        if (staffUser.isPendingProfile()) {
-            return accountLoginResponse(staffUser);
-        }
-
-        if (!staffUser.isActive()) {
+        if (!staffUser.isPendingProfile() && !staffUser.isActive()) {
             throw new InvalidCredentialsException();
         }
+        return toLoginResponse(authSessionService.start(staffUser));
+    }
 
-        List<TenantMembershipEntity> memberships = tenantMembershipRepository.findActiveByStaffUserId(staffUser.getId());
-        if (memberships.size() != 1) {
-            return accountLoginResponse(staffUser);
+    @Transactional
+    public LoginResponse selectMerchant(AccountPrincipal principal, UUID tenantId, UUID outletId) {
+        MerchantSelectionRepository.Selection selection = merchantSelectionRepository
+                .findAccessible(principal.getUserId(), tenantId, outletId)
+                .orElseGet(() -> {
+                    requireActiveAccount(principal);
+                    throw new ResourceNotFoundException(ErrorMessage.RESOURCE_UNAVAILABLE.getMessage());
+                });
+        TenantMembershipEntity membership = selection.getMembership();
+        StaffUserEntity user = membership.getUser();
+        if (user.isPendingProfile()) {
+            throw new OperationConflictException(ErrorMessage.PROFILE_INCOMPLETE.getMessage());
         }
-
-        TenantMembershipEntity membership = memberships.get(0);
-        if (!membership.getTenant().isActive() || !subscriptionRepository.findActiveForTenant(membership.getTenant().getId())
-                .map(subscription -> subscription.isActiveAt(Instant.now())).orElse(false)) {
-            return accountLoginResponse(staffUser);
+        if (!user.isActive()) {
+            throw new AccessForbiddenException(ErrorMessage.ACCOUNT_FORBIDDEN.getMessage());
         }
-        return merchantLoginResponse(staffUser, membership);
+        var outlet = selection.getOutlet();
+        if (!outlet.isActive()) {
+            throw new ResourceNotFoundException(ErrorMessage.RESOURCE_UNAVAILABLE.getMessage());
+        }
+        if (!membership.getTenant().isFnbEnabled()) {
+            throw new ResourceNotFoundException(ErrorMessage.RESOURCE_UNAVAILABLE.getMessage());
+        }
+        if (!membership.getTenant().isActive()) {
+            throw new OperationConflictException(ErrorMessage.MERCHANT_INACTIVE.getMessage());
+        }
+        var subscription = selection.getSubscription();
+        if (subscription == null || !subscription.isActiveAt(Instant.now())) {
+            throw new OperationConflictException(ErrorMessage.SUBSCRIPTION_INACTIVE.getMessage());
+        }
+        return toLoginResponse(authSessionService.selectMerchant(principal, membership, outlet, subscription));
     }
 
     @Transactional(readOnly = true)
-    public LoginResponse selectMerchant(AccountPrincipal principal, UUID tenantId) {
-        StaffUserEntity user = staffUserRepository.findById(principal.getUserId())
-                .filter(StaffUserEntity::isActive)
-                .orElseThrow(InvalidCredentialsException::new);
-        TenantMembershipEntity membership = tenantMembershipRepository.findActive(user.getId(), tenantId)
-                .filter(value -> value.getTenant().isActive())
-                .filter(value -> subscriptionRepository.findActiveForTenant(tenantId)
+    public List<MerchantOutletChoiceResponse> listChoices(AccountPrincipal principal) {
+        StaffUserEntity user = requireActiveAccount(principal);
+        return tenantMembershipRepository.findActiveByStaffUserId(user.getId()).stream()
+                .filter(membership -> membership.getTenant().isActive())
+                .filter(membership -> membership.getTenant().isFnbEnabled())
+                .filter(membership -> subscriptionRepository.findActiveForTenant(membership.getTenant().getId())
                         .map(subscription -> subscription.isActiveAt(Instant.now())).orElse(false))
-                .orElseThrow(InvalidCredentialsException::new);
-        return merchantLoginResponse(user, membership);
+                .flatMap(membership -> accessRepository.listActiveForMembership(
+                        membership.getTenant().getId(), membership.getId()).stream())
+                .map(IdentityMapper::toChoice).toList();
     }
 
-    private LoginResponse merchantLoginResponse(StaffUserEntity staffUser, TenantMembershipEntity membership) {
-        Instant expiresAt = Instant.now().plus(jwtProperties.getAccessTokenTtl());
-        LoginResponse response = new LoginResponse();
-        response.setAccessToken(jwtTokenService.generateAccessToken(staffUser.getId(), membership.getTenant().getId(), staffUser.getEmail(), List.of(membership.getRole())));
-        response.setTokenType("Bearer");
-        response.setExpiresAt(expiresAt);
-        response.setRole(membership.getRole());
-        response.setTenantId(membership.getTenant().getId());
-        return response;
+    private StaffUserEntity requireActiveAccount(AccountPrincipal principal) {
+        StaffUserEntity user = staffUserRepository.findById(principal.getUserId())
+                .orElseThrow(AuthenticationRequiredException::new);
+        if (user.isPendingProfile()) {
+            throw new OperationConflictException(ErrorMessage.PROFILE_INCOMPLETE.getMessage());
+        }
+        if (!user.isActive()) {
+            throw new AccessForbiddenException(ErrorMessage.ACCOUNT_FORBIDDEN.getMessage());
+        }
+        return user;
     }
 
-    private LoginResponse accountLoginResponse(StaffUserEntity staffUser) {
-        Instant expiresAt = Instant.now().plus(jwtProperties.getAccessTokenTtl());
+    private LoginResponse toLoginResponse(AuthSessionService.IssuedTokens tokens) {
         LoginResponse response = new LoginResponse();
-        response.setAccessToken(jwtTokenService.generateAccountAccessToken(staffUser.getId(), staffUser.getEmail()));
-        response.setTokenType("Bearer");
-        response.setExpiresAt(expiresAt);
+        response.setAccessToken(tokens.getAccessToken());
+        response.setTokenType(AuthenticationConstants.BEARER_SCHEME);
+        response.setExpiresAt(tokens.getExpiresAt());
+        response.setRole(tokens.getRole());
+        response.setTenantId(tokens.getTenantId());
+        response.setOutletId(tokens.getOutletId());
+        response.setNextStep(tokens.getNextStep());
+        response.setRefreshToken(tokens.getRefreshToken());
         return response;
     }
 }

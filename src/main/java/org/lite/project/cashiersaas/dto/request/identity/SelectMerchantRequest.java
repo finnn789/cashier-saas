@@ -11,4 +11,7 @@ import java.util.UUID;
 public class SelectMerchantRequest {
     @NotNull(message = "Merchant wajib dipilih.")
     private UUID tenantId;
+
+    @NotNull(message = "Outlet wajib dipilih.")
+    private UUID outletId;
 }

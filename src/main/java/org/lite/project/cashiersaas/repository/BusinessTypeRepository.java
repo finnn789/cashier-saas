@@ -14,9 +14,9 @@ public class BusinessTypeRepository {
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
-    public Optional<BusinessTypeEntity> findActiveLaundry() {
+    public Optional<BusinessTypeEntity> findActiveByCode(String code) {
         return criteriaBuilderFactory.create(entityManager, BusinessTypeEntity.class, "type")
-                .where("type.code").eq("LAUNDRY")
+                .where("type.code").eq(code)
                 .where("type.active").eq(true)
                 .setMaxResults(1).getResultList().stream().findFirst();
     }
