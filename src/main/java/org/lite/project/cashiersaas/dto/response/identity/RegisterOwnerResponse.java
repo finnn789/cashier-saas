@@ -3,6 +3,7 @@ package org.lite.project.cashiersaas.dto.response.identity;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Getter;
 import lombok.Setter;
+import org.lite.project.cashiersaas.shared.AuthenticationConstants;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -28,7 +29,7 @@ public class RegisterOwnerResponse {
     ) {
         RegisterOwnerResponse response = new RegisterOwnerResponse();
         response.setAccessToken(accessToken);
-        response.setTokenType("Bearer");
+        response.setTokenType(AuthenticationConstants.BEARER_SCHEME);
         response.setExpiresAt(expiresAt);
         response.setTenantId(tenantId);
         response.setOutletId(outletId);
