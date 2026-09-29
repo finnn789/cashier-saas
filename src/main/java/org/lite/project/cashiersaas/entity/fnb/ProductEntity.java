@@ -41,4 +41,30 @@ public class ProductEntity extends MutableBaseEntity {
     private boolean archived = false;
     @Column(nullable = false)
     private int displayOrder;
+
+    public record Details(CategoryEntity category, String name, String description, BigDecimal price,
+                          String imageUrl, boolean available, int displayOrder) { }
+
+    public static ProductEntity create(TenantEntity tenant, OutletEntity outlet, Details details) {
+        ProductEntity product = new ProductEntity();
+        product.tenant = tenant;
+        product.outlet = outlet;
+        product.update(details);
+        return product;
+    }
+
+    public void update(Details details) {
+        this.category = details.category();
+        this.name = details.name();
+        this.description = details.description();
+        this.price = details.price();
+        this.imageUrl = details.imageUrl();
+        this.available = details.available();
+        this.displayOrder = details.displayOrder();
+    }
+
+    public void archive() {
+        archived = true;
+        available = false;
+    }
 }

@@ -36,4 +36,25 @@ public class OptionGroupEntity extends MutableBaseEntity {
     private int maximumSelections;
     @Column(nullable = false)
     private int displayOrder;
+
+    public record Details(String name, boolean required, int minimumSelections,
+                          int maximumSelections, int displayOrder) { }
+
+    public static OptionGroupEntity create(TenantEntity tenant, OutletEntity outlet, ProductEntity product,
+                                           Details details) {
+        OptionGroupEntity group = new OptionGroupEntity();
+        group.tenant = tenant;
+        group.outlet = outlet;
+        group.product = product;
+        group.update(details);
+        return group;
+    }
+
+    public void update(Details details) {
+        this.name = details.name();
+        this.required = details.required();
+        this.minimumSelections = details.minimumSelections();
+        this.maximumSelections = details.maximumSelections();
+        this.displayOrder = details.displayOrder();
+    }
 }

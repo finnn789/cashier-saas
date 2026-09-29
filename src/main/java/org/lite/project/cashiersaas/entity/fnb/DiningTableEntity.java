@@ -26,4 +26,15 @@ public class DiningTableEntity extends MutableBaseEntity {
     private DiningTableStatus status = DiningTableStatus.VACANT;
     @Column(nullable=false)
     private boolean active = true;
+
+    public static DiningTableEntity create(TenantEntity tenant, OutletEntity outlet, String name) {
+        DiningTableEntity table = new DiningTableEntity();
+        table.tenant = tenant;
+        table.outlet = outlet;
+        table.name = name;
+        return table;
+    }
+    public void rename(String name) { this.name = name; }
+    public void setActive(boolean active) { this.active = active; }
+    public void markActive() { this.status = DiningTableStatus.ACTIVE; }
 }

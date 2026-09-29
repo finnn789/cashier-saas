@@ -30,4 +30,22 @@ public class CategoryEntity extends MutableBaseEntity {
     private int displayOrder;
     @Column(nullable = false)
     private boolean archived = false;
+
+    public static CategoryEntity create(TenantEntity tenant, OutletEntity outlet, String name, int displayOrder) {
+        CategoryEntity category = new CategoryEntity();
+        category.tenant = tenant;
+        category.outlet = outlet;
+        category.name = name;
+        category.displayOrder = displayOrder;
+        return category;
+    }
+
+    public void update(String name, int displayOrder) {
+        this.name = name;
+        this.displayOrder = displayOrder;
+    }
+
+    public void archive() {
+        archived = true;
+    }
 }

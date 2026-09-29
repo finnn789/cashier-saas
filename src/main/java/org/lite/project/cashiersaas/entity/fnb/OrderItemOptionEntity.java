@@ -29,4 +29,13 @@ public class OrderItemOptionEntity extends BaseEntity {
     private String optionNameSnapshot;
     @Column(nullable=false,precision=19,scale=2)
     private BigDecimal priceAdjustmentSnapshot;
+
+    public static OrderItemOptionEntity snapshot(org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity tenant,
+                                                 org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity outlet,
+                                                 OrderItemEntity item, ProductOptionEntity option) {
+        OrderItemOptionEntity value = new OrderItemOptionEntity();
+        value.tenant = tenant; value.outlet = outlet; value.orderItem = item; value.productOption = option;
+        value.optionNameSnapshot = option.getName(); value.priceAdjustmentSnapshot = option.getPriceAdjustment();
+        return value;
+    }
 }

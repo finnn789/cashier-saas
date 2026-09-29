@@ -42,7 +42,9 @@ public class AuditLogEntity extends BaseEntity {
     public enum Action {
         CASHIER_PAYMENT_RECORDED("CASHIER_SALE"),
         CASHIER_PRICE_CHANGED("CASHIER_CATALOG_ITEM"),
-        CASHIER_ITEM_ARCHIVED("CASHIER_CATALOG_ITEM");
+        CASHIER_ITEM_ARCHIVED("CASHIER_CATALOG_ITEM"),
+        FNB_PRODUCT_PRICE_CHANGED("PRODUCT"),
+        FNB_OPTION_PRICE_CHANGED("PRODUCT_OPTION");
 
         private final String entityType;
 

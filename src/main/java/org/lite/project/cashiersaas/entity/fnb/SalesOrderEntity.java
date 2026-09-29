@@ -11,6 +11,7 @@ import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.enums.ServiceType;
 import java.math.BigDecimal;
+import java.time.Instant;
 
 @Getter
 @Entity
@@ -56,4 +57,31 @@ public class SalesOrderEntity extends MutableBaseEntity {
     private BigDecimal total;
     @Column(length=500)
     private String cancellationReason;
+    @Column(name="request_fingerprint",length=64)
+    private String requestFingerprint;
+    @Column(name="public_status_token_digest",length=64,unique=true)
+    private String publicStatusTokenDigest;
+    @Column(name="public_status_token_expires_at")
+    private Instant publicStatusTokenExpiresAt;
+
+    public record PublicQrDetails(DiningTableEntity table, String idempotencyKey, String fingerprint,
+                                  String orderNumber, String statusTokenDigest, Instant statusTokenExpiry,
+                                  String customerLabel) { }
+
+    public record Charges(BigDecimal subtotal, BigDecimal tax, BigDecimal serviceCharge) { }
+
+    public static SalesOrderEntity publicQr(TenantEntity tenant, OutletEntity outlet,
+                                            PublicQrDetails details, Charges charges) {
+        SalesOrderEntity order = new SalesOrderEntity();
+        order.tenant = tenant; order.outlet = outlet; order.diningTable = details.table();
+        order.idempotencyKey = details.idempotencyKey();
+        order.requestFingerprint = details.fingerprint(); order.orderNumber = details.orderNumber();
+        order.publicStatusTokenDigest = details.statusTokenDigest();
+        order.publicStatusTokenExpiresAt = details.statusTokenExpiry();
+        order.source = OrderSource.QR; order.serviceType = ServiceType.DINE_IN;
+        order.customerLabel = details.customerLabel(); order.subtotal = charges.subtotal();
+        order.taxAmount = charges.tax(); order.serviceChargeAmount = charges.serviceCharge();
+        order.total = charges.subtotal().add(charges.tax()).add(charges.serviceCharge());
+        return order;
+    }
 }

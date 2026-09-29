@@ -35,4 +35,15 @@ public class OrderItemEntity extends BaseEntity {
     private BigDecimal lineTotal;
     @Column(length=500)
     private String note;
+
+    public static OrderItemEntity snapshot(org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity tenant,
+                                           org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity outlet,
+                                           SalesOrderEntity order, ProductEntity product, int quantity,
+                                           BigDecimal lineTotal, String note) {
+        OrderItemEntity item = new OrderItemEntity();
+        item.tenant = tenant; item.outlet = outlet; item.salesOrder = order; item.product = product;
+        item.productNameSnapshot = product.getName(); item.unitPriceSnapshot = product.getPrice();
+        item.quantity = quantity; item.lineTotal = lineTotal; item.note = note;
+        return item;
+    }
 }

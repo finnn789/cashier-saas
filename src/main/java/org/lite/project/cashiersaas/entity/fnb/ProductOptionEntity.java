@@ -35,4 +35,21 @@ public class ProductOptionEntity extends MutableBaseEntity {
     private boolean available = true;
     @Column(nullable = false)
     private int displayOrder;
+
+    public static ProductOptionEntity create(TenantEntity tenant, OutletEntity outlet, OptionGroupEntity group,
+                                             String name, BigDecimal adjustment, boolean available, int displayOrder) {
+        ProductOptionEntity option = new ProductOptionEntity();
+        option.tenant = tenant;
+        option.outlet = outlet;
+        option.optionGroup = group;
+        option.update(name, adjustment, available, displayOrder);
+        return option;
+    }
+
+    public void update(String name, BigDecimal adjustment, boolean available, int displayOrder) {
+        this.name = name;
+        this.priceAdjustment = adjustment;
+        this.available = available;
+        this.displayOrder = displayOrder;
+    }
 }

@@ -25,4 +25,14 @@ public class TableQrTokenEntity extends MutableBaseEntity {
     private String token;
     @Column(nullable=false)
     private boolean active = true;
+
+    public static TableQrTokenEntity create(TenantEntity tenant, OutletEntity outlet, DiningTableEntity table, String token) {
+        TableQrTokenEntity qr = new TableQrTokenEntity();
+        qr.tenant = tenant;
+        qr.outlet = outlet;
+        qr.diningTable = table;
+        qr.token = token;
+        return qr;
+    }
+    public void rotate(String replacement) { this.token = replacement; }
 }
