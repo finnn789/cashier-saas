@@ -15,6 +15,8 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import org.lite.project.cashiersaas.shared.StatusConstants;
 
+import java.util.Objects;
+
 @Getter
 @Entity
 @Table(name = "tenants")
@@ -79,6 +81,31 @@ public class TenantEntity extends MutableBaseEntity {
         this.phoneNumber = phoneNumber;
         this.profileCompletedAt = Instant.now();
         this.status = StatusConstants.ACTIVE;
+    }
+
+    public boolean updateBusinessSettings(String name, String logoUrl, String currency, String address,
+                                          String phoneNumber, BigDecimal taxRate, BigDecimal serviceChargeRate,
+                                          String timeZone) {
+        boolean changed = !Objects.equals(this.name, name) || !Objects.equals(this.logoUrl, logoUrl)
+                || !Objects.equals(this.currency, currency) || !Objects.equals(this.address, address)
+                || !Objects.equals(this.phoneNumber, phoneNumber) || ratesDiffer(this.taxRate, taxRate)
+                || ratesDiffer(this.serviceChargeRate, serviceChargeRate) || !Objects.equals(this.timeZone, timeZone);
+        if (changed) {
+            this.name = name;
+            this.logoUrl = logoUrl;
+            this.currency = currency;
+            this.address = address;
+            this.phoneNumber = phoneNumber;
+            this.taxRate = taxRate;
+            this.serviceChargeRate = serviceChargeRate;
+            this.timeZone = timeZone;
+        }
+        return changed;
+    }
+
+    private boolean ratesDiffer(BigDecimal current, BigDecimal replacement) {
+        if (current == null || replacement == null) return current != replacement;
+        return current.compareTo(replacement) != 0;
     }
 
 }

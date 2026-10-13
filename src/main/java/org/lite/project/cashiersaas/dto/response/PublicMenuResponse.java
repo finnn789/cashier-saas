@@ -7,19 +7,24 @@ import java.util.List;
 import java.util.UUID;
 
 @Getter @Setter
+@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
 public class PublicMenuResponse {
+    private String qrType;
+    private List<org.lite.project.cashiersaas.enums.ServiceType> serviceTypes;
     private String outletName;
     private String tableName;
     private BigDecimal taxRate;
     private BigDecimal serviceChargeRate;
     private List<Category> categories;
 
-    @Getter @Setter public static class Category {
+    @Getter @Setter @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public static class Category {
         private UUID id;
         private String name;
         private List<Product> products;
     }
-    @Getter @Setter public static class Product {
+    @Getter @Setter @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public static class Product {
         private UUID id;
         private String name;
         private String description;
@@ -28,7 +33,8 @@ public class PublicMenuResponse {
         private boolean available;
         private List<OptionGroup> groups;
     }
-    @Getter @Setter public static class OptionGroup {
+    @Getter @Setter @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public static class OptionGroup {
         private UUID id;
         private String name;
         private boolean required;
@@ -36,7 +42,8 @@ public class PublicMenuResponse {
         private int maximumSelections;
         private List<Option> options;
     }
-    @Getter @Setter public static class Option {
+    @Getter @Setter @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public static class Option {
         private UUID id;
         private String name;
         private BigDecimal priceAdjustment;

@@ -1,12 +1,36 @@
 # Cashier SaaS repository guidance
 
-For this project, work directly in the main Codex session. This project-specific rule takes precedence over the global Ruflo and multi-agent workflow.
+## Ruflo integration
+
+- Ruflo MCP is configured for this trusted project in `.codex/config.toml`; setup and verification notes are in `docs/ruflo-setup.md`.
+- For complex or multi-file work, discover the Ruflo tools available in the current session and use `memory_search`, `hooks_route`, `swarm_init`, and `agent_spawn` when applicable. If ToolSearch is unavailable, use the client's exposed MCP tools; report unavailable capabilities honestly.
+- Ruflo memory is supplementary. The PRD, explicit user decisions, and orchestrator-owned `.ai` documents remain canonical.
+- Agent registration or swarm initialization is coordination evidence, not proof that an executor ran or wrote code. Delegate application implementation only to an actual available worker execution tool, following the reserved-write workflow below.
+- Ruflo hooks, daemon workers, and automatic test execution are disabled for this Codex setup. Do not enable them or run tests through Ruflo implicitly.
+
+The main session is the Project Orchestrator and Engineering Lead. The latest user instruction
+of 5 October 2026 assigns code writing to workers, not the orchestrator. This supersedes the
+earlier direct-implementation preference. The orchestrator plans tasks, reviews architecture,
+checks evidence, and writes canonical state and coordination documents. Application code,
+SQL migrations and automated test code are worker implementation scopes. If no worker tool is
+available, report the limitation and keep implementation pending; do not automatically write
+the code yourself. Direct code writing requires a new explicit task-specific user exception.
+
+## Start here and canonical ownership
+
+- Read `.ai/MEMORY.md`, then `.ai/TASKS.md`. Use `.ai/context/INDEX.md` to load relevant context only.
+- Only the orchestrator writes `.ai/MEMORY.md`, `.ai/TASKS.md`, `.ai/DECISIONS.md`, `.ai/ARCHITECTURE.md`, and `.ai/context/*`. All other `.ai` entry-point files are also orchestrator-owned.
+- Before delegation, inspect dependencies and the dirty working tree, record the memory version, reserve write paths, and create `tasks/TASK-XXX.md`. Workers write only their reserved files and unique report.
+- After submission, inspect the report and actual diff against its baseline, verify evidence/test status, compare memory versions, and check concurrent conflicts. Reject unauthorized changes without discarding user work.
+- Update canonical state only after review. A worker statement is not proof. Follow `.ai/context/workflow.md` and the task/report templates.
+- Keep MEMORY compact; history and detailed evidence belong in reports, ADRs, and Git history.
+- Mandatory progress persistence: after each meaningful code-writing checkpoint and before handoff, workers update their assigned report with changed files, acceptance progress, evidence, test status and remaining work. They never write canonical memory. The orchestrator verifies those claims and updates `.ai/MEMORY.md` and `.ai/TASKS.md` after each task, including partial or blocked results. A task handoff is incomplete until its reviewed progress is persisted.
 
 ## Product sources of truth
 
 - Read `PRD-MVP.md` before planning a feature. It defines MVP scope and product acceptance criteria.
-- Read `PROJECT_MEMORY.md` for stable decisions and domain language. If it conflicts with the PRD, follow the latest PRD.
-- Keep the mandatory product flow working end to end: menu -> table/QR -> QR or POS order -> kitchen -> payment -> report.
+- Read `.ai/DECISIONS.md` for active decisions and `.ai/MEMORY.md` for evidence-qualified state. `PROJECT_MEMORY.md` is preserved historical reference. If a summary conflicts with the PRD, follow the latest PRD and explicit user decisions.
+- Keep the active Pay First flow working end to end: menu -> optional table/QR -> QR or POS order -> payment -> kitchen -> completion -> report.
 - Do not add post-MVP features unless the user explicitly changes the scope.
 
 ## Technical baseline
@@ -55,12 +79,12 @@ For this project, work directly in the main Codex session. This project-specific
 
 - When a task is unspecified, select the smallest incomplete slice from the earliest incomplete PRD milestone.
 - State the selected acceptance criteria and assumptions before editing. Make routine reversible assumptions; ask only when an unresolved choice changes public behavior, security, or the data model materially.
-- Work directly on project tasks, including exploration, implementation, review, and user-requested testing. Do not spawn Ruflo or Codex agents for this repository.
-- Use available read-only tools for codebase context when useful, without routing work to agents.
+- Decompose project work into bounded tasks and assign code implementation to workers. Parallel tasks must have disjoint reserved writes and compatible reviewed contracts. The main session performs orchestration, read-only review and canonical updates.
+- Use Codebase Memory MCP for structural context and verify findings against current source. Fresh workers receive explicit context and task contracts; they do not inherit conversation history.
 - Preserve unrelated user changes and avoid broad rewrites.
 - Do not automatically run tests after implementation. When the end-to-end feature is ready, hand it back as `READY FOR TESTING` with the recommended unit/API scenarios. Execute tests yourself only after the user explicitly requests testing.
 - A feature implementation is ready for testing when its acceptance path is implemented, authorization and tenant boundaries are reviewed, and the result is summarized with remaining risks. Test completion additionally requires the user-requested relevant tests to pass.
 
 ## Preferred reusable workflow
 
-Use the repository skill `$cashier-mvp-builder` for requests to implement, continue, test, or review the Cashier SaaS MVP. Handle the full workflow directly in this session. For new features or changes to schema, API contracts, or cross-cutting security, prepare and review the architecture yourself before editing.
+Use the repository skill `$cashier-mvp-builder` for requests to implement, continue, test, or review the Cashier SaaS MVP, and `vertical-slice-code-pattern` for application changes. Their engineering rules remain applicable; historical single-session/no-agent implementation directions are superseded by the latest user instruction. The orchestrator prepares/reviews architecture and delegates code writing within reserved scopes. Test execution still requires the user's explicit request after implementation.

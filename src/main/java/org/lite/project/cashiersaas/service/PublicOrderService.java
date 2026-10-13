@@ -4,30 +4,28 @@ import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.dto.FnbOrderMapper;
 import org.lite.project.cashiersaas.dto.request.PublicOrderRequest;
 import org.lite.project.cashiersaas.dto.response.PublicOrderResponse;
-import org.lite.project.cashiersaas.entity.fnb.*;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.fnb.TableQrTokenEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
-import org.lite.project.cashiersaas.repository.FnbCatalogRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -35,55 +33,58 @@ import java.util.UUID;
 public class PublicOrderService {
     private static final Duration TOKEN_TTL = Duration.ofDays(30);
     private final PublicQrAccessService publicQrAccess;
-    private final FnbCatalogRepository catalog;
     private final FnbOrderRepository orders;
     private final PublicOrderTokenService tokens;
+    private final FnbOrderPricingService pricing;
+    private final FnbRealtimePublisher realtime;
 
     @Transactional
     public PublicOrderResponse checkout(String qrToken, String key, PublicOrderRequest request) {
         if (key == null || !key.matches("[A-Za-z0-9_-]{16,128}"))
-            throw new InvalidOperationException("Idempotency-Key wajib 16–128 karakter alfanumerik, '_' atau '-'.");
+            throw new InvalidOperationException("Idempotency-Key wajib 16-128 karakter alfanumerik, '_' atau '-'.");
         TableQrTokenEntity qr = publicQrAccess.requirePublicQr(qrToken);
         UUID tenantId = qr.getTenant().getId();
         UUID outletId = qr.getOutlet().getId();
-        UUID tableId = qr.getDiningTable().getId();
+        UUID tableId = qr.getDiningTable() == null ? null : qr.getDiningTable().getId();
+        if (tableId != null && request.getServiceType() != org.lite.project.cashiersaas.enums.ServiceType.DINE_IN)
+            throw new InvalidOperationException("QR meja hanya untuk dine-in.");
         String fingerprint = fingerprint(tableId, request);
         orders.lockTenant(tenantId);
         orders.refreshQr(qr);
         // Rotation invalidates the old QR immediately, including in-flight requests queued on the tenant lock.
-        if (!qr.isActive() || !qr.getToken().equals(qrToken) || !qr.getDiningTable().isActive()
+        if (!qr.isActive() || !qr.getToken().equals(qrToken) || (qr.getDiningTable() != null && !qr.getDiningTable().isActive())
                 || !qr.getOutlet().isActive() || !qr.getTenant().isActive()) throw new ResourceNotFoundException();
         publicQrAccess.requirePublicQr(qrToken);
         String statusToken = tokens.token(tenantId, key);
         var existing = orders.byIdempotency(tenantId, key);
         if (existing.isPresent()) {
+            if (!existing.get().getOutlet().getId().equals(outletId))
+                throw new OperationConflictException("Idempotency-Key telah digunakan.");
             return existingOrder(existing.get(), tableId, fingerprint, statusToken);
         }
-        List<PricedLine> lines = new ArrayList<>();
-        BigDecimal subtotal = BigDecimal.ZERO;
-        for (PublicOrderRequest.Item item : request.getItems()) {
-            PricedLine line = priceLine(tenantId, outletId, item);
-            lines.add(line);
-            subtotal = subtotal.add(line.total());
-        }
-        BigDecimal tax = percentage(subtotal, qr.getTenant().getTaxRate());
-        BigDecimal charge = percentage(subtotal, qr.getTenant().getServiceChargeRate());
+        FnbOrderPricingService.PricedOrder priced = pricing.price(tenantId, outletId,
+                request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
+                        item.getQuantity(), item.getNote(), item.getOptionIds())).toList(),
+                qr.getTenant().getTaxRate(), qr.getTenant().getServiceChargeRate());
         String number = "QR-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase();
         SalesOrderEntity order = SalesOrderEntity.publicQr(qr.getTenant(), qr.getOutlet(),
                 new SalesOrderEntity.PublicQrDetails(qr.getDiningTable(), key, fingerprint, number,
                         tokens.digest(statusToken), Instant.now().plus(TOKEN_TTL), request.getCustomerLabel().trim()),
-                new SalesOrderEntity.Charges(subtotal, tax, charge));
+                new SalesOrderEntity.Charges(priced.subtotal(), priced.taxAmount(), priced.serviceChargeAmount()));
+        order.snapshotRates(qr.getTenant().getTaxRate(), qr.getTenant().getServiceChargeRate());
+        order.selectPublicServiceType(request.getServiceType());
         orders.persist(order);
-        persistLines(qr, order, lines);
-        qr.getDiningTable().markActive();
+        persistLines(qr, order, priced.lines());
+        if (qr.getDiningTable() != null) qr.getDiningTable().markAwaitingPayment();
         orders.flush();
+        realtime.orderChanged("ORDER_CREATED", order);
         return FnbOrderMapper.publicOrder(order, statusToken);
     }
 
     private PublicOrderResponse existingOrder(SalesOrderEntity previous, UUID tableId, String fingerprint,
                                               String statusToken) {
         if (!fingerprint.equals(previous.getRequestFingerprint()) || previous.getSource() != OrderSource.QR
-                || !tableId.equals(previous.getDiningTable().getId()))
+                || !java.util.Objects.equals(tableId, previous.getDiningTable() == null ? null : previous.getDiningTable().getId()))
             throw new OperationConflictException("Idempotency-Key telah digunakan untuk pesanan berbeda.");
         if (previous.getPublicStatusTokenExpiresAt().isBefore(Instant.now()))
             throw new OperationConflictException("Token status pesanan telah kedaluwarsa.");
@@ -92,10 +93,10 @@ public class PublicOrderService {
         return FnbOrderMapper.publicOrder(previous, statusToken);
     }
 
-    private void persistLines(TableQrTokenEntity qr, SalesOrderEntity order, List<PricedLine> lines) {
-        for (PricedLine line : lines) {
+    private void persistLines(TableQrTokenEntity qr, SalesOrderEntity order, List<FnbOrderPricingService.PricedLine> lines) {
+        for (FnbOrderPricingService.PricedLine line : lines) {
             OrderItemEntity saved = OrderItemEntity.snapshot(qr.getTenant(), qr.getOutlet(), order,
-                    line.product(), line.request().getQuantity(), line.total(), line.request().getNote());
+                    line.product(), line.input().quantity(), line.lineTotal(), line.input().note());
             orders.persist(saved);
             for (ProductOptionEntity option : line.options())
                 orders.persist(OrderItemOptionEntity.snapshot(qr.getTenant(), qr.getOutlet(), saved, option));
@@ -111,48 +112,11 @@ public class PublicOrderService {
         return FnbOrderMapper.publicOrder(order, null);
     }
 
-    private PricedLine priceLine(UUID tenantId, UUID outletId, PublicOrderRequest.Item item) {
-        ProductEntity product = catalog.product(tenantId, outletId, item.getProductId())
-                .orElseThrow(() -> new InvalidOperationException("Produk tidak tersedia."));
-        catalog.lock(product);
-        catalog.lock(product.getCategory());
-        if (!product.isAvailable() || product.isArchived() || product.getCategory().isArchived())
-            throw new InvalidOperationException("Produk tidak tersedia.");
-        Set<UUID> selectedIds = new HashSet<>(item.getOptionIds());
-        if (selectedIds.size() != item.getOptionIds().size()) throw new InvalidOperationException("Pilihan tidak boleh berulang.");
-        List<ProductOptionEntity> selected = selectedOptions(tenantId, outletId, product, selectedIds);
-        if (selected.size() != selectedIds.size()) throw new InvalidOperationException("Pilihan bukan milik produk.");
-        BigDecimal unit = product.getPrice();
-        for (ProductOptionEntity option : selected) unit = unit.add(option.getPriceAdjustment());
-        return new PricedLine(item, product, selected, unit.multiply(BigDecimal.valueOf(item.getQuantity())));
-    }
-    private List<ProductOptionEntity> selectedOptions(UUID tenantId, UUID outletId, ProductEntity product,
-                                                       Set<UUID> selectedIds) {
-        List<ProductOptionEntity> selected = new ArrayList<>();
-        for (OptionGroupEntity group : catalog.groups(tenantId, outletId, product.getId())) {
-            catalog.lock(group);
-            int count = 0;
-            for (ProductOptionEntity option : catalog.options(tenantId, outletId, group.getId())) {
-                if (selectedIds.contains(option.getId())) {
-                    catalog.lock(option);
-                    if (!option.isAvailable()) throw new InvalidOperationException("Pilihan tidak tersedia.");
-                    selected.add(option);
-                    count++;
-                }
-            }
-            if (count < group.getMinimumSelections() || count > group.getMaximumSelections())
-                throw new InvalidOperationException("Jumlah pilihan pada grup tidak valid.");
-        }
-        return selected;
-    }
-    private BigDecimal percentage(BigDecimal value, BigDecimal percent) {
-        return value.multiply(percent).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-    }
     private String fingerprint(UUID tableId, PublicOrderRequest request) {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
-            out.writeUTF(tableId.toString());
+            out.writeUTF(tableId == null ? "OUTLET:" + request.getServiceType().name() : tableId.toString());
             out.writeUTF(request.getCustomerLabel().trim());
             out.writeInt(request.getItems().size());
             for (PublicOrderRequest.Item item : request.getItems()) {
@@ -169,6 +133,4 @@ public class PublicOrderService {
             throw new IllegalStateException("Cannot fingerprint checkout", exception);
         }
     }
-    private record PricedLine(PublicOrderRequest.Item request, ProductEntity product,
-                              List<ProductOptionEntity> options, BigDecimal total) { }
 }

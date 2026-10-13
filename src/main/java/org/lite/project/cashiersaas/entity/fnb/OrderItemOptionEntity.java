@@ -1,6 +1,7 @@
 package org.lite.project.cashiersaas.entity.fnb;
 
 import org.lite.project.cashiersaas.entity.shared.BaseEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import jakarta.persistence.*;

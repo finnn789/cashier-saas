@@ -35,7 +35,7 @@ public class MerchantSelectionRepository {
     public Optional<Selection> findAccessible(UUID userId, UUID tenantId, UUID outletId) {
         return criteriaBuilderFactory.create(entityManager, Tuple.class)
                 .from(TenantMembershipEntity.class, MEMBERSHIP.getMetadata().getName())
-                .innerJoin(MEMBERSHIP.tenant.toString(), TENANT.getMetadata().getName())
+                .innerJoinFetch(MEMBERSHIP.tenant.toString(), TENANT.getMetadata().getName())
                 .innerJoinOn(OutletEntity.class, OUTLET.getMetadata().getName())
                     .on(OUTLET.tenant.id.toString()).eqExpression(TENANT.id.toString())
                 .end()
@@ -51,7 +51,7 @@ public class MerchantSelectionRepository {
                 .select(MEMBERSHIP.toString())
                 .select(OUTLET.toString())
                 .select(SUBSCRIPTION.toString())
-                .fetch(MEMBERSHIP.user.toString(), MEMBERSHIP.tenant.toString(), TENANT.businessType.toString())
+                .fetch(MEMBERSHIP.user.toString(), TENANT.businessType.toString())
                 .where(MEMBERSHIP.user.id.toString()).eq(userId)
                 .where(TENANT.id.toString()).eq(tenantId)
                 .where(OUTLET.id.toString()).eq(outletId)

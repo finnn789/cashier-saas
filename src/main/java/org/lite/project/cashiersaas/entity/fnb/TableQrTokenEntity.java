@@ -18,9 +18,11 @@ public class TableQrTokenEntity extends MutableBaseEntity {
     @ManyToOne(fetch=FetchType.LAZY,optional=false)
     @JoinColumn(name="outlet_id",nullable=false)
     private OutletEntity outlet;
-    @OneToOne(fetch=FetchType.LAZY,optional=false)
-    @JoinColumn(name="dining_table_id",nullable=false,unique=true)
+    @OneToOne(fetch=FetchType.LAZY)
+    @JoinColumn(name="dining_table_id",unique=true)
     private DiningTableEntity diningTable;
+    @Column(name="qr_type",nullable=false,length=16)
+    private String qrType = "TABLE";
     @Column(nullable=false,length=128)
     private String token;
     @Column(nullable=false)
@@ -35,4 +37,9 @@ public class TableQrTokenEntity extends MutableBaseEntity {
         return qr;
     }
     public void rotate(String replacement) { this.token = replacement; }
+    public static TableQrTokenEntity outlet(TenantEntity tenant, OutletEntity outlet, String token) {
+        TableQrTokenEntity qr = create(tenant, outlet, null, token);
+        qr.qrType = "OUTLET";
+        return qr;
+    }
 }

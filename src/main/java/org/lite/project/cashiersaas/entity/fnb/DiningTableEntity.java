@@ -37,4 +37,6 @@ public class DiningTableEntity extends MutableBaseEntity {
     public void rename(String name) { this.name = name; }
     public void setActive(boolean active) { this.active = active; }
     public void markActive() { this.status = DiningTableStatus.ACTIVE; }
+    public void markVacant() { this.status = DiningTableStatus.VACANT; }
+    public void markAwaitingPayment() { this.status = DiningTableStatus.AWAITING_PAYMENT; }
 }

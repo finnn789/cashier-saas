@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.Objects;
+
 @Getter
 @Entity
 @Table(name = "outlets", uniqueConstraints = @UniqueConstraint(name = "uk_outlets_tenant_name", columnNames = {"tenant_id", "name"}))
@@ -32,5 +34,17 @@ public class OutletEntity extends MutableBaseEntity {
         outlet.address = address;
         outlet.phoneNumber = phoneNumber;
         return outlet;
+    }
+
+    public boolean updateBusinessSettings(String name, String timeZone, String address, String phoneNumber) {
+        boolean changed = !Objects.equals(this.name, name) || !Objects.equals(this.timeZone, timeZone)
+                || !Objects.equals(this.address, address) || !Objects.equals(this.phoneNumber, phoneNumber);
+        if (changed) {
+            this.name = name;
+            this.timeZone = timeZone;
+            this.address = address;
+            this.phoneNumber = phoneNumber;
+        }
+        return changed;
     }
 }

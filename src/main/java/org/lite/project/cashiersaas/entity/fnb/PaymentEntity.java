@@ -13,7 +13,11 @@ import java.time.Instant;
 
 @Getter
 @Entity
-@Table(name="payments", uniqueConstraints=@UniqueConstraint(name="uk_payments_sales_order",columnNames="sales_order_id"))
+@Table(name="payments", uniqueConstraints={
+        @UniqueConstraint(name="uk_payments_sales_order",columnNames="sales_order_id"),
+        @UniqueConstraint(name="uk_payments_tenant_idempotency",columnNames={"tenant_id","idempotency_key"}),
+        @UniqueConstraint(name="uk_payments_outlet_receipt",columnNames={"outlet_id","receipt_number"})
+})
 @NoArgsConstructor
 public class PaymentEntity extends BaseEntity {
     @ManyToOne(fetch=FetchType.LAZY,optional=false)
@@ -34,9 +38,26 @@ public class PaymentEntity extends BaseEntity {
     private BigDecimal changeAmount = BigDecimal.ZERO;
     @Column(nullable=false,length=32)
     private String receiptNumber;
+    @Column(name="idempotency_key",nullable=false,length=128)
+    private String idempotencyKey;
+    @Column(name="request_fingerprint",nullable=false,length=64)
+    private String requestFingerprint;
+    @Column(length=128)
+    private String reference;
     @ManyToOne(fetch=FetchType.LAZY,optional=false)
     @JoinColumn(name="received_by_staff_user_id",nullable=false)
     private StaffUserEntity receivedBy;
     @Column(nullable=false)
     private Instant paidAt;
+
+    public static PaymentEntity settle(TenantEntity tenant, OutletEntity outlet, SalesOrderEntity order,
+            PaymentMethod method, BigDecimal amountPaid, BigDecimal changeAmount, String receiptNumber,
+            String idempotencyKey, String fingerprint, String reference, StaffUserEntity receivedBy) {
+        PaymentEntity payment = new PaymentEntity();
+        payment.tenant = tenant; payment.outlet = outlet; payment.salesOrder = order; payment.method = method;
+        payment.amountPaid = amountPaid; payment.changeAmount = changeAmount; payment.receiptNumber = receiptNumber;
+        payment.idempotencyKey = idempotencyKey; payment.requestFingerprint = fingerprint;
+        payment.reference = reference; payment.receivedBy = receivedBy; payment.paidAt = Instant.now();
+        return payment;
+    }
 }

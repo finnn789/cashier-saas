@@ -6,7 +6,7 @@ import org.lite.project.cashiersaas.dto.CashierMapper;
 import org.lite.project.cashiersaas.dto.request.CashierCatalogItemRequest;
 import org.lite.project.cashiersaas.dto.request.CashierPriceChangeRequest;
 import org.lite.project.cashiersaas.dto.response.CashierCatalogItemResponse;
-import org.lite.project.cashiersaas.entity.laundry.CashierCatalogItemEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.CashierCatalogItemEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;

@@ -1,0 +1,33 @@
+# Unit-test delivery review: TASK-030/031/032 changes
+
+User explicitly authorized delegated unit-test creation after implementation handoff on 2026-10-07. Test tasks TASK-033/034/035 reserve disjoint files and reports; no application, SQL or pom writes authorized initially. Baseline memory8; coordination memory9; baseline of 281 main/test/pom files with copies/hashes and dirty git status under reports/artifacts/UNIT-20261007.
+
+Ruflo memory search/routing/swarm/agent registrations completed. Swarm swarm-1791367683126-ugwwrk and tester registrations cashier-unit-033/034/035-20261007 are coordination only; actual executors are independent authenticated Codex CLI workers. Parent CLI initialization required escalation after access-denied sandbox failure; workers retain workspace-write/automatic approval review. No provider/secret configuration changed.
+
+Initial status: all workers active, test-only creation. Workers do not run tests/builds to avoid concurrent target writes. Orchestrator reviews code and executes serialized Maven wrapper unit tests after submissions. No DB/server/API/integration acceptance is implied by unit tests.
+
+Actual worker threads: TASK-033 `01a115d7-13eb-7a62-8400-6aca9e982e31`; TASK-034 `01a115d7-4ca6-7b83-bf01-3137627db969`; TASK-035 `01a115d7-86ae-7bb3-a0e6-928d97cfb734`. Original execution and correction JSONL/last messages retained under the artifact directory.
+
+Initial source review rejected TASK-033 Jackson2 mapper mismatch and no-op fixture that inadvertently clears optional fields. TASK-035 had insufficient session/ticket/handler coverage and a rollback assertion driven by invented test synchronization instead of Spring's transactional listener; both returned to actual worker sessions with unchanged reservations. TASK-034 inclusive366-day fixture spans367 days in a leap year, and deep fluent mocks do not verify executed query values; correction packet prepared. These are test submission defects, not established application defects. No tests run at this checkpoint. Memory10 records reviewed partial progress.
+
+Historical policy/template paths .ai/DECISIONS.md, .ai/context/workflow.md and PROJECT_MEMORY.md are absent; current explicit user instruction, AGENTS.md, PRD active header and task reservations govern. Missing historical files were not fabricated/restored.
+
+TASK-033 corrected submission accepted statically: current source uses Jackson3; actual no-op preserves all fields; audit controls roundtrip/redaction, independent validation cases, rate boundaries, history conflict/success, existing order snapshots and full mapper/null omission are implemented. Static35invocations, not executed yet. Memory11 persists acceptance; original worker memory8 retained. TASK-034 and035 review resumes active.
+
+TASK-034 corrected submission accepted statically: inclusive366-day leap interval and exclusive end corrected, invalid/exact bounds independent, page/count DST window parity, concrete tenant/outlet/filter values verified using controlled typed Blaze fluent mocks, stable field/order/offset/overflow projection and Jackson3 nested null omission implemented. Memory12 persists acceptance; no compile/test execution yet. Actual SQL/database isolation remains outside mock evidence.
+
+## Latest checkpoint: PAUSED BY USER, memory13
+
+User requested saving the latest progress for continuation later. No Maven/build/test/startup/database commands were executed. TASK-033 and034 original/review CLI workers completed exit0 and their corrected source is accepted for test execution. TASK-035 corrected source was largely implemented and inspected, but the active review process was interrupted through its execution session58349 using Ctrl+C, exit1. Its corrected final report was not yet persisted, so no completed handoff or passing result is claimed. Initial report sections remain historical and are superseded by the actual correction source and review packet.
+
+Saved13 new unit-test classes plus updated PublicOrderServiceTest; original checkout assertion starting lines all remain present. Paused code copies and SHA-256 manifest: `reports/artifacts/UNIT-20261007/paused-checkpoint/`, `paused-test-sha256.csv`. Baseline differences recorded in `paused-baseline-changes.csv`: checkout test and one external production-controller syntax correction. Worker file-change events across original/review logs show zero allowlist violations. External FnbPaymentController change removes stray `oke` after an annotation; it was preserved and is not attributed to the test workers. No test worker modified production/pom/SQL.
+
+Observed TASK-035 corrections: ticket format/single-use/JWT-versus-ticket expiry/revocation/scope/capacity tests; current-session/membership/role validation; successful and rejected/replayed handshake; exact tenant/outlet JSON delivery, per-user/global bounds, expiry/revocation cleanup, client-message denial and broken-socket isolation; actual Spring EventListenerMethodProcessor/TransactionalApplicationListenerMethodAdapter with resource-free AbstractPlatformTransactionManager/TransactionTemplate tests for commit, rollback, exception rollback and no active transaction; immutable publisher snapshot after order mutation; Jackson3 minimal/null-free mapper; origin/container/executor bounds; checkout publisher-once and no-publication failures/replays. This is source inspection, not runtime evidence. Final reports and full acceptance matrix still need confirmation.
+
+Resume instructions:
+
+1. Read memory13, TASKS and this checkpoint; compare paused hashes with current working tree, preserve any intervening user changes.
+2. Resume TASK-035 worker thread `01a115d7-86ae-7bb3-a0e6-928d97cfb734` with TASK-035 and TASK-035-REVIEW same allowlist. First persist accurate correction checkpoint/report, verify all nine reserved test paths and finish remaining source review. Do not overwrite historical report or authorize production edits implicitly.
+3. Verify worker report against actual source/event paths; TASK-033/034 remain accepted statically unless new edits change them.
+4. Run Maven wrapper serially: `./mvnw.cmd -Punit-tests test`. If sandbox blocks required Maven cache/network, use normal command escalation. Delegate any necessary test corrections to workers; no orchestrator test-code writing. Production defects require explicit bounded worker scope and review.
+5. Inspect current Surefire XML/results, persist exact executed tests/failures/skips and canonical statuses. Unit success does not prove database/HTTP/WebSocket-container/pilot acceptance. Do not start API/integration/server/database work as part of this checkpoint.

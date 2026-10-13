@@ -1,0 +1,14 @@
+# TASK-032 final adapter/injection review
+
+Continue only after existing revision worker finishes; same exclusive allowlist, current canonical memory7, original worker baseline5. No tests/build/startup/database/network or canonical/code outside reservation. Preserve other live formatting/user changes; do not restore source baseline wholesale.
+
+Inspect final source and correct any remaining issues below (skip only if actual final revision already fixed it):
+
+1. Jackson3 ObjectMapper.writeValueAsBytes throws tools.jackson.core.JacksonException, a RuntimeException, not IOException. A catch(IOException) around only mapper serialization is unreachable Java. Catch JacksonException/runtime serialization failures. Primary reference https://github.com/FasterXML/jackson/blob/main/jackson3/MIGRATING_TO_JACKSON_3.md; local source jar exists in C:/Users/arips/.m2/repository/tools/jackson/core/jackson-databind/3.1.5/. Inspect only, no compilation.
+2. Field @Qualifier on Lombok RequiredArgsConstructor is not reliably copied to generated constructor parameters; no lombok.config exists. Use explicit constructor with @Qualifier("fnbRealtimeDeliveryExecutor") on Executor parameter; remove redundant Lombok constructor annotation. No ambiguous Executor injection.
+3. Prevent config bean cycle: config setter-injects handler; handler needs executor currently produced by same configuration instance. Make factory for independent delivery executor static @Bean (no config state) or other same-file cycle-free wiring; avoid relying on allow-circular-references. Review maintenance scheduler and configuration injection graph.
+4. Reject-full-session branch must close socket outside synchronized(sessionLock); reserve insertion atomically, network/DB outside lock. Catch both IOException and runtime transport/decorator failures per session, close/remove failed connection and continue others, never abort whole broadcast or periodic maintenance. Cleanup loop must retain scheduling if one close/check unexpectedly fails.
+5. Origins parsing must reject explicit invalid ports (0/>65535) and nonempty URI path including '/' (origin never has path) instead of allowing configs which browsers never send. Keep default origins and same CORS setting. Scheduler lambda catches runtime to keep recurring task alive.
+6. Reformat new dense classes into ordinary readable Java (normal methods/branches/fields, no multi-statement lines) within reservation only. Update report with completed acceptance, any compile uncertainty, actual file hashes and source limitations. Clarify older rejected report checkpoint is historical, final status supersedes it.
+
+Acceptance: no detectable adapter compilation/injection issue by source/API inspection; atomic capacity without network locks; documented after-commit bounded delivery/periodic revocation/REST resync. No claimed build/test success.

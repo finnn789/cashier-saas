@@ -19,7 +19,7 @@ public class PublicQrAccessService {
     public TableQrTokenEntity requirePublicQr(String token) {
         if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) throw new ResourceNotFoundException();
         TableQrTokenEntity qr = tables.byToken(token).orElseThrow(ResourceNotFoundException::new);
-        if (!qr.getDiningTable().isActive() || !qr.getOutlet().isActive() || !qr.getTenant().isActive()
+        if ((qr.getDiningTable() != null && !qr.getDiningTable().isActive()) || !qr.getOutlet().isActive() || !qr.getTenant().isActive()
                 || !qr.getTenant().isFnbEnabled()
                 || subscriptions.findActiveForTenant(qr.getTenant().getId())
                     .filter(s -> "FREETIER".equals(s.getPlanCode()) && s.isActiveAt(Instant.now())).isEmpty()) {

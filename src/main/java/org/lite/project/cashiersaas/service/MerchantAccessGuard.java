@@ -6,10 +6,7 @@ import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
-import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
-import org.lite.project.cashiersaas.repository.OutletRepository;
-import org.lite.project.cashiersaas.repository.SubscriptionRepository;
-import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
+import org.lite.project.cashiersaas.repository.MerchantAccessRepository;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -18,35 +15,21 @@ import java.util.UUID;
 @Component
 @RequiredArgsConstructor
 public class MerchantAccessGuard {
-    private final TenantMembershipRepository membershipRepository;
-    private final SubscriptionRepository subscriptionRepository;
-    private final OutletRepository outletRepository;
-    private final MembershipOutletAccessRepository accessRepository;
+    private final MerchantAccessRepository accessRepository;
 
     public MerchantAccessContext requireOutlet(TenantPrincipal principal, UUID outletId) {
         principal.requireOutlet(outletId);
-        TenantMembershipEntity membership = requireMember(principal);
-        var outlet = outletRepository.findActive(principal.getTenantId(), outletId)
+        MerchantAccessRepository.OutletAccess access = accessRepository.findOutlet(
+                        principal.getUserId(), principal.getTenantId(), outletId, principal.getRoles(), Instant.now())
                 .orElseThrow(ResourceNotFoundException::new);
-        accessRepository.findAccess(principal.getTenantId(), membership.getId(), outletId)
-                .orElseThrow(ResourceNotFoundException::new);
-        return new MerchantAccessContext(membership.getTenant(), outlet, membership);
+        TenantMembershipEntity membership = access.getMembership();
+        return new MerchantAccessContext(membership.getTenant(), access.getOutlet(), membership);
     }
 
     public TenantMembershipEntity requireMember(TenantPrincipal principal) {
-        TenantMembershipEntity membership = membershipRepository.findActive(principal.getUserId(), principal.getTenantId())
-                .filter(value -> value.getUser().isActive())
-                .filter(value -> value.getTenant().isActive())
-                .filter(value -> value.getTenant().isFnbEnabled())
-                .filter(value -> principal.getRoles().contains(value.getRole()))
+        return accessRepository.findMember(principal.getUserId(), principal.getTenantId(),
+                        principal.getRoles(), Instant.now())
                 .orElseThrow(ResourceNotFoundException::new);
-        boolean subscribed = subscriptionRepository.findActiveForTenant(principal.getTenantId())
-                .map(value -> "FREETIER".equals(value.getPlanCode()) && value.isActiveAt(Instant.now()))
-                .orElse(false);
-        if (!subscribed) {
-            throw new ResourceNotFoundException();
-        }
-        return membership;
     }
 
     public MerchantAccessContext requireOwner(TenantPrincipal principal, UUID outletId) {

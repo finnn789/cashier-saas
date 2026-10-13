@@ -63,6 +63,7 @@ public class AuthSessionService {
                 user.isPendingProfile() ? "COMPLETE_ONBOARDING" : "SELECT_MERCHANT_OUTLET", null, null, null);
     }
 
+
     @Transactional
     public IssuedTokens selectMerchant(AccountPrincipal principal, TenantMembershipEntity membership,
                                        OutletEntity outlet, SubscriptionEntity subscription) {

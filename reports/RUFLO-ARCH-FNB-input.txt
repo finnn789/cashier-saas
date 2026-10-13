@@ -1,0 +1,1364 @@
+﻿SOURCE FILE: tasks/TASK-RUFLO-ARCH-FNB.md
+# Read-only architecture reviewer: F&B operations and persistence
+
+Assigned by orchestrator on 2026-10-07. Canonical baseline memory version: 2.
+Ruflo swarm: swarm-1791361273309-rota2f.
+Execution: authenticated Codex CLI, independent fresh context. This is not Ruflo agent_execute.
+
+Read AGENTS.md, .ai/MEMORY.md, .ai/ARCHITECTURE.md and .codex/agents/mvp_architect.toml once. Current instructions override historical template details. PROJECT_MEMORY.md is deleted in the dirty working tree; do not restore it.
+
+Review PublicOrderService, FnbPosOrderService, FnbOrderPricingService, FnbPaymentService, MockFnbGatewayService, FnbKitchenService, FnbSalesReportRepository, FnbOrderRepository and SalesOrderEntity. Explain actual Pay First transitions, snapshot pricing, idempotency, locking, audit and report boundaries. Inspect current migration filenames and non-secret Flyway/Liquibase/JPA settings only. Identify material gaps in .ai/ARCHITECTURE.md and limits of source evidence. Do not read .env, auth.json, secrets, datasource credentials or liquibase-diff.properties. PRD text is older than active Pay First/three-role policy; do not invent new product decisions.
+
+Allowlist: read-only source/configuration inspection, git status/diff, final review response. No filesystem writes, builds/tests/startup/database/network operations, nested agents or MCP mutation, canonical updates, migration repair or implementation. Existing application changes and staged migration deletions are user work and must be preserved. The host persists final response only to reports/RUFLO-ARCH-FNB.md.
+
+Return a concise report: memory baseline; files inspected; architecture findings; corrections or unknowns; testing not run by policy; changed files none. Distinguish source observations from proposed improvements. Do not certify end-to-end readiness.
+
+SOURCE FILE: .ai/MEMORY.md
+# Project memory
+
+Memory version: 2
+Updated: 2026-10-07 (Asia/Jakarta)
+
+## Evidence-qualified state
+
+- This entry point was absent at session start, as were TASKS.md and context/INDEX.md. Application milestone state has not been reconstructed or reviewed in this infrastructure task.
+- Ruflo CLI 3.54.1 configured for this Codex project in `.codex/config.toml`; runtime config at `.claude-flow/config.yaml`.
+- Verified through the configured launcher: MCP handshake, 358 tools, memory store/retrieve/search, keyword hooks_route. Backend: sql.js + HNSW on Windows.
+- Ruflo MCP tools are now callable in this chat. Hierarchical architecture swarm and two Sonnet reviewer registrations succeeded; actual agent_execute failed because no LLM provider is configured. No worker review ran.
+- Source-reviewed architecture snapshot: `.ai/ARCHITECTURE.md`. Java 17 / Boot 4.1.1 modular monolith, controller/service/repository/DTO layers, account/merchant JWT scopes, membership guards, F&B Pay First shared QR/POS order model, JPA/Blaze-Persistence PostgreSQL persistence. This is structural evidence, not runtime acceptance.
+- Codebase Memory index is older than current source (missing current payment/kitchen classes). Migration history/deployment, real-time push and full tenant-isolation proof remain unverified. PRD/policy differences are documented in the snapshot.
+- Existing dirty application changes were preserved. No Maven, unit, API, or integration tests ran.
+- Detailed setup evidence and limitations: `docs/ruflo-setup.md`.
+
+## Next action
+
+Configure an LLM provider through the approved credential mechanism before Ruflo worker execution. Refresh structural index and review migration history/product-document differences before selecting implementation work. Application milestone acceptance remains unassessed.
+
+SOURCE FILE: .ai/ARCHITECTURE.md
+# Architecture snapshot
+
+Reviewed: 2026-10-07 (Asia/Jakarta). Memory version: 2.
+Evidence: current working-tree source, pom.xml, AGENTS.md, PRD-MVP.md, and Codebase Memory graph. This is a structural review, not runtime or security certification.
+
+## Application structure
+
+One Java 17 / Spring Boot 4.1.1 backend: a modular monolith organized in existing top-level packages under `org.lite.project.cashiersaas`.
+
+```mermaid
+flowchart LR
+    HTTP[Staff or public HTTP client] --> Security[Spring Security / JWT]
+    Security --> Controller[controller]
+    Controller --> Service[service: use cases and transactions]
+    Service --> Guard[MerchantAccessGuard]
+    Service --> Repository[repository: JPA / Blaze-Persistence]
+    Repository --> DB[(PostgreSQL)]
+    Service --> Mapper[dto: explicit mappers]
+    Mapper --> Response[ApiResponse and named DTOs]
+```
+
+Controllers adapt HTTP and return `ApiResponse<T>`; services coordinate transactions, guards, persistence and explicit DTO mappers. Entities own named business transitions. Repositories use EntityManager and Blaze-Persistence; QueryDSL generated Q types support typed paths. `ApiResponse` omits null fields. Current exception classes reside in `exception/runtime`, with `GlobalExceptionHandler`; AGENTS.md instead prescribes `shared/exception/runtime` for the policy boundary. Do not silently move existing code during discovery.
+
+## Functional boundaries
+
+- Identity and sessions: RegisterService, LoginService, AuthSessionService, JwtTokenService, JWT configuration and conversion. Account scope supports onboarding and merchant selection; merchant scope carries tenant/outlet/membership context. Refresh tokens are persisted as digests and rotated; sessions support revocation. Stateless HTTP security does not mean refresh sessions have no database state.
+- Merchant foundation: tenant, outlet, tenant membership, membership outlet access, invitations, onboarding and subscription/free-tier services.
+- F&B catalog and QR: FnbCatalogService, FnbTableService, FnbOrderQrService, PublicQrAccessService. Public QR resolves tenant/outlet and optional table from validated server-side token context.
+- Shared F&B checkout: PublicOrderService and FnbPosOrderService use FnbOrderPricingService and SalesOrderEntity with line/option snapshots. Both sources feed the same operational order model.
+- Operations: FnbStaffOrderService, FnbDiscountService, FnbOrderCancellationService, FnbPaymentService, MockFnbGatewayService, FnbKitchenService and FnbTableReconciliationService.
+- Receipts and reports: FnbReceiptService and FnbSalesReportService/FnbSalesReportRepository. Paid-sales queries scope both payment and order to tenant/outlet, use payment time, require PAID and exclude CANCELLED.
+- Separate earlier cashier sales/catalog services and broader laundry/inventory/platform entity/schema areas remain present. Their existence does not establish active MVP acceptance or completed features.
+
+## Security and tenancy
+
+SecurityConfiguration owns stateless HTTP policy, BCrypt and CORS. JwtConfiguration wires HS256 signing/verification, mandatory environment secret, issuer/audience/time and required claims checks. TenantJwtAuthenticationConverter distinguishes ACCOUNT and MERCHANT scopes. Merchant conversion requires UUID subject, session, tenant, outlet and membership claims plus supported roles.
+
+Active role policy is exactly SUPERADMIN, OWNERMERCHANT and CASHIER. Platform routes require SUPERADMIN; merchant routes OWNERMERCHANT; cashier routes OWNERMERCHANT or CASHIER. Account-only routes use SCOPE_ACCOUNT. Public QR routes are anonymous and use token-scoped context.
+
+MerchantAccessGuard checks principal outlet and reloads authorized membership/outlet access through MerchantAccessRepository. Failed ownership/access checks use ResourceNotFoundException to avoid disclosing another tenant's records. Protected data context comes from the principal, public context from validated QR. This review sampled boundaries; exhaustive tenant-isolation proof remains pending.
+
+## Pay First state and consistency
+
+```text
+QR/POS checkout -> NEW + UNPAID
+successful settlement -> CONFIRMED + PAID
+kitchen -> PREPARING -> READY -> COMPLETED
+NEW + UNPAID -> CANCELLED (reason and audit in service)
+```
+
+SalesOrderEntity enforces these transitions. Discount and cancellation require NEW/UNPAID. Pricing uses BigDecimal, server-side availability/pricing and order snapshots. Checkout requires an idempotency key and stores a request fingerprint; changed-request key reuse conflicts. Payment supports replay/conflict checks and a separate mock gateway attempt model. Payment settlement records payment, audit and table reconciliation inside the service transaction.
+
+FnbOrderRepository locks the tenant row with PESSIMISTIC_WRITE. Checkout/payment/kitchen use this coordination; it serializes mutations for a tenant and is a potential throughput bottleneck. Entity uniqueness includes tenant/idempotency and outlet/order-number. Runtime concurrency and actual database constraint enforcement were not tested.
+
+## Persistence and delivery limits
+
+- PostgreSQL, Hibernate schema validation, open-in-view disabled. Flyway is enabled for runtime migration. Liquibase runtime is disabled; optional schema-diff Maven profile is diagnostic tooling.
+- Working tree has deletions of historical V1-V10 migrations and an untracked `V1__initial_schema.sql` containing a broad schema. Older docs report an unresolved authentic V11 conflict. Current database history was not inspected; migration/deployment readiness is unknown.
+- Existing graph contains 186 Java files and 10 SQL files; it does not contain current FnbPaymentService/FnbKitchenService classes. Use graph as navigation only, verify against source and refresh before relying on current call coverage.
+- Search of main source found no SseEmitter, WebSocket or TransactionalEventListener implementation. List/status endpoints exist for polling; push delivery after commit is not established.
+- PRD describes additional Manager/Kitchen roles and pay-after-meal flows; explicit active repository policy takes precedence for this snapshot: three roles and Pay First. Reconciliation of product documentation is pending, not a newly approved product decision.
+- No frontend package.json/tsx/vue/html files were found by repository file search. This snapshot covers backend architecture.
+
+## Ruflo evidence
+
+Swarm `swarm-1791361273309-rota2f` initialized with hierarchical topology, specialized strategy, maximum 3 agents. Memory search returned no prior architecture entries; keyword routing recommended security-architect. Registered Sonnet reviewers: `agent-1791361308449-h63kyb` (security) and `agent-1791361308340-gxo7t6` (operations).
+
+Actual agent_execute attempts failed: no LLM provider configured (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OLLAMA_API_KEY absent from Ruflo provider configuration). Registration is not executed review evidence. This snapshot was reviewed by the orchestrator using source and graph, not produced by those workers. No provider configuration, application code, SQL or tests changed. No builds, tests, startup or database commands ran.
+
+SOURCE FILE: .codex/agents/mvp_architect.toml
+name = "mvp_architect"
+description = "Read-only solution architect for new Cashier SaaS MVP features, schemas, API boundaries, security boundaries, and cross-cutting changes."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Design the smallest architecture that safely delivers the requested Cashier SaaS MVP slice.
+
+Read AGENTS.md, PRD-MVP.md, PROJECT_MEMORY.md, pom.xml, and the relevant implementation before making recommendations. Treat the active user request as the task boundary and the PRD as the product scope authority.
+
+Return a concise, implementation-ready architecture brief containing:
+- the acceptance criteria and assumptions;
+- affected modules, packages, and ownership boundaries;
+- domain entities, database constraints, and transaction boundaries;
+- API contracts, authentication, role authorization, tenant and outlet scoping;
+- state transitions, idempotency, audit, money, and concurrency requirements;
+- real-time publication boundary when applicable;
+- testing seams, important negative cases, and a safe implementation order.
+
+End the brief with `READY` when implementation can proceed or `NEEDS_PRODUCT_DECISION` followed by the single blocking decision. Include a unit/API test matrix mapped to the acceptance criteria.
+
+Prefer a modular monolith and vertical slices. Reuse existing project patterns once they exist. Do not introduce microservices, event infrastructure, generic frameworks, or dependencies without a demonstrated requirement.
+
+Require named public DTO classes with Lombok @Getter and @Setter, never records or wildcard generic types (`<?>`, `? extends`, `? super`). Keep DTOs in feature-local dto/request and dto/response packages. Recommend controller -> service -> repository boundaries, explicit mappers, composition, and focused policy/guard classes. Recommend Strategy and a narrow factory only for concrete business variations; reject generic base-service and helper-dump designs.
+
+Apply the active roles exactly: SUPERADMIN, OWNERMERCHANT, and CASHIER. For protected APIs, require stateless Bearer JWT validation and tenant identity sourced from the validated principal. Keep HTTP security policy in SecurityConfiguration and JWT bean wiring in JwtConfiguration.
+
+Stay read-only. Do not edit files or implement the feature. Identify open decisions only when they materially affect the public contract, security boundary, or persistent schema. Give the parent agent one recommended option with its tradeoff instead of returning an unranked list.
+"""
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/PublicOrderService.java
+package org.lite.project.cashiersaas.service;
+
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.dto.FnbOrderMapper;
+import org.lite.project.cashiersaas.dto.request.PublicOrderRequest;
+import org.lite.project.cashiersaas.dto.response.PublicOrderResponse;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.ProductOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.fnb.TableQrTokenEntity;
+import org.lite.project.cashiersaas.enums.OrderSource;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.FnbOrderRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class PublicOrderService {
+    private static final Duration TOKEN_TTL = Duration.ofDays(30);
+    private final PublicQrAccessService publicQrAccess;
+    private final FnbOrderRepository orders;
+    private final PublicOrderTokenService tokens;
+    private final FnbOrderPricingService pricing;
+
+    @Transactional
+    public PublicOrderResponse checkout(String qrToken, String key, PublicOrderRequest request) {
+        if (key == null || !key.matches("[A-Za-z0-9_-]{16,128}"))
+            throw new InvalidOperationException("Idempotency-Key wajib 16-128 karakter alfanumerik, '_' atau '-'.");
+        TableQrTokenEntity qr = publicQrAccess.requirePublicQr(qrToken);
+        UUID tenantId = qr.getTenant().getId();
+        UUID outletId = qr.getOutlet().getId();
+        UUID tableId = qr.getDiningTable() == null ? null : qr.getDiningTable().getId();
+        if (tableId != null && request.getServiceType() != org.lite.project.cashiersaas.enums.ServiceType.DINE_IN)
+            throw new InvalidOperationException("QR meja hanya untuk dine-in.");
+        String fingerprint = fingerprint(tableId, request);
+        orders.lockTenant(tenantId);
+        orders.refreshQr(qr);
+        // Rotation invalidates the old QR immediately, including in-flight requests queued on the tenant lock.
+        if (!qr.isActive() || !qr.getToken().equals(qrToken) || (qr.getDiningTable() != null && !qr.getDiningTable().isActive())
+                || !qr.getOutlet().isActive() || !qr.getTenant().isActive()) throw new ResourceNotFoundException();
+        publicQrAccess.requirePublicQr(qrToken);
+        String statusToken = tokens.token(tenantId, key);
+        var existing = orders.byIdempotency(tenantId, key);
+        if (existing.isPresent()) {
+            if (!existing.get().getOutlet().getId().equals(outletId))
+                throw new OperationConflictException("Idempotency-Key telah digunakan.");
+            return existingOrder(existing.get(), tableId, fingerprint, statusToken);
+        }
+        FnbOrderPricingService.PricedOrder priced = pricing.price(tenantId, outletId,
+                request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
+                        item.getQuantity(), item.getNote(), item.getOptionIds())).toList(),
+                qr.getTenant().getTaxRate(), qr.getTenant().getServiceChargeRate());
+        String number = "QR-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase();
+        SalesOrderEntity order = SalesOrderEntity.publicQr(qr.getTenant(), qr.getOutlet(),
+                new SalesOrderEntity.PublicQrDetails(qr.getDiningTable(), key, fingerprint, number,
+                        tokens.digest(statusToken), Instant.now().plus(TOKEN_TTL), request.getCustomerLabel().trim()),
+                new SalesOrderEntity.Charges(priced.subtotal(), priced.taxAmount(), priced.serviceChargeAmount()));
+        order.snapshotRates(qr.getTenant().getTaxRate(), qr.getTenant().getServiceChargeRate());
+        order.selectPublicServiceType(request.getServiceType());
+        orders.persist(order);
+        persistLines(qr, order, priced.lines());
+        if (qr.getDiningTable() != null) qr.getDiningTable().markAwaitingPayment();
+        orders.flush();
+        return FnbOrderMapper.publicOrder(order, statusToken);
+    }
+
+    private PublicOrderResponse existingOrder(SalesOrderEntity previous, UUID tableId, String fingerprint,
+                                              String statusToken) {
+        if (!fingerprint.equals(previous.getRequestFingerprint()) || previous.getSource() != OrderSource.QR
+                || !java.util.Objects.equals(tableId, previous.getDiningTable() == null ? null : previous.getDiningTable().getId()))
+            throw new OperationConflictException("Idempotency-Key telah digunakan untuk pesanan berbeda.");
+        if (previous.getPublicStatusTokenExpiresAt().isBefore(Instant.now()))
+            throw new OperationConflictException("Token status pesanan telah kedaluwarsa.");
+        if (!tokens.digest(statusToken).equals(previous.getPublicStatusTokenDigest()))
+            throw new OperationConflictException("Token status tidak lagi dapat direkonstruksi.");
+        return FnbOrderMapper.publicOrder(previous, statusToken);
+    }
+
+    private void persistLines(TableQrTokenEntity qr, SalesOrderEntity order, List<FnbOrderPricingService.PricedLine> lines) {
+        for (FnbOrderPricingService.PricedLine line : lines) {
+            OrderItemEntity saved = OrderItemEntity.snapshot(qr.getTenant(), qr.getOutlet(), order,
+                    line.product(), line.input().quantity(), line.lineTotal(), line.input().note());
+            orders.persist(saved);
+            for (ProductOptionEntity option : line.options())
+                orders.persist(OrderItemOptionEntity.snapshot(qr.getTenant(), qr.getOutlet(), saved, option));
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public PublicOrderResponse status(String token) {
+        if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) throw new ResourceNotFoundException();
+        SalesOrderEntity order = orders.byStatusDigest(tokens.digest(token)).orElseThrow(ResourceNotFoundException::new);
+        if (order.getPublicStatusTokenExpiresAt() == null || !order.getPublicStatusTokenExpiresAt().isAfter(Instant.now()))
+            throw new ResourceNotFoundException();
+        return FnbOrderMapper.publicOrder(order, null);
+    }
+
+    private String fingerprint(UUID tableId, PublicOrderRequest request) {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(bytes);
+            out.writeUTF(tableId == null ? "OUTLET:" + request.getServiceType().name() : tableId.toString());
+            out.writeUTF(request.getCustomerLabel().trim());
+            out.writeInt(request.getItems().size());
+            for (PublicOrderRequest.Item item : request.getItems()) {
+                out.writeUTF(item.getProductId().toString());
+                out.writeInt(item.getQuantity());
+                out.writeUTF(item.getNote() == null ? "" : item.getNote());
+                List<UUID> ids = item.getOptionIds().stream().sorted(Comparator.naturalOrder()).toList();
+                out.writeInt(ids.size());
+                for (UUID id : ids) out.writeUTF(id.toString());
+            }
+            out.flush();
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray()));
+        } catch (IOException | NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("Cannot fingerprint checkout", exception);
+        }
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/FnbPosOrderService.java
+package org.lite.project.cashiersaas.service;
+
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.MerchantAccessContext;
+import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.dto.FnbStaffOrderMapper;
+import org.lite.project.cashiersaas.dto.request.FnbPosOrderRequest;
+import org.lite.project.cashiersaas.dto.response.FnbStaffOrderResponse;
+import org.lite.project.cashiersaas.entity.fnb.DiningTableEntity;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.ProductOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.enums.OrderSource;
+import org.lite.project.cashiersaas.enums.ServiceType;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.FnbOrderRepository;
+import org.lite.project.cashiersaas.repository.FnbTableRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class FnbPosOrderService {
+    private final MerchantAccessGuard guard;
+    private final FnbTableRepository tables;
+    private final FnbOrderRepository orders;
+    private final FnbOrderPricingService pricing;
+
+    @Transactional
+    public FnbStaffOrderResponse checkout(TenantPrincipal principal, UUID outletId, String key,
+                                          FnbPosOrderRequest request) {
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        String idempotencyKey = validatedKey(key);
+        String fingerprint = fingerprint(request);
+        orders.lockTenant(context.getTenant().getId());
+        context = guard.requireOutlet(principal, outletId);
+        if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
+            throw new ResourceNotFoundException();
+        DiningTableEntity table = selectedTable(context, request);
+        SalesOrderEntity existing = orders.byIdempotency(context.getTenant().getId(), idempotencyKey).orElse(null);
+        if (existing != null) return replay(existing, outletId, fingerprint);
+        FnbOrderPricingService.PricedOrder priced = pricing.price(context.getTenant().getId(), outletId,
+                request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
+                        item.getQuantity(), item.getNote(), item.getOptionIds())).toList(),
+                context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
+        String number = "POS-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase();
+        SalesOrderEntity order = SalesOrderEntity.pos(context.getTenant(), context.getOutlet(),
+                new SalesOrderEntity.PosDetails(table, idempotencyKey, fingerprint, number,
+                        request.getServiceType(), request.getCustomerLabel().trim()),
+                new SalesOrderEntity.Charges(priced.subtotal(), priced.taxAmount(), priced.serviceChargeAmount()));
+        order.snapshotRates(context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
+        orders.persist(order);
+        persistLines(context, order, priced.lines());
+        if (table != null) table.markAwaitingPayment();
+        orders.flush();
+        return response(order);
+    }
+
+    private DiningTableEntity selectedTable(MerchantAccessContext context, FnbPosOrderRequest request) {
+        if (request.getServiceType() == null) throw new InvalidOperationException("Tipe layanan wajib diisi.");
+        if (request.getServiceType() == ServiceType.TAKEAWAY) {
+            if (request.getTableId() != null) throw new InvalidOperationException("Takeaway tidak dapat memakai meja.");
+            return null;
+        }
+        if (request.getServiceType() != ServiceType.DINE_IN) throw new InvalidOperationException("Tipe layanan tidak valid.");
+        if (request.getTableId() == null) return null;
+        DiningTableEntity table = tables.find(context.getTenant().getId(), context.getOutlet().getId(), request.getTableId())
+                .orElseThrow(ResourceNotFoundException::new);
+        if (!table.isActive()) throw new InvalidOperationException("Meja tidak tersedia.");
+        return table;
+    }
+
+    private FnbStaffOrderResponse replay(SalesOrderEntity existing, UUID outletId, String fingerprint) {
+        if (existing.getSource() != OrderSource.POS || !existing.getOutlet().getId().equals(outletId)
+                || !fingerprint.equals(existing.getRequestFingerprint())) {
+            throw new OperationConflictException("Idempotency-Key telah digunakan untuk pesanan berbeda.");
+        }
+        return response(existing);
+    }
+
+    private void persistLines(MerchantAccessContext context, SalesOrderEntity order,
+                              List<FnbOrderPricingService.PricedLine> lines) {
+        for (FnbOrderPricingService.PricedLine line : lines) {
+            OrderItemEntity item = OrderItemEntity.snapshot(context.getTenant(), context.getOutlet(), order,
+                    line.product(), line.input().quantity(), line.lineTotal(), line.input().note());
+            orders.persist(item);
+            for (ProductOptionEntity option : line.options())
+                orders.persist(OrderItemOptionEntity.snapshot(context.getTenant(), context.getOutlet(), item, option));
+        }
+    }
+
+    private FnbStaffOrderResponse response(SalesOrderEntity order) {
+        List<OrderItemEntity> items = orders.items(order.getTenant().getId(), order.getOutlet().getId(), List.of(order.getId()));
+        List<UUID> itemIds = items.stream().map(OrderItemEntity::getId).toList();
+        List<OrderItemOptionEntity> options = orders.itemOptions(order.getTenant().getId(), order.getOutlet().getId(), itemIds);
+        return FnbStaffOrderMapper.order(order, items, options);
+    }
+
+    private String validatedKey(String key) {
+        if (key == null || !key.matches("[A-Za-z0-9_-]{16,128}"))
+            throw new InvalidOperationException("Idempotency-Key wajib 16-128 karakter alfanumerik, '_' atau '-'.");
+        return key;
+    }
+
+    private String fingerprint(FnbPosOrderRequest request) {
+        StringBuilder canonical = new StringBuilder();
+        append(canonical, request.getServiceType() == null ? null : request.getServiceType().name());
+        append(canonical, request.getTableId() == null ? null : request.getTableId().toString());
+        append(canonical, request.getCustomerLabel() == null ? null : request.getCustomerLabel().trim());
+        if (request.getItems() == null) throw new InvalidOperationException("Pesanan harus memiliki item.");
+        for (FnbPosOrderRequest.Item item : request.getItems()) {
+            append(canonical, item.getProductId() == null ? null : item.getProductId().toString());
+            append(canonical, Integer.toString(item.getQuantity()));
+            append(canonical, item.getNote());
+            if (item.getOptionIds() == null) throw new InvalidOperationException("Pilihan item tidak valid.");
+            List<UUID> optionIds = item.getOptionIds().stream().sorted(Comparator.naturalOrder()).toList();
+            append(canonical, Integer.toString(optionIds.size()));
+            for (UUID optionId : optionIds) append(canonical, optionId.toString());
+        }
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.", exception);
+        }
+    }
+
+    private void append(StringBuilder builder, String value) {
+        String part = value == null ? "" : value;
+        builder.append(part.length()).append(':').append(part);
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/FnbOrderPricingService.java
+package org.lite.project.cashiersaas.service;
+
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.entity.fnb.OptionGroupEntity;
+import org.lite.project.cashiersaas.entity.fnb.ProductEntity;
+import org.lite.project.cashiersaas.entity.fnb.ProductOptionEntity;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.repository.FnbCatalogRepository;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class FnbOrderPricingService {
+    private final FnbCatalogRepository catalog;
+
+    public PricedOrder price(UUID tenantId, UUID outletId, List<LineInput> inputs,
+                             BigDecimal taxRate, BigDecimal serviceChargeRate) {
+        if (inputs == null || inputs.isEmpty()) throw new InvalidOperationException("Pesanan harus memiliki item.");
+        requireRate(taxRate, "Tarif pajak tidak valid.");
+        requireRate(serviceChargeRate, "Tarif biaya layanan tidak valid.");
+        List<PricedLine> lines = new ArrayList<>();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (LineInput input : inputs) {
+            PricedLine line = priceLine(tenantId, outletId, input);
+            lines.add(line);
+            subtotal = subtotal.add(line.lineTotal());
+        }
+        BigDecimal taxAmount = percentage(subtotal, taxRate);
+        BigDecimal serviceChargeAmount = percentage(subtotal, serviceChargeRate);
+        return new PricedOrder(lines, subtotal, taxAmount, serviceChargeAmount,
+                subtotal.add(taxAmount).add(serviceChargeAmount));
+    }
+
+    private PricedLine priceLine(UUID tenantId, UUID outletId, LineInput input) {
+        if (input == null || input.productId() == null || input.quantity() < 1 || input.optionIds() == null)
+            throw new InvalidOperationException("Item pesanan tidak valid.");
+        ProductEntity product = catalog.product(tenantId, outletId, input.productId())
+                .orElseThrow(() -> new InvalidOperationException("Produk tidak tersedia."));
+        catalog.lock(product);
+        catalog.lock(product.getCategory());
+        if (!product.isAvailable() || product.isArchived() || product.getCategory().isArchived())
+            throw new InvalidOperationException("Produk tidak tersedia.");
+        Set<UUID> selectedIds = new HashSet<>(input.optionIds());
+        if (selectedIds.size() != input.optionIds().size())
+            throw new InvalidOperationException("Pilihan tidak boleh berulang.");
+        List<ProductOptionEntity> selected = selectedOptions(tenantId, outletId, product, selectedIds);
+        if (selected.size() != selectedIds.size())
+            throw new InvalidOperationException("Pilihan bukan milik produk.");
+        BigDecimal unitPrice = product.getPrice();
+        for (ProductOptionEntity option : selected) unitPrice = unitPrice.add(option.getPriceAdjustment());
+        if (unitPrice.signum() < 0) throw new InvalidOperationException("Harga efektif item tidak valid.");
+        BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(input.quantity())).setScale(2, RoundingMode.HALF_UP);
+        if (lineTotal.signum() < 0) throw new InvalidOperationException("Total item tidak valid.");
+        return new PricedLine(input, product, selected, unitPrice, lineTotal);
+    }
+
+    private List<ProductOptionEntity> selectedOptions(UUID tenantId, UUID outletId, ProductEntity product,
+                                                       Set<UUID> selectedIds) {
+        List<ProductOptionEntity> selected = new ArrayList<>();
+        for (OptionGroupEntity group : catalog.groups(tenantId, outletId, product.getId())) {
+            catalog.lock(group);
+            int selectedCount = 0;
+            for (ProductOptionEntity option : catalog.options(tenantId, outletId, group.getId())) {
+                if (selectedIds.contains(option.getId())) {
+                    catalog.lock(option);
+                    if (!option.isAvailable()) throw new InvalidOperationException("Pilihan tidak tersedia.");
+                    selected.add(option);
+                    selectedCount++;
+                }
+            }
+            if (selectedCount < group.getMinimumSelections() || selectedCount > group.getMaximumSelections())
+                throw new InvalidOperationException("Jumlah pilihan pada grup tidak valid.");
+        }
+        return selected;
+    }
+
+    private static void requireRate(BigDecimal rate, String message) {
+        if (rate == null || rate.signum() < 0) throw new InvalidOperationException(message);
+    }
+
+    private static BigDecimal percentage(BigDecimal value, BigDecimal rate) {
+        return value.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+    }
+
+    public record LineInput(UUID productId, int quantity, String note, List<UUID> optionIds) { }
+
+    public record PricedLine(LineInput input, ProductEntity product, List<ProductOptionEntity> options,
+                             BigDecimal unitPrice, BigDecimal lineTotal) { }
+
+    public record PricedOrder(List<PricedLine> lines, BigDecimal subtotal, BigDecimal taxAmount,
+                              BigDecimal serviceChargeAmount, BigDecimal total) { }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/FnbPaymentService.java
+package org.lite.project.cashiersaas.service;
+
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.MerchantAccessContext;
+import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.dto.FnbPaymentMapper;
+import org.lite.project.cashiersaas.dto.request.FnbPaymentRequest;
+import org.lite.project.cashiersaas.dto.response.FnbPaymentResponse;
+import org.lite.project.cashiersaas.entity.fnb.FnbGatewayAttemptEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
+import org.lite.project.cashiersaas.enums.PaymentMethod;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
+import org.lite.project.cashiersaas.repository.FnbGatewayAttemptRepository;
+import org.lite.project.cashiersaas.repository.FnbOrderRepository;
+import org.lite.project.cashiersaas.repository.FnbPaymentRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class FnbPaymentService {
+    private final MerchantAccessGuard guard;
+    private final FnbOrderRepository orders;
+    private final FnbPaymentRepository payments;
+    private final FnbGatewayAttemptRepository attempts;
+    private final AuditLogRepository audit;
+    private final MockFnbGatewayService mockGateway;
+    private final FnbTableReconciliationService reconciliation;
+
+    @Transactional
+    public FnbPaymentResponse pay(TenantPrincipal principal, UUID outletId, UUID orderId, FnbPaymentRequest request) {
+        if (request.getMethod() == PaymentMethod.MOCK_GATEWAY) return mockGateway.initiate(principal, outletId, orderId, request);
+        if (request.getMethod() == null) throw new InvalidOperationException("Metode pembayaran wajib diisi.");
+        orders.lockTenant(principal.getTenantId());
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        SalesOrderEntity order = current(principal, outletId, orderId);
+        String fingerprint = fingerprint(request.getMethod(), request.getAmountTendered());
+        PaymentEntity keyedPayment = payments.byKey(principal.getTenantId(), request.getIdempotencyKey()).orElse(null);
+        FnbGatewayAttemptEntity keyedAttempt = attempts.byKey(principal.getTenantId(), request.getIdempotencyKey()).orElse(null);
+        if (keyedPayment != null) return replayPayment(keyedPayment, orderId, outletId, request.getMethod(), fingerprint);
+        if (keyedAttempt != null) throw new OperationConflictException("Kunci pembayaran telah digunakan.");
+        if (attempts.pendingForOrder(principal.getTenantId(), outletId, orderId).isPresent()) throw new OperationConflictException("Gateway attempt masih tertunda.");
+        if (payments.byOrder(principal.getTenantId(), outletId, orderId).isPresent()) throw new OperationConflictException("Pesanan sudah dibayar.");
+        BigDecimal tendered = request.getAmountTendered();
+        if (request.getMethod() == PaymentMethod.CASH && tendered.compareTo(order.getTotal()) < 0) throw new InvalidOperationException("Uang tunai kurang dari total pesanan.");
+        if (request.getMethod() != PaymentMethod.CASH && tendered.compareTo(order.getTotal()) != 0) throw new InvalidOperationException("Pembayaran non-tunai harus sesuai total pesanan.");
+        return settle(context, order, request.getMethod(), tendered, request.getIdempotencyKey(), fingerprint, null);
+    }
+
+    FnbPaymentResponse settle(MerchantAccessContext context, SalesOrderEntity order, PaymentMethod method, BigDecimal tendered, String key, String fingerprint, String reference) {
+        BigDecimal change = method == PaymentMethod.CASH ? tendered.subtract(order.getTotal()) : BigDecimal.ZERO;
+        order.confirmPaid();
+        PaymentEntity payment = PaymentEntity.settle(context.getTenant(), context.getOutlet(), order, method, tendered, change, receiptNumber(), key, fingerprint, reference, context.getMembership().getUser());
+        payments.persist(payment); orders.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_PAYMENT_RECORDED, order.getId(), null, "method=" + method + ";paymentId=" + payment.getId()));
+        reconciliation.reconcile(order);
+        return FnbPaymentMapper.payment(payment);
+    }
+
+    SalesOrderEntity current(TenantPrincipal principal, UUID outletId, UUID orderId) {
+        SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+        orders.refreshOrder(order);
+        return orders.byId(principal.getTenantId(), outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+    }
+
+    static String fingerprint(PaymentMethod method, BigDecimal tendered) {
+        String source = method.name() + "|" + normalize(tendered);
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8))); }
+        catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
+    }
+
+    private FnbPaymentResponse replayPayment(PaymentEntity payment, UUID orderId, UUID outletId, PaymentMethod method, String fingerprint) {
+        if (!payment.getOutlet().getId().equals(outletId) || !payment.getSalesOrder().getId().equals(orderId) || payment.getMethod() != method || !payment.getRequestFingerprint().equals(fingerprint)) throw new OperationConflictException("Kunci pembayaran telah digunakan.");
+        return FnbPaymentMapper.payment(payment);
+    }
+    private static String normalize(BigDecimal value) { return value.stripTrailingZeros().toPlainString(); }
+    private static String receiptNumber() { return "R-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase(); }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/MockFnbGatewayService.java
+package org.lite.project.cashiersaas.service;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.MerchantAccessContext;
+import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.dto.FnbPaymentMapper;
+import org.lite.project.cashiersaas.dto.request.FnbMockPaymentResolutionRequest;
+import org.lite.project.cashiersaas.dto.request.FnbPaymentRequest;
+import org.lite.project.cashiersaas.dto.response.FnbPaymentResponse;
+import org.lite.project.cashiersaas.entity.fnb.FnbGatewayAttemptEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
+import org.lite.project.cashiersaas.enums.FnbGatewayOutcome;
+import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentMethod;
+import org.lite.project.cashiersaas.enums.PaymentStatus;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
+import org.lite.project.cashiersaas.repository.FnbGatewayAttemptRepository;
+import org.lite.project.cashiersaas.repository.FnbOrderRepository;
+import org.lite.project.cashiersaas.repository.FnbPaymentRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class MockFnbGatewayService {
+    private final MerchantAccessGuard guard;
+    private final FnbOrderRepository orders;
+    private final FnbGatewayAttemptRepository attempts;
+    private final FnbPaymentRepository payments;
+    private final AuditLogRepository audit;
+    private final FnbTableReconciliationService reconciliation;
+
+    @Transactional
+    public FnbPaymentResponse initiate(TenantPrincipal principal, UUID outletId, UUID orderId, FnbPaymentRequest request) {
+        orders.lockTenant(principal.getTenantId());
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        SalesOrderEntity order = current(principal, outletId, orderId);
+        String fingerprint = FnbPaymentService.fingerprint(PaymentMethod.MOCK_GATEWAY, request.getAmountTendered());
+        FnbGatewayAttemptEntity keyedAttempt = attempts.byKey(principal.getTenantId(), request.getIdempotencyKey()).orElse(null);
+        PaymentEntity keyedPayment = payments.byKey(principal.getTenantId(), request.getIdempotencyKey()).orElse(null);
+        if (keyedAttempt != null) return replayAttempt(keyedAttempt, keyedPayment, orderId, outletId, fingerprint);
+        if (keyedPayment != null) throw new OperationConflictException("Kunci pembayaran telah digunakan.");
+        if (payments.byOrder(principal.getTenantId(), outletId, orderId).isPresent()) throw new OperationConflictException("Pesanan sudah dibayar.");
+        if (attempts.pendingForOrder(principal.getTenantId(), outletId, orderId).isPresent()) throw new OperationConflictException("Gateway attempt masih tertunda.");
+        if (order.getStatus() != OrderStatus.NEW || order.getPaymentStatus() != PaymentStatus.UNPAID) throw new OperationConflictException("Mock gateway hanya dapat dimulai untuk pesanan baru yang belum dibayar.");
+        if (request.getAmountTendered().compareTo(order.getTotal()) != 0) throw new InvalidOperationException("Jumlah gateway harus sesuai total pesanan.");
+        FnbGatewayAttemptEntity attempt = FnbGatewayAttemptEntity.pending(context.getTenant(), context.getOutlet(), order, context.getMembership().getUser(), order.getTotal(), request.getIdempotencyKey(), fingerprint, "MOCK-" + UUID.randomUUID());
+        attempts.persist(attempt); orders.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_GATEWAY_ATTEMPT_CREATED, attempt.getId(), null, "provider=MOCK"));
+        return FnbPaymentMapper.attempt(attempt);
+    }
+
+    @Transactional
+    public FnbPaymentResponse resolve(TenantPrincipal principal, UUID outletId, UUID orderId, UUID attemptId, FnbMockPaymentResolutionRequest request) {
+        orders.lockTenant(principal.getTenantId());
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        SalesOrderEntity order = current(principal, outletId, orderId);
+        FnbGatewayAttemptEntity attempt = attempts.byId(principal.getTenantId(), outletId, attemptId).orElseThrow(ResourceNotFoundException::new);
+        if (!attempt.getSalesOrder().getId().equals(orderId)) throw new ResourceNotFoundException();
+        if (attempt.getOutcome() != FnbGatewayOutcome.PENDING) {
+            if (attempt.getOutcome() != request.getOutcome()) throw new OperationConflictException("Gateway attempt sudah memiliki outcome terminal.");
+            return terminalReplay(principal, outletId, attempt);
+        }
+        if (request.getOutcome() == null || request.getOutcome() == FnbGatewayOutcome.PENDING) throw new InvalidOperationException("Outcome resolusi harus terminal.");
+        if (request.getOutcome() == FnbGatewayOutcome.SUCCEEDED && attempt.getAmount().compareTo(order.getTotal()) != 0) throw new OperationConflictException("Jumlah gateway tidak lagi sesuai total pesanan.");
+        attempt.resolve(request.getOutcome(), context.getMembership().getUser());
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_GATEWAY_ATTEMPT_RESOLVED, attempt.getId(), null, "outcome=" + request.getOutcome()));
+        if (request.getOutcome() == FnbGatewayOutcome.SUCCEEDED) return settle(context, order, attempt);
+        return FnbPaymentMapper.attempt(attempt);
+    }
+
+    private FnbPaymentResponse terminalReplay(TenantPrincipal principal, UUID outletId, FnbGatewayAttemptEntity attempt) {
+        if (attempt.getOutcome() == FnbGatewayOutcome.FAILED) return FnbPaymentMapper.attempt(attempt);
+        PaymentEntity payment = payments.byOrder(principal.getTenantId(), outletId, attempt.getSalesOrder().getId()).orElseThrow(() -> new OperationConflictException("Pembayaran gateway berhasil tidak ditemukan."));
+        return FnbPaymentMapper.mockPayment(payment, attempt);
+    }
+    private SalesOrderEntity current(TenantPrincipal principal, UUID outletId, UUID orderId) {
+        SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+        orders.refreshOrder(order);
+        return orders.byId(principal.getTenantId(), outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+    }
+    private FnbPaymentResponse replayAttempt(FnbGatewayAttemptEntity attempt, PaymentEntity payment, UUID orderId, UUID outletId, String fingerprint) {
+        if (!attempt.getOutlet().getId().equals(outletId) || !attempt.getSalesOrder().getId().equals(orderId) || !attempt.getRequestFingerprint().equals(fingerprint)) throw new OperationConflictException("Kunci pembayaran telah digunakan.");
+        if (attempt.getOutcome() == FnbGatewayOutcome.SUCCEEDED) {
+            if (payment == null) throw new OperationConflictException("Pembayaran gateway berhasil tidak ditemukan.");
+            return FnbPaymentMapper.mockPayment(payment, attempt);
+        }
+        if (payment != null) throw new OperationConflictException("Kunci pembayaran tidak konsisten.");
+        return FnbPaymentMapper.attempt(attempt);
+    }
+    private FnbPaymentResponse settle(MerchantAccessContext context, SalesOrderEntity order, FnbGatewayAttemptEntity attempt) {
+        if (payments.byOrder(context.getTenant().getId(), context.getOutlet().getId(), order.getId()).isPresent()) throw new OperationConflictException("Pesanan sudah dibayar.");
+        order.confirmPaid();
+        PaymentEntity payment = PaymentEntity.settle(context.getTenant(), context.getOutlet(), order, PaymentMethod.MOCK_GATEWAY, attempt.getAmount(), BigDecimal.ZERO, receiptNumber(), attempt.getIdempotencyKey(), attempt.getRequestFingerprint(), attempt.getProviderReference(), context.getMembership().getUser());
+        payments.persist(payment); orders.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_PAYMENT_RECORDED, order.getId(), null, "method=MOCK_GATEWAY;paymentId=" + payment.getId()));
+        reconciliation.reconcile(order);
+        return FnbPaymentMapper.mockPayment(payment, attempt);
+    }
+    private static String receiptNumber() { return "R-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase(); }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/FnbKitchenService.java
+package org.lite.project.cashiersaas.service;
+
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.MerchantAccessContext;
+import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.dto.FnbKitchenMapper;
+import org.lite.project.cashiersaas.dto.response.FnbKitchenOrderResponse;
+import org.lite.project.cashiersaas.dto.response.FnbKitchenPageResponse;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
+import org.lite.project.cashiersaas.repository.FnbKitchenRepository;
+import org.lite.project.cashiersaas.repository.FnbOrderRepository;
+import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class FnbKitchenService {
+    private final MerchantAccessGuard guard;
+    private final FnbKitchenRepository kitchenOrders;
+    private final FnbOrderRepository orders;
+    private final MerchantReferenceRepository references;
+    private final AuditLogRepository auditLogs;
+    private final FnbTableReconciliationService tableReconciliation;
+
+    @Transactional(readOnly = true)
+    public FnbKitchenPageResponse list(TenantPrincipal principal, UUID outletId, int page, int size) {
+        if (page < 0 || page > 1_000_000 || size < 1 || size > 50)
+            throw new InvalidOperationException("Parameter halaman tidak valid.");
+        guard.requireOutlet(principal, outletId);
+        List<SalesOrderEntity> queue = kitchenOrders.page(principal.getTenantId(), outletId, page, size);
+        FnbKitchenPageResponse response = new FnbKitchenPageResponse();
+        response.setOrders(responses(principal.getTenantId(), outletId, queue));
+        response.setPage(page);
+        response.setSize(size);
+        response.setTotal(kitchenOrders.count(principal.getTenantId(), outletId));
+        return response;
+    }
+
+    @Transactional
+    public FnbKitchenOrderResponse prepare(TenantPrincipal principal, UUID outletId, UUID orderId) {
+        return transition(principal, outletId, orderId, "PREPARING");
+    }
+
+    @Transactional
+    public FnbKitchenOrderResponse ready(TenantPrincipal principal, UUID outletId, UUID orderId) {
+        return transition(principal, outletId, orderId, "READY");
+    }
+
+    @Transactional
+    public FnbKitchenOrderResponse complete(TenantPrincipal principal, UUID outletId, UUID orderId) {
+        return transition(principal, outletId, orderId, "COMPLETED");
+    }
+
+    private FnbKitchenOrderResponse transition(TenantPrincipal principal, UUID outletId, UUID orderId,
+                                               String targetStatus) {
+        orders.lockTenant(principal.getTenantId());
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId)
+                .orElseThrow(ResourceNotFoundException::new);
+        orders.refreshOrder(order);
+        String previousStatus = order.getStatus().name();
+        if ("PREPARING".equals(targetStatus)) {
+            order.startPreparing();
+        } else if ("READY".equals(targetStatus)) {
+            order.markReady();
+        } else {
+            order.complete();
+        }
+        auditLogs.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(),
+                references.user(principal.getUserId()), AuditLogEntity.Action.FNB_ORDER_STATUS_CHANGED,
+                order.getId(), null, previousStatus + " -> " + order.getStatus().name()));
+        orders.flush();
+        if ("COMPLETED".equals(targetStatus)) {
+            tableReconciliation.reconcile(order);
+        }
+        return responses(principal.getTenantId(), outletId, List.of(order)).get(0);
+    }
+
+    private List<FnbKitchenOrderResponse> responses(UUID tenantId, UUID outletId, List<SalesOrderEntity> queue) {
+        if (queue.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> orderIds = queue.stream().map(SalesOrderEntity::getId).toList();
+        List<OrderItemEntity> items = orders.items(tenantId, outletId, orderIds);
+        Map<UUID, List<OrderItemEntity>> itemsByOrder = items.stream()
+                .collect(Collectors.groupingBy(item -> item.getSalesOrder().getId()));
+        List<UUID> itemIds = items.stream().map(OrderItemEntity::getId).toList();
+        Map<UUID, List<OrderItemOptionEntity>> optionsByItem = orders.itemOptions(tenantId, outletId, itemIds).stream()
+                .collect(Collectors.groupingBy(option -> option.getOrderItem().getId()));
+        return queue.stream().map(order -> {
+            List<OrderItemEntity> orderItems = itemsByOrder.getOrDefault(order.getId(), List.of());
+            List<OrderItemOptionEntity> orderOptions = orderItems.stream()
+                    .flatMap(item -> optionsByItem.getOrDefault(item.getId(), List.of()).stream()).toList();
+            return FnbKitchenMapper.order(order, orderItems, orderOptions);
+        }).toList();
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/repository/FnbSalesReportRepository.java
+package org.lite.project.cashiersaas.repository;
+
+import com.blazebit.persistence.CriteriaBuilder;
+import com.blazebit.persistence.CriteriaBuilderFactory;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Tuple;
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentMethod;
+import org.lite.project.cashiersaas.enums.PaymentStatus;
+import org.springframework.stereotype.Repository;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+@Repository
+@RequiredArgsConstructor
+public class FnbSalesReportRepository {
+
+    private final EntityManager entityManager;
+    private final CriteriaBuilderFactory criteriaBuilderFactory;
+
+    public List<TransactionRow> transactions(UUID tenantId, UUID outletId, Instant start, Instant end,
+                                             OrderStatus status, PaymentMethod method, int page, int size) {
+        return paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .selectNew(TransactionRow.class)
+                .with("salesOrder.id")
+                .with("salesOrder.orderNumber")
+                .with("salesOrder.status")
+                .with("payment.method")
+                .with("salesOrder.subtotal")
+                .with("salesOrder.total")
+                .with("payment.amountPaid")
+                .with("payment.changeAmount")
+                .with("salesOrder.discountAmount")
+                .with("salesOrder.taxAmount")
+                .with("salesOrder.serviceChargeAmount")
+                .with("payment.receiptNumber")
+                .with("payment.paidAt")
+                .end()
+                .orderByDesc("payment.paidAt")
+                .orderByDesc("payment.id")
+                .setFirstResult(page * size)
+                .setMaxResults(size + 1)
+                .getResultList();
+    }
+
+    public SummaryRow summary(UUID tenantId, UUID outletId, Instant start, Instant end,
+                              OrderStatus status, PaymentMethod method) {
+        return paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .selectNew(SummaryRow.class)
+                .with("COALESCE(SUM(salesOrder.subtotal), 0)")
+                .with("COALESCE(SUM(salesOrder.subtotal - salesOrder.discountAmount), 0)")
+                .with("COALESCE(SUM(salesOrder.total), 0)")
+                .with("COALESCE(SUM(payment.amountPaid - payment.changeAmount), 0)")
+                .with("COUNT(payment.id)")
+                .with("COALESCE(SUM(salesOrder.discountAmount), 0)")
+                .with("COALESCE(SUM(salesOrder.taxAmount), 0)")
+                .with("COALESCE(SUM(salesOrder.serviceChargeAmount), 0)")
+                .end()
+                .getSingleResult();
+    }
+
+    public long cancellations(UUID tenantId, UUID outletId, Instant start, Instant end) {
+        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, "salesOrder")
+                .where("salesOrder.tenant.id").eq(tenantId)
+                .where("salesOrder.outlet.id").eq(outletId)
+                .where("salesOrder.status").eq(OrderStatus.CANCELLED)
+                .where("salesOrder.updatedAt").ge(start)
+                .where("salesOrder.updatedAt").lt(end)
+                .getCountQuery().getSingleResult();
+    }
+
+    public List<ProductRow> products(UUID tenantId, UUID outletId, Instant start, Instant end,
+                                     OrderStatus status, PaymentMethod method, int limit) {
+        CriteriaBuilder<Tuple> query = paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .innerJoinOn(OrderItemEntity.class, "item")
+                .on("item.salesOrder.id").eqExpression("salesOrder.id")
+                .on("item.tenant.id").eq(tenantId)
+                .on("item.outlet.id").eq(outletId)
+                .end();
+        return query.selectNew(ProductRow.class)
+                .with("item.product.id")
+                .with("item.productNameSnapshot")
+                .with("SUM(item.quantity)")
+                .with("COALESCE(SUM(item.lineTotal), 0)")
+                .end()
+                .groupBy("item.product.id")
+                .groupBy("item.productNameSnapshot")
+                .orderByDesc("SUM(item.lineTotal)")
+                .orderByAsc("item.productNameSnapshot")
+                .setMaxResults(limit)
+                .getResultList();
+    }
+
+    public List<MethodRow> methods(UUID tenantId, UUID outletId, Instant start, Instant end,
+                                   OrderStatus status, PaymentMethod method) {
+        return paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .selectNew(MethodRow.class)
+                .with("payment.method")
+                .with("COUNT(payment.id)")
+                .with("COALESCE(SUM(salesOrder.subtotal - salesOrder.discountAmount), 0)")
+                .with("COALESCE(SUM(payment.amountPaid - payment.changeAmount), 0)")
+                .end()
+                .groupBy("payment.method")
+                .orderByAsc("payment.method")
+                .getResultList();
+    }
+
+    private CriteriaBuilder<Tuple> paidSalesQuery(UUID tenantId, UUID outletId, Instant start, Instant end,
+                                                   OrderStatus status, PaymentMethod method) {
+        CriteriaBuilder<Tuple> query = criteriaBuilderFactory.create(entityManager, Tuple.class)
+                .from(PaymentEntity.class, "payment")
+                .innerJoin("payment.salesOrder", "salesOrder")
+                .where("payment.tenant.id").eq(tenantId)
+                .where("payment.outlet.id").eq(outletId)
+                .where("salesOrder.tenant.id").eq(tenantId)
+                .where("salesOrder.outlet.id").eq(outletId)
+                .where("payment.paidAt").ge(start)
+                .where("payment.paidAt").lt(end)
+                .where("salesOrder.paymentStatus").eq(PaymentStatus.PAID)
+                .where("salesOrder.status").notEq(OrderStatus.CANCELLED);
+        if (status != null) {
+            query.where("salesOrder.status").eq(status);
+        }
+        if (method != null) {
+            query.where("payment.method").eq(method);
+        }
+        return query;
+    }
+
+    public static class TransactionRow {
+        public final UUID orderId;
+        public final String orderNumber;
+        public final OrderStatus status;
+        public final PaymentMethod method;
+        public final BigDecimal subtotal;
+        public final BigDecimal total;
+        public final BigDecimal amountPaid;
+        public final BigDecimal change;
+        public final BigDecimal discount;
+        public final BigDecimal tax;
+        public final BigDecimal service;
+        public final String receipt;
+        public final Instant paidAt;
+
+        public TransactionRow(UUID orderId, String orderNumber, OrderStatus status, PaymentMethod method,
+                              BigDecimal subtotal, BigDecimal total, BigDecimal amountPaid, BigDecimal change,
+                              BigDecimal discount, BigDecimal tax, BigDecimal service, String receipt, Instant paidAt) {
+            this.orderId = orderId;
+            this.orderNumber = orderNumber;
+            this.status = status;
+            this.method = method;
+            this.subtotal = subtotal;
+            this.total = total;
+            this.amountPaid = amountPaid;
+            this.change = change;
+            this.discount = discount;
+            this.tax = tax;
+            this.service = service;
+            this.receipt = receipt;
+            this.paidAt = paidAt;
+        }
+    }
+
+    public static class SummaryRow {
+        public final BigDecimal subtotal;
+        public final BigDecimal netSales;
+        public final BigDecimal total;
+        public final BigDecimal amountCollected;
+        public final long count;
+        public final BigDecimal discount;
+        public final BigDecimal tax;
+        public final BigDecimal service;
+
+        public SummaryRow(BigDecimal subtotal, BigDecimal netSales, BigDecimal total, BigDecimal amountCollected,
+                          long count, BigDecimal discount, BigDecimal tax, BigDecimal service) {
+            this.subtotal = subtotal;
+            this.netSales = netSales;
+            this.total = total;
+            this.amountCollected = amountCollected;
+            this.count = count;
+            this.discount = discount;
+            this.tax = tax;
+            this.service = service;
+        }
+    }
+
+    public static class ProductRow {
+        public final UUID productId;
+        public final String name;
+        public final long quantity;
+        public final BigDecimal grossSales;
+
+        public ProductRow(UUID productId, String name, long quantity, BigDecimal grossSales) {
+            this.productId = productId;
+            this.name = name;
+            this.quantity = quantity;
+            this.grossSales = grossSales;
+        }
+    }
+
+    public static class MethodRow {
+        public final PaymentMethod method;
+        public final long count;
+        public final BigDecimal netSales;
+        public final BigDecimal amountCollected;
+
+        public MethodRow(PaymentMethod method, long count, BigDecimal netSales, BigDecimal amountCollected) {
+            this.method = method;
+            this.count = count;
+            this.netSales = netSales;
+            this.amountCollected = amountCollected;
+        }
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/repository/FnbOrderRepository.java
+package org.lite.project.cashiersaas.repository;
+
+import com.blazebit.persistence.CriteriaBuilderFactory;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.QOrderItemEntity;
+import org.lite.project.cashiersaas.entity.fnb.QOrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.QSalesOrderEntity;
+import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.fnb.TableQrTokenEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.OrderSource;
+import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentStatus;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+@RequiredArgsConstructor
+public class FnbOrderRepository {
+    private static final QSalesOrderEntity ORDER = new QSalesOrderEntity("salesOrder");
+    private static final QOrderItemEntity ITEM = new QOrderItemEntity("orderItem");
+    private static final QOrderItemOptionEntity OPTION = new QOrderItemOptionEntity("orderItemOption");
+    private final EntityManager entityManager;
+    private final CriteriaBuilderFactory criteriaBuilderFactory;
+
+    // A tenant row lock serializes checkout with the same idempotency key even across QR tables.
+    public void lockTenant(UUID tenantId) {
+        TenantEntity tenant = criteriaBuilderFactory.create(entityManager, TenantEntity.class, "tenant")
+                .where("tenant.id").eq(tenantId).setMaxResults(1).getResultList().stream()
+                .findFirst().orElseThrow(ResourceNotFoundException::new);
+        entityManager.refresh(tenant, LockModeType.PESSIMISTIC_WRITE);
+    }
+
+    public void refreshQr(TableQrTokenEntity qr) {
+        entityManager.refresh(qr);
+        entityManager.refresh(qr.getOutlet());
+        if (qr.getDiningTable() != null) entityManager.refresh(qr.getDiningTable());
+    }
+
+    public Optional<SalesOrderEntity> byIdempotency(UUID tenant, String key) {
+        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
+                .where(ORDER.tenant.id.toString()).eq(tenant).where(ORDER.idempotencyKey.toString()).eq(key)
+                .setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    public Optional<SalesOrderEntity> byStatusDigest(String digest) {
+        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
+                .where(ORDER.publicStatusTokenDigest.toString()).eq(digest)
+                .setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    public Optional<SalesOrderEntity> byId(UUID tenantId, UUID outletId, UUID orderId) {
+        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
+                .where(ORDER.tenant.id.toString()).eq(tenantId).where(ORDER.outlet.id.toString()).eq(outletId)
+                .where(ORDER.id.toString()).eq(orderId).setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    public List<SalesOrderEntity> page(UUID tenantId, UUID outletId, int page, int size,
+                                       OrderStatus status, PaymentStatus paymentStatus, OrderSource source) {
+        var query = criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
+                .where(ORDER.tenant.id.toString()).eq(tenantId).where(ORDER.outlet.id.toString()).eq(outletId);
+        if (status != null) query.where(ORDER.status.toString()).eq(status);
+        if (paymentStatus != null) query.where(ORDER.paymentStatus.toString()).eq(paymentStatus);
+        if (source != null) query.where(ORDER.source.toString()).eq(source);
+        return query.orderByDesc(ORDER.createdAt.toString()).orderByDesc(ORDER.id.toString())
+                .setFirstResult(page * size).setMaxResults(size + 1).getResultList();
+    }
+
+    public List<OrderItemEntity> items(UUID tenantId, UUID outletId, List<UUID> orderIds) {
+        if (orderIds.isEmpty()) return List.of();
+        return criteriaBuilderFactory.create(entityManager, OrderItemEntity.class, ITEM.getMetadata().getName())
+                .where(ITEM.tenant.id.toString()).eq(tenantId).where(ITEM.outlet.id.toString()).eq(outletId)
+                .where(ITEM.salesOrder.id.toString()).in(orderIds).orderByAsc(ITEM.createdAt.toString()).getResultList();
+    }
+
+    public List<OrderItemOptionEntity> itemOptions(UUID tenantId, UUID outletId, List<UUID> itemIds) {
+        if (itemIds.isEmpty()) return List.of();
+        return criteriaBuilderFactory.create(entityManager, OrderItemOptionEntity.class, OPTION.getMetadata().getName())
+                .where(OPTION.tenant.id.toString()).eq(tenantId).where(OPTION.outlet.id.toString()).eq(outletId)
+                .where(OPTION.orderItem.id.toString()).in(itemIds).orderByAsc(OPTION.createdAt.toString()).getResultList();
+    }
+
+    public List<SalesOrderEntity> activeForTable(UUID tenantId, UUID outletId, UUID tableId) {
+        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
+                .where(ORDER.tenant.id.toString()).eq(tenantId)
+                .where(ORDER.outlet.id.toString()).eq(outletId)
+                .where(ORDER.diningTable.id.toString()).eq(tableId)
+                .where(ORDER.status.toString()).notEq(OrderStatus.CANCELLED)
+                .where(ORDER.status.toString()).notEq(OrderStatus.COMPLETED).getResultList();
+    }
+
+    public void refreshOrder(SalesOrderEntity order) {
+        entityManager.refresh(order);
+    }
+
+    public void persist(SalesOrderEntity order) {
+        entityManager.persist(order);
+    }
+
+    public void persist(OrderItemEntity item) {
+        entityManager.persist(item);
+    }
+
+    public void persist(OrderItemOptionEntity option) {
+        entityManager.persist(option);
+    }
+
+    public void flush() {
+        entityManager.flush();
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/entity/fnb/SalesOrderEntity.java
+package org.lite.project.cashiersaas.entity.fnb;
+
+import org.lite.project.cashiersaas.entity.shared.MutableBaseEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import org.lite.project.cashiersaas.enums.OrderSource;
+import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentStatus;
+import org.lite.project.cashiersaas.enums.ServiceType;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+
+@Getter
+@Entity
+@Table(name="sales_orders", uniqueConstraints={@UniqueConstraint(name="uk_sales_orders_outlet_order_number",columnNames={"outlet_id","order_number"}),@UniqueConstraint(name="uk_sales_orders_tenant_idempotency",columnNames={"tenant_id","idempotency_key"})})
+@NoArgsConstructor
+public class SalesOrderEntity extends MutableBaseEntity {
+    @ManyToOne(fetch=FetchType.LAZY,optional=false)
+    @JoinColumn(name="tenant_id",nullable=false)
+    private TenantEntity tenant;
+    @ManyToOne(fetch=FetchType.LAZY,optional=false)
+    @JoinColumn(name="outlet_id",nullable=false)
+    private OutletEntity outlet;
+    @ManyToOne(fetch=FetchType.LAZY)
+    @JoinColumn(name="dining_table_id")
+    private DiningTableEntity diningTable;
+    @Column(name="order_number",nullable=false,length=32)
+    private String orderNumber;
+    @Column(name="idempotency_key",nullable=false,length=128)
+    private String idempotencyKey;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable=false,length=24)
+    private OrderSource source;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable=false,length=24)
+    private ServiceType serviceType;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable=false,length=24)
+    private OrderStatus status = OrderStatus.NEW;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable=false,length=24)
+    private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
+    @Column(length=80)
+    private String customerLabel;
+    @Column(precision=19,scale=2,nullable=false)
+    private BigDecimal subtotal;
+    @Column(precision=19,scale=2,nullable=false)
+    private BigDecimal taxAmount;
+    @Column(name="tax_rate_snapshot", precision=5,scale=2,nullable=false)
+    private BigDecimal taxRateSnapshot;
+    @Column(precision=19,scale=2,nullable=false)
+    private BigDecimal serviceChargeAmount;
+    @Column(name="service_charge_rate_snapshot", precision=5,scale=2,nullable=false)
+    private BigDecimal serviceChargeRateSnapshot;
+    @Column(precision=19,scale=2,nullable=false)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+    @Column(precision=19,scale=2,nullable=false)
+    private BigDecimal total;
+    @Column(length=500)
+    private String cancellationReason;
+    @Column(name="request_fingerprint",length=64)
+    private String requestFingerprint;
+    @Column(name="public_status_token_digest",length=64,unique=true)
+    private String publicStatusTokenDigest;
+    @Column(name="public_status_token_expires_at")
+    private Instant publicStatusTokenExpiresAt;
+
+    public record PublicQrDetails(DiningTableEntity table, String idempotencyKey, String fingerprint,
+                                  String orderNumber, String statusTokenDigest, Instant statusTokenExpiry,
+                                  String customerLabel) { }
+
+    public record Charges(BigDecimal subtotal, BigDecimal tax, BigDecimal serviceCharge) { }
+
+    public record PosDetails(DiningTableEntity table, String idempotencyKey, String fingerprint,
+                             String orderNumber, ServiceType serviceType, String customerLabel) { }
+
+    public static SalesOrderEntity publicQr(TenantEntity tenant, OutletEntity outlet,
+                                            PublicQrDetails details, Charges charges) {
+        SalesOrderEntity order = new SalesOrderEntity();
+        order.tenant = tenant; order.outlet = outlet; order.diningTable = details.table();
+        order.idempotencyKey = details.idempotencyKey();
+        order.requestFingerprint = details.fingerprint(); order.orderNumber = details.orderNumber();
+        order.publicStatusTokenDigest = details.statusTokenDigest();
+        order.publicStatusTokenExpiresAt = details.statusTokenExpiry();
+        order.source = OrderSource.QR; order.serviceType = ServiceType.DINE_IN;
+        order.customerLabel = details.customerLabel(); order.subtotal = charges.subtotal();
+        order.taxAmount = charges.tax(); order.serviceChargeAmount = charges.serviceCharge();
+        order.total = charges.subtotal().add(charges.tax()).add(charges.serviceCharge());
+        return order;
+    }
+
+    public static SalesOrderEntity pos(TenantEntity tenant, OutletEntity outlet, PosDetails details, Charges charges) {
+        if (details.serviceType() == null || (details.serviceType() == ServiceType.TAKEAWAY && details.table() != null)) {
+            throw new InvalidOperationException("Tipe layanan dan meja tidak valid.");
+        }
+        SalesOrderEntity order = new SalesOrderEntity();
+        order.tenant = tenant; order.outlet = outlet; order.diningTable = details.table();
+        order.idempotencyKey = details.idempotencyKey(); order.requestFingerprint = details.fingerprint();
+        order.orderNumber = details.orderNumber(); order.source = OrderSource.POS;
+        order.serviceType = details.serviceType(); order.customerLabel = details.customerLabel();
+        order.subtotal = charges.subtotal(); order.taxAmount = charges.tax();
+        order.serviceChargeAmount = charges.serviceCharge();
+        order.total = charges.subtotal().add(charges.tax()).add(charges.serviceCharge());
+        return order;
+    }
+
+    public void snapshotRates(BigDecimal taxRate, BigDecimal serviceChargeRate) {
+        requireNewUnpaid();
+        if (taxRateSnapshot != null || serviceChargeRateSnapshot != null)
+            throw new InvalidOperationException("Snapshot tarif pesanan sudah tersedia.");
+        requireNonNegative(taxRate, "Tarif pajak tidak valid.");
+        requireNonNegative(serviceChargeRate, "Tarif biaya layanan tidak valid.");
+        taxRateSnapshot = taxRate;
+        serviceChargeRateSnapshot = serviceChargeRate;
+    }
+
+    public void selectPublicServiceType(ServiceType type) {
+        if (type == null || (diningTable != null && type != ServiceType.DINE_IN))
+            throw new InvalidOperationException("Tipe layanan tidak valid.");
+        serviceType = type;
+    }
+
+    public void confirmPaid() {
+        requireNewUnpaid();
+        paymentStatus = PaymentStatus.PAID;
+        status = OrderStatus.CONFIRMED;
+    }
+
+    public void startPreparing() {
+        requirePaidStatus(OrderStatus.CONFIRMED);
+        status = OrderStatus.PREPARING;
+    }
+
+    public void markReady() {
+        requirePaidStatus(OrderStatus.PREPARING);
+        status = OrderStatus.READY;
+    }
+
+    public void complete() {
+        requirePaidStatus(OrderStatus.READY);
+        status = OrderStatus.COMPLETED;
+    }
+
+    public void cancel(String reason) {
+        requireNewUnpaid();
+        if (reason == null || reason.isBlank()) throw new InvalidOperationException("Alasan pembatalan wajib diisi.");
+        cancellationReason = reason.trim();
+        status = OrderStatus.CANCELLED;
+    }
+
+    public void applyDiscount(BigDecimal amount) {
+        requireNewUnpaid();
+        requireNonNegative(amount, "Diskon tidak valid.");
+        if (amount.compareTo(subtotal) > 0) throw new InvalidOperationException("Diskon melebihi subtotal.");
+        if (taxRateSnapshot == null || serviceChargeRateSnapshot == null)
+            throw new InvalidOperationException("Snapshot tarif pesanan belum tersedia.");
+        discountAmount = amount;
+        BigDecimal discountedSubtotal = subtotal.subtract(amount);
+        taxAmount = percentage(discountedSubtotal, taxRateSnapshot);
+        serviceChargeAmount = percentage(discountedSubtotal, serviceChargeRateSnapshot);
+        total = discountedSubtotal.add(taxAmount).add(serviceChargeAmount);
+    }
+
+    private void requireNewUnpaid() {
+        if (status != OrderStatus.NEW || paymentStatus != PaymentStatus.UNPAID)
+            throw new InvalidOperationException("Perubahan hanya dapat dilakukan pada pesanan baru yang belum dibayar.");
+    }
+
+    private void requirePaidStatus(OrderStatus expected) {
+        if (paymentStatus != PaymentStatus.PAID || status != expected)
+            throw new InvalidOperationException("Transisi status pesanan tidak valid.");
+    }
+
+    private static void requireNonNegative(BigDecimal value, String message) {
+        if (value == null || value.signum() < 0) throw new InvalidOperationException(message);
+    }
+
+    private static BigDecimal percentage(BigDecimal amount, BigDecimal rate) {
+        return amount.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+    }
+}
+

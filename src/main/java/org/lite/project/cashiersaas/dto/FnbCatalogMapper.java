@@ -2,6 +2,10 @@ package org.lite.project.cashiersaas.dto;
 
 import org.lite.project.cashiersaas.dto.response.*;
 import org.lite.project.cashiersaas.entity.fnb.*;
+import org.lite.project.cashiersaas.entity.shared.catalog.CategoryEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 
 public final class FnbCatalogMapper {
     private FnbCatalogMapper() { }

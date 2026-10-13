@@ -1,12 +1,16 @@
 # Product Requirements Document — SaaS Cashier MVP
 
+> Keputusan operasional aktif, 30 September 2026: backend F&B memakai Pay First wajib. QR outlet tidak memerlukan meja; QR meja tetap didukung. Owner/Cashier dapat membuat order. Order NEW/UNPAID hanya masuk produksi setelah pembayaran manual tercatat atomik sebagai CONFIRMED/PAID. Lifecycle berikutnya PREPARING -> READY -> COMPLETED, dan COMPLETED wajib READY + PAID. Owner saja menentukan diskon sebelum pajak/service charge. Owner dan Cashier boleh membatalkan NEW/UNPAID dengan alasan/audit; order dibayar tidak dibatalkan karena refund di luar scope. Push staf menggunakan WebSocket dengan REST resync/polling fallback, bukan SSE. Fokus tahap ini backend; frontend terpisah. Keputusan ini menggantikan bagian lama yang menyebut bayar setelah makan, meja wajib, atau konfirmasi sebelum pembayaran. Role aktif tetap SUPERADMIN, OWNERMERCHANT, CASHIER.
+
 > Keputusan prioritas, 28 September 2026: F&B kembali menjadi produk pertama dan alur MVP di dokumen ini menjadi target implementasi aktif. Pengembangan Laundry ditunda; onboarding dan akses operasional Laundry dinonaktifkan tanpa menghapus data historis. Catatan arah Laundry di bawah dipertahankan sebagai riwayat keputusan.
 
 > Catatan arah produk, 16 September 2026: pengguna menetapkan platform multi-bisnis dengan Laundry sebagai produk pertama. [Rancangan database Laundry v1](docs/database/README.md) mendokumentasikan scope dan model data baru untuk pekerjaan desain ini. Isi F&B di bawah dipertahankan sebagai referensi bisnis berikutnya; belum menjadi PRD laundry dan bukan tanda fitur laundry sudah diimplementasikan. Untuk desain database baru, keputusan laundry terbaru tersebut menggantikan batas scope F&B lama (termasuk langganan gateway, antar-jemput, dan inventory dasar).
 
 > Keputusan Freetier, 23 September 2026: Freetier adalah paket gratis untuk pencatatan kasir biasa. Kasir memasukkan transaksi dan nama pelanggan secara manual, lalu mencatat uang yang diterima dari pelanggan secara manual. Data transaksi disimpan di database SaaS dan dapat dibuka kembali setelah login, termasuk dari perangkat lain yang diizinkan. Aktivasi Freetier tidak memerlukan invoice atau pembayaran langganan melalui gateway platform. Batas fitur lain masih perlu dipastikan; aturan F&B di bawah tidak otomatis menjadi hak Freetier Laundry.
 
-**Versi:** 0.1  
+> Keputusan implementasi, 6 Oktober 2026: lanjutkan backend POS F&B, pembayaran Pay First, proses dapur, struk, dan laporan penjualan. Payment gateway memakai mock terlebih dahulu dengan hasil tertunda, berhasil, atau gagal; integrasi provider nyata belum termasuk tugas ini. Pembayaran berhasil tetap menjadi syarat masuk produksi. Frontend tetap terpisah.
+
+**Versi:** 0.1
 **Status:** Draft awal  
 **Tanggal:** 13 September 2026  
 **Fokus:** MVP untuk bisnis F&B skala kecil dengan 1–3 outlet

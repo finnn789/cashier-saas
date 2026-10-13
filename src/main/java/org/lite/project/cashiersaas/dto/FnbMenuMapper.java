@@ -3,10 +3,20 @@ package org.lite.project.cashiersaas.dto;
 import org.lite.project.cashiersaas.dto.response.FnbTableResponse;
 import org.lite.project.cashiersaas.dto.response.PublicMenuResponse;
 import org.lite.project.cashiersaas.entity.fnb.*;
+import org.lite.project.cashiersaas.entity.shared.catalog.CategoryEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import java.util.List;
 
 public final class FnbMenuMapper {
     private FnbMenuMapper() { }
+    public static org.lite.project.cashiersaas.dto.response.FnbQrResponse qr(TableQrTokenEntity qr) {
+        var response = new org.lite.project.cashiersaas.dto.response.FnbQrResponse();
+        response.setQrType(qr.getQrType()); response.setToken(qr.getToken());
+        response.setMenuPath("/api/v1/public/fnb/menu/" + qr.getToken());
+        return response;
+    }
     public static FnbTableResponse table(DiningTableEntity table, TableQrTokenEntity qr) {
         FnbTableResponse response = new FnbTableResponse();
         response.setId(table.getId()); response.setName(table.getName());
@@ -19,7 +29,11 @@ public final class FnbMenuMapper {
                                           List<ProductOptionEntity> options) {
         PublicMenuResponse response = new PublicMenuResponse();
         response.setOutletName(qr.getOutlet().getName());
-        response.setTableName(qr.getDiningTable().getName());
+        response.setTableName(qr.getDiningTable() == null ? null : qr.getDiningTable().getName());
+        response.setQrType(qr.getQrType());
+        response.setServiceTypes(qr.getDiningTable() == null
+                ? List.of(org.lite.project.cashiersaas.enums.ServiceType.DINE_IN, org.lite.project.cashiersaas.enums.ServiceType.TAKEAWAY)
+                : List.of(org.lite.project.cashiersaas.enums.ServiceType.DINE_IN));
         response.setTaxRate(qr.getTenant().getTaxRate());
         response.setServiceChargeRate(qr.getTenant().getServiceChargeRate());
         response.setCategories(categories.stream().map(category -> {

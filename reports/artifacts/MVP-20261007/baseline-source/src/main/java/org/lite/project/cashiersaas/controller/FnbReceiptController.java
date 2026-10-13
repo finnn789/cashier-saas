@@ -1,0 +1,4 @@
+package org.lite.project.cashiersaas.controller;
+import lombok.RequiredArgsConstructor; import org.lite.project.cashiersaas.component.TenantPrincipal; import org.lite.project.cashiersaas.dto.response.FnbReceiptResponse; import org.lite.project.cashiersaas.service.FnbReceiptService; import org.lite.project.cashiersaas.shared.response.ApiResponse; import org.springframework.security.core.annotation.AuthenticationPrincipal; import org.springframework.web.bind.annotation.*; import java.util.UUID;
+@RestController @RequiredArgsConstructor @RequestMapping("/api/v1/cashier/outlets/{outletId}/fnb/orders")
+public class FnbReceiptController { private final FnbReceiptService receipts; @GetMapping("/{orderId}/receipt") public ApiResponse<FnbReceiptResponse> receipt(@AuthenticationPrincipal TenantPrincipal principal,@PathVariable UUID outletId,@PathVariable UUID orderId){return ApiResponse.success("Struk pesanan diambil.",receipts.receipt(principal,outletId,orderId));} }

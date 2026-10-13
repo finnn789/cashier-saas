@@ -9,9 +9,9 @@ import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.dto.request.CashierSaleLineRequest;
 import org.lite.project.cashiersaas.dto.request.CashierSaleRequest;
 import org.lite.project.cashiersaas.dto.response.CashierSaleResponse;
-import org.lite.project.cashiersaas.entity.laundry.CashierCatalogItemEntity;
-import org.lite.project.cashiersaas.entity.laundry.CashierSaleEntity;
-import org.lite.project.cashiersaas.entity.laundry.CashierSaleItemEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.CashierCatalogItemEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleItemEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 

@@ -83,6 +83,7 @@ public class FreeTierOnboardingService {
         }
         BusinessTypeEntity businessType = businessTypeRepository.findActiveByCode(typeCode)
                 .orElseThrow(() -> new OperationConflictException("Jenis bisnis F&B belum tersedia."));
+
         TenantEntity tenant = TenantEntity.startFreeTier(owner, businessType, key, fingerprint);
         tenantRepository.persist(tenant);
         membershipRepository.persist(TenantMembershipEntity.grantOwner(owner, tenant));

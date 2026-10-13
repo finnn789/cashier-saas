@@ -4,9 +4,9 @@ import org.lite.project.cashiersaas.dto.response.CashierCatalogItemResponse;
 import org.lite.project.cashiersaas.dto.response.CashierSaleLineResponse;
 import org.lite.project.cashiersaas.dto.response.CashierSaleResponse;
 import org.lite.project.cashiersaas.dto.response.OutletResponse;
-import org.lite.project.cashiersaas.entity.laundry.CashierCatalogItemEntity;
-import org.lite.project.cashiersaas.entity.laundry.CashierSaleEntity;
-import org.lite.project.cashiersaas.entity.laundry.CashierSaleItemEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.CashierCatalogItemEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleItemEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 
 import java.util.List;

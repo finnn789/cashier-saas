@@ -3,10 +3,10 @@ package org.lite.project.cashiersaas.repository;
 import com.blazebit.persistence.CriteriaBuilderFactory;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
-import org.lite.project.cashiersaas.entity.laundry.CashierSaleEntity;
-import org.lite.project.cashiersaas.entity.laundry.CashierSaleItemEntity;
-import org.lite.project.cashiersaas.entity.laundry.QCashierSaleEntity;
-import org.lite.project.cashiersaas.entity.laundry.QCashierSaleItemEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleItemEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.QCashierSaleEntity;
+import org.lite.project.cashiersaas.entity.shared.sales.QCashierSaleItemEntity;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;

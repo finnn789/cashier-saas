@@ -39,5 +39,10 @@ public class FnbTableRepository {
                 .setMaxResults(1).getResultList().stream().findFirst();
     }
     public void persist(DiningTableEntity table) { entityManager.persist(table); }
+    public Optional<TableQrTokenEntity> outletQr(UUID tenant, UUID outlet) {
+        return criteriaBuilderFactory.create(entityManager, TableQrTokenEntity.class, "qr")
+                .where("qr.tenant.id").eq(tenant).where("qr.outlet.id").eq(outlet)
+                .where("qr.qrType").eq("OUTLET").setMaxResults(1).getResultList().stream().findFirst();
+    }
     public void persist(TableQrTokenEntity qr) { entityManager.persist(qr); }
 }

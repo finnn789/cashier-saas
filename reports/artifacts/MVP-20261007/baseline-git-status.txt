@@ -1,0 +1,112 @@
+ M .gitignore
+ M AGENTS.md
+ M PRD-MVP.md
+ D PROJECT_MEMORY.md
+ M pom.xml
+ M src/main/java/org/lite/project/cashiersaas/configuration/SecurityConfiguration.java
+ M src/main/java/org/lite/project/cashiersaas/dto/FnbMenuMapper.java
+ M src/main/java/org/lite/project/cashiersaas/dto/request/PublicOrderRequest.java
+ M src/main/java/org/lite/project/cashiersaas/dto/response/PublicMenuResponse.java
+ M src/main/java/org/lite/project/cashiersaas/entity/fnb/DiningTableEntity.java
+ M src/main/java/org/lite/project/cashiersaas/entity/fnb/DiscountEntity.java
+ M src/main/java/org/lite/project/cashiersaas/entity/fnb/PaymentEntity.java
+ M src/main/java/org/lite/project/cashiersaas/entity/fnb/SalesOrderEntity.java
+ M src/main/java/org/lite/project/cashiersaas/entity/fnb/TableQrTokenEntity.java
+ M src/main/java/org/lite/project/cashiersaas/entity/shared/audit/AuditLogEntity.java
+ M src/main/java/org/lite/project/cashiersaas/enums/PaymentMethod.java
+ M src/main/java/org/lite/project/cashiersaas/repository/BusinessTypeRepository.java
+ M src/main/java/org/lite/project/cashiersaas/repository/FnbOrderRepository.java
+ M src/main/java/org/lite/project/cashiersaas/repository/FnbTableRepository.java
+ M src/main/java/org/lite/project/cashiersaas/repository/MerchantSelectionRepository.java
+ M src/main/java/org/lite/project/cashiersaas/service/AuthSessionService.java
+ M src/main/java/org/lite/project/cashiersaas/service/MerchantAccessGuard.java
+ M src/main/java/org/lite/project/cashiersaas/service/PublicOrderService.java
+ M src/main/java/org/lite/project/cashiersaas/service/PublicQrAccessService.java
+ M src/main/resources/application.properties
+D  src/main/resources/db/migration/V10__fnb_public_order_tokens.sql
+D  src/main/resources/db/migration/V1__create_identity_foundation.sql
+D  src/main/resources/db/migration/V2__create_mvp_core_schema.sql
+D  src/main/resources/db/migration/V3__create_global_user_identity.sql
+D  src/main/resources/db/migration/V4__use_staff_users_as_global_identity.sql
+D  src/main/resources/db/migration/V5__free_tier_laundry_cashier.sql
+D  src/main/resources/db/migration/V6__onboarding_intent_and_cashier_invitations.sql
+D  src/main/resources/db/migration/V7__auth_refresh_sessions.sql
+D  src/main/resources/db/migration/V8__prioritize_fnb_business_type.sql
+D  src/main/resources/db/migration/V9__fnb_catalog_ownership_and_versions.sql
+ M src/test/java/org/lite/project/cashiersaas/unit/service/MerchantAccessGuardTest.java
+?? .ai/
+?? .claude-flow/
+?? docs/database/liquibase-schema-diff.md
+?? docs/fnb-operations.md
+?? docs/fnb-pay-first-backend.md
+?? docs/ruflo-setup.md
+?? postman/
+?? reports/
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbDiscountController.java
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbKitchenController.java
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbOrderQrController.java
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbPaymentController.java
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbReceiptController.java
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbSalesReportController.java
+?? src/main/java/org/lite/project/cashiersaas/controller/FnbStaffOrderController.java
+?? src/main/java/org/lite/project/cashiersaas/dto/FnbKitchenMapper.java
+?? src/main/java/org/lite/project/cashiersaas/dto/FnbPaymentMapper.java
+?? src/main/java/org/lite/project/cashiersaas/dto/FnbReceiptMapper.java
+?? src/main/java/org/lite/project/cashiersaas/dto/FnbSalesReportMapper.java
+?? src/main/java/org/lite/project/cashiersaas/dto/FnbStaffOrderMapper.java
+?? src/main/java/org/lite/project/cashiersaas/dto/request/FnbCancelOrderRequest.java
+?? src/main/java/org/lite/project/cashiersaas/dto/request/FnbDiscountRequest.java
+?? src/main/java/org/lite/project/cashiersaas/dto/request/FnbMockPaymentResolutionRequest.java
+?? src/main/java/org/lite/project/cashiersaas/dto/request/FnbPaymentRequest.java
+?? src/main/java/org/lite/project/cashiersaas/dto/request/FnbPosOrderRequest.java
+?? src/main/java/org/lite/project/cashiersaas/dto/request/FnbSalesReportFilter.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbCancellationResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbDiscountResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbKitchenItemResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbKitchenOptionResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbKitchenOrderResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbKitchenPageResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbOrderPageResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbPaymentResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbQrResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbReceiptItemResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbReceiptOptionResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbReceiptResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbSalesCsvResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbSalesPaymentBreakdownResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbSalesProductResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbSalesReportResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbSalesSummaryResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbSalesTransactionResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbStaffOrderItemResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbStaffOrderOptionResponse.java
+?? src/main/java/org/lite/project/cashiersaas/dto/response/FnbStaffOrderResponse.java
+?? src/main/java/org/lite/project/cashiersaas/entity/fnb/FnbGatewayAttemptEntity.java
+?? src/main/java/org/lite/project/cashiersaas/enums/FnbGatewayOutcome.java
+?? src/main/java/org/lite/project/cashiersaas/repository/FnbDiscountRepository.java
+?? src/main/java/org/lite/project/cashiersaas/repository/FnbGatewayAttemptRepository.java
+?? src/main/java/org/lite/project/cashiersaas/repository/FnbKitchenRepository.java
+?? src/main/java/org/lite/project/cashiersaas/repository/FnbPaymentRepository.java
+?? src/main/java/org/lite/project/cashiersaas/repository/FnbSalesReportRepository.java
+?? src/main/java/org/lite/project/cashiersaas/repository/MerchantAccessRepository.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbDiscountService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbKitchenService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbOrderCancellationService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbOrderPricingService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbOrderQrService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbPaymentService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbPosOrderService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbReceiptService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbSalesReportService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbStaffOrderService.java
+?? src/main/java/org/lite/project/cashiersaas/service/FnbTableReconciliationService.java
+?? src/main/java/org/lite/project/cashiersaas/service/MockFnbGatewayService.java
+?? src/main/resources/db/
+?? src/main/resources/liquibase-diff.properties
+?? src/test/java/org/lite/project/cashiersaas/unit/dto/
+?? src/test/java/org/lite/project/cashiersaas/unit/entity/
+?? src/test/java/org/lite/project/cashiersaas/unit/service/FnbOrderQrServiceTest.java
+?? src/test/java/org/lite/project/cashiersaas/unit/service/PublicOrderServiceTest.java
+?? src/test/java/org/lite/project/cashiersaas/unit/service/PublicOrderTokenServiceTest.java
+?? src/test/java/org/lite/project/cashiersaas/unit/service/PublicQrAccessServiceTest.java
+?? tasks/

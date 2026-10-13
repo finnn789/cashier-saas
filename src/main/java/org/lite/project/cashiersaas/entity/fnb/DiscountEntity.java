@@ -36,4 +36,12 @@ public class DiscountEntity extends BaseEntity {
     @ManyToOne(fetch=FetchType.LAZY,optional=false)
     @JoinColumn(name="granted_by_staff_user_id",nullable=false)
     private StaffUserEntity grantedBy;
+
+    public static DiscountEntity grant(TenantEntity tenant, OutletEntity outlet, SalesOrderEntity order,
+            DiscountType type, BigDecimal value, BigDecimal amount, String reason, StaffUserEntity grantedBy) {
+        DiscountEntity discount = new DiscountEntity();
+        discount.tenant = tenant; discount.outlet = outlet; discount.salesOrder = order; discount.type = type;
+        discount.value = value; discount.amount = amount; discount.reason = reason; discount.grantedBy = grantedBy;
+        return discount;
+    }
 }

@@ -1,0 +1,867 @@
+﻿SOURCE FILE: tasks/TASK-RUFLO-ARCH-SECURITY.md
+# Read-only architecture reviewer: identity and tenant boundaries
+
+Assigned by orchestrator on 2026-10-07. Canonical baseline memory version: 2.
+Ruflo swarm: swarm-1791361273309-rota2f.
+Execution: authenticated Codex CLI, independent fresh context. This is not Ruflo agent_execute.
+
+Read AGENTS.md, .ai/MEMORY.md, .ai/ARCHITECTURE.md and .codex/agents/mvp_architect.toml once. Current instructions override historical template details. PROJECT_MEMORY.md is deleted in the dirty working tree; do not restore it.
+
+Review current SecurityConfiguration, JwtConfiguration, TenantJwtAuthenticationConverter, JwtTokenService, AuthSessionService, MerchantAccessGuard and MerchantAccessRepository. Explain actual account/merchant/session/tenant/outlet boundaries, with concrete file references. Identify material gaps in the architecture snapshot or limits of source evidence. Do not read .env, auth.json, secrets, datasource credentials or liquibase-diff.properties.
+
+Allowlist: read-only source/configuration inspection, git status/diff, final review response. No filesystem writes, no builds/tests/startup/database/network operations, no nested agents or MCP mutation, no canonical updates. Existing application changes and staged migration deletions are user work and must be preserved. No code implementation is assigned. The host persists final response only to reports/RUFLO-ARCH-SECURITY.md.
+
+Return a concise report: memory baseline; files inspected; architecture findings; corrections or unknowns; testing not run by policy; changed files none. Distinguish source observations from proposed improvements. Do not certify end-to-end readiness.
+
+SOURCE FILE: .ai/MEMORY.md
+# Project memory
+
+Memory version: 2
+Updated: 2026-10-07 (Asia/Jakarta)
+
+## Evidence-qualified state
+
+- This entry point was absent at session start, as were TASKS.md and context/INDEX.md. Application milestone state has not been reconstructed or reviewed in this infrastructure task.
+- Ruflo CLI 3.54.1 configured for this Codex project in `.codex/config.toml`; runtime config at `.claude-flow/config.yaml`.
+- Verified through the configured launcher: MCP handshake, 358 tools, memory store/retrieve/search, keyword hooks_route. Backend: sql.js + HNSW on Windows.
+- Ruflo MCP tools are now callable in this chat. Hierarchical architecture swarm and two Sonnet reviewer registrations succeeded; actual agent_execute failed because no LLM provider is configured. No worker review ran.
+- Source-reviewed architecture snapshot: `.ai/ARCHITECTURE.md`. Java 17 / Boot 4.1.1 modular monolith, controller/service/repository/DTO layers, account/merchant JWT scopes, membership guards, F&B Pay First shared QR/POS order model, JPA/Blaze-Persistence PostgreSQL persistence. This is structural evidence, not runtime acceptance.
+- Codebase Memory index is older than current source (missing current payment/kitchen classes). Migration history/deployment, real-time push and full tenant-isolation proof remain unverified. PRD/policy differences are documented in the snapshot.
+- Existing dirty application changes were preserved. No Maven, unit, API, or integration tests ran.
+- Detailed setup evidence and limitations: `docs/ruflo-setup.md`.
+
+## Next action
+
+Configure an LLM provider through the approved credential mechanism before Ruflo worker execution. Refresh structural index and review migration history/product-document differences before selecting implementation work. Application milestone acceptance remains unassessed.
+
+SOURCE FILE: .ai/ARCHITECTURE.md
+# Architecture snapshot
+
+Reviewed: 2026-10-07 (Asia/Jakarta). Memory version: 2.
+Evidence: current working-tree source, pom.xml, AGENTS.md, PRD-MVP.md, and Codebase Memory graph. This is a structural review, not runtime or security certification.
+
+## Application structure
+
+One Java 17 / Spring Boot 4.1.1 backend: a modular monolith organized in existing top-level packages under `org.lite.project.cashiersaas`.
+
+```mermaid
+flowchart LR
+    HTTP[Staff or public HTTP client] --> Security[Spring Security / JWT]
+    Security --> Controller[controller]
+    Controller --> Service[service: use cases and transactions]
+    Service --> Guard[MerchantAccessGuard]
+    Service --> Repository[repository: JPA / Blaze-Persistence]
+    Repository --> DB[(PostgreSQL)]
+    Service --> Mapper[dto: explicit mappers]
+    Mapper --> Response[ApiResponse and named DTOs]
+```
+
+Controllers adapt HTTP and return `ApiResponse<T>`; services coordinate transactions, guards, persistence and explicit DTO mappers. Entities own named business transitions. Repositories use EntityManager and Blaze-Persistence; QueryDSL generated Q types support typed paths. `ApiResponse` omits null fields. Current exception classes reside in `exception/runtime`, with `GlobalExceptionHandler`; AGENTS.md instead prescribes `shared/exception/runtime` for the policy boundary. Do not silently move existing code during discovery.
+
+## Functional boundaries
+
+- Identity and sessions: RegisterService, LoginService, AuthSessionService, JwtTokenService, JWT configuration and conversion. Account scope supports onboarding and merchant selection; merchant scope carries tenant/outlet/membership context. Refresh tokens are persisted as digests and rotated; sessions support revocation. Stateless HTTP security does not mean refresh sessions have no database state.
+- Merchant foundation: tenant, outlet, tenant membership, membership outlet access, invitations, onboarding and subscription/free-tier services.
+- F&B catalog and QR: FnbCatalogService, FnbTableService, FnbOrderQrService, PublicQrAccessService. Public QR resolves tenant/outlet and optional table from validated server-side token context.
+- Shared F&B checkout: PublicOrderService and FnbPosOrderService use FnbOrderPricingService and SalesOrderEntity with line/option snapshots. Both sources feed the same operational order model.
+- Operations: FnbStaffOrderService, FnbDiscountService, FnbOrderCancellationService, FnbPaymentService, MockFnbGatewayService, FnbKitchenService and FnbTableReconciliationService.
+- Receipts and reports: FnbReceiptService and FnbSalesReportService/FnbSalesReportRepository. Paid-sales queries scope both payment and order to tenant/outlet, use payment time, require PAID and exclude CANCELLED.
+- Separate earlier cashier sales/catalog services and broader laundry/inventory/platform entity/schema areas remain present. Their existence does not establish active MVP acceptance or completed features.
+
+## Security and tenancy
+
+SecurityConfiguration owns stateless HTTP policy, BCrypt and CORS. JwtConfiguration wires HS256 signing/verification, mandatory environment secret, issuer/audience/time and required claims checks. TenantJwtAuthenticationConverter distinguishes ACCOUNT and MERCHANT scopes. Merchant conversion requires UUID subject, session, tenant, outlet and membership claims plus supported roles.
+
+Active role policy is exactly SUPERADMIN, OWNERMERCHANT and CASHIER. Platform routes require SUPERADMIN; merchant routes OWNERMERCHANT; cashier routes OWNERMERCHANT or CASHIER. Account-only routes use SCOPE_ACCOUNT. Public QR routes are anonymous and use token-scoped context.
+
+MerchantAccessGuard checks principal outlet and reloads authorized membership/outlet access through MerchantAccessRepository. Failed ownership/access checks use ResourceNotFoundException to avoid disclosing another tenant's records. Protected data context comes from the principal, public context from validated QR. This review sampled boundaries; exhaustive tenant-isolation proof remains pending.
+
+## Pay First state and consistency
+
+```text
+QR/POS checkout -> NEW + UNPAID
+successful settlement -> CONFIRMED + PAID
+kitchen -> PREPARING -> READY -> COMPLETED
+NEW + UNPAID -> CANCELLED (reason and audit in service)
+```
+
+SalesOrderEntity enforces these transitions. Discount and cancellation require NEW/UNPAID. Pricing uses BigDecimal, server-side availability/pricing and order snapshots. Checkout requires an idempotency key and stores a request fingerprint; changed-request key reuse conflicts. Payment supports replay/conflict checks and a separate mock gateway attempt model. Payment settlement records payment, audit and table reconciliation inside the service transaction.
+
+FnbOrderRepository locks the tenant row with PESSIMISTIC_WRITE. Checkout/payment/kitchen use this coordination; it serializes mutations for a tenant and is a potential throughput bottleneck. Entity uniqueness includes tenant/idempotency and outlet/order-number. Runtime concurrency and actual database constraint enforcement were not tested.
+
+## Persistence and delivery limits
+
+- PostgreSQL, Hibernate schema validation, open-in-view disabled. Flyway is enabled for runtime migration. Liquibase runtime is disabled; optional schema-diff Maven profile is diagnostic tooling.
+- Working tree has deletions of historical V1-V10 migrations and an untracked `V1__initial_schema.sql` containing a broad schema. Older docs report an unresolved authentic V11 conflict. Current database history was not inspected; migration/deployment readiness is unknown.
+- Existing graph contains 186 Java files and 10 SQL files; it does not contain current FnbPaymentService/FnbKitchenService classes. Use graph as navigation only, verify against source and refresh before relying on current call coverage.
+- Search of main source found no SseEmitter, WebSocket or TransactionalEventListener implementation. List/status endpoints exist for polling; push delivery after commit is not established.
+- PRD describes additional Manager/Kitchen roles and pay-after-meal flows; explicit active repository policy takes precedence for this snapshot: three roles and Pay First. Reconciliation of product documentation is pending, not a newly approved product decision.
+- No frontend package.json/tsx/vue/html files were found by repository file search. This snapshot covers backend architecture.
+
+## Ruflo evidence
+
+Swarm `swarm-1791361273309-rota2f` initialized with hierarchical topology, specialized strategy, maximum 3 agents. Memory search returned no prior architecture entries; keyword routing recommended security-architect. Registered Sonnet reviewers: `agent-1791361308449-h63kyb` (security) and `agent-1791361308340-gxo7t6` (operations).
+
+Actual agent_execute attempts failed: no LLM provider configured (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OLLAMA_API_KEY absent from Ruflo provider configuration). Registration is not executed review evidence. This snapshot was reviewed by the orchestrator using source and graph, not produced by those workers. No provider configuration, application code, SQL or tests changed. No builds, tests, startup or database commands ran.
+
+SOURCE FILE: .codex/agents/mvp_architect.toml
+name = "mvp_architect"
+description = "Read-only solution architect for new Cashier SaaS MVP features, schemas, API boundaries, security boundaries, and cross-cutting changes."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Design the smallest architecture that safely delivers the requested Cashier SaaS MVP slice.
+
+Read AGENTS.md, PRD-MVP.md, PROJECT_MEMORY.md, pom.xml, and the relevant implementation before making recommendations. Treat the active user request as the task boundary and the PRD as the product scope authority.
+
+Return a concise, implementation-ready architecture brief containing:
+- the acceptance criteria and assumptions;
+- affected modules, packages, and ownership boundaries;
+- domain entities, database constraints, and transaction boundaries;
+- API contracts, authentication, role authorization, tenant and outlet scoping;
+- state transitions, idempotency, audit, money, and concurrency requirements;
+- real-time publication boundary when applicable;
+- testing seams, important negative cases, and a safe implementation order.
+
+End the brief with `READY` when implementation can proceed or `NEEDS_PRODUCT_DECISION` followed by the single blocking decision. Include a unit/API test matrix mapped to the acceptance criteria.
+
+Prefer a modular monolith and vertical slices. Reuse existing project patterns once they exist. Do not introduce microservices, event infrastructure, generic frameworks, or dependencies without a demonstrated requirement.
+
+Require named public DTO classes with Lombok @Getter and @Setter, never records or wildcard generic types (`<?>`, `? extends`, `? super`). Keep DTOs in feature-local dto/request and dto/response packages. Recommend controller -> service -> repository boundaries, explicit mappers, composition, and focused policy/guard classes. Recommend Strategy and a narrow factory only for concrete business variations; reject generic base-service and helper-dump designs.
+
+Apply the active roles exactly: SUPERADMIN, OWNERMERCHANT, and CASHIER. For protected APIs, require stateless Bearer JWT validation and tenant identity sourced from the validated principal. Keep HTTP security policy in SecurityConfiguration and JWT bean wiring in JwtConfiguration.
+
+Stay read-only. Do not edit files or implement the feature. Identify open decisions only when they materially affect the public contract, security boundary, or persistent schema. Give the parent agent one recommended option with its tradeoff instead of returning an unranked list.
+"""
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/configuration/SecurityConfiguration.java
+package org.lite.project.cashiersaas.configuration;
+
+import org.lite.project.cashiersaas.enums.Role;
+import org.lite.project.cashiersaas.component.ApiSecurityExceptionHandler;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfiguration {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+            Converter<Jwt, AbstractAuthenticationToken> jwtAuthenticationConverter,
+            ApiSecurityExceptionHandler securityExceptionHandler) {
+        return http
+                .cors(cors-> cors.configurationSource(corsConfigurationSource()))
+                .csrf(csrf -> csrf
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                .requireCsrfProtectionMatcher(request -> request.getMethod().equals("POST")
+                        && (request.getServletPath().equals("/api/v1/auth/refresh")
+                        || request.getServletPath().equals("/api/v1/auth/logout"))))
+                .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exception ->
+                        exception.authenticationEntryPoint(securityExceptionHandler)
+                                .accessDeniedHandler(securityExceptionHandler)).authorizeHttpRequests(authorize -> authorize
+                                .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/register").permitAll()
+                                .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh", "/api/v1/auth/logout").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
+                                .requestMatchers("/api/v1/auth/select-merchant", "/api/v1/auth/outlets").hasAuthority("SCOPE_ACCOUNT")
+                                .requestMatchers("/api/v1/onboarding/**").hasAuthority("SCOPE_ACCOUNT")
+                                .requestMatchers("/api/v1/public/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                                .requestMatchers("/api/v1/platform/**").hasRole(Role.SUPERADMIN.name())
+                                .requestMatchers("/api/v1/merchant/**").hasRole(Role.OWNERMERCHANT.name())
+                                .requestMatchers("/api/v1/cashier/**").hasAnyRole(Role.OWNERMERCHANT.name(),
+                                        Role.CASHIER.name()).anyRequest().authenticated()).oauth2ResourceServer(
+                                                resourceServer -> resourceServer
+                                                        .authenticationEntryPoint(securityExceptionHandler)
+                                                        .accessDeniedHandler(securityExceptionHandler)
+                                                        .jwt(jwt ->
+                                                        jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))).build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("X-XSRF-TOKEN"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/configuration/JwtConfiguration.java
+package org.lite.project.cashiersaas.configuration;
+
+import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import org.lite.project.cashiersaas.component.AudienceValidator;
+import org.lite.project.cashiersaas.component.TenantJwtAuthenticationConverter;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Base64;
+
+@Configuration
+@EnableConfigurationProperties(JwtProperties.class)
+public class JwtConfiguration {
+
+    private static final int MIN_HMAC_SHA256_KEY_BYTES = 32;
+
+    @Bean
+    public SecretKey jwtSigningKey(JwtProperties jwtProperties) {
+        String configuredSecret = jwtProperties.getSecret();
+        if (configuredSecret == null || configuredSecret.isBlank()) {
+            throw new IllegalStateException("CASHIER_JWT_SECRET_B64 must be configured.");
+        }
+
+        byte[] secretBytes;
+        try {
+            secretBytes = Base64.getDecoder().decode(configuredSecret);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("CASHIER_JWT_SECRET_B64 must be Base64-encoded.", exception);
+        }
+
+        if (secretBytes.length < MIN_HMAC_SHA256_KEY_BYTES) {
+            throw new IllegalStateException("CASHIER_JWT_SECRET_B64 must decode to at least 32 bytes.");
+        }
+
+        return new SecretKeySpec(secretBytes, "HmacSHA256");
+    }
+
+    @Bean
+    public JwtEncoder jwtEncoder(SecretKey jwtSigningKey) {
+        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey));
+    }
+
+    @Bean
+    @Primary
+    public JwtDecoder jwtDecoder(SecretKey jwtSigningKey, JwtProperties jwtProperties) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(jwtSigningKey).macAlgorithm(MacAlgorithm.HS256).build();
+        OAuth2TokenValidator<Jwt> requiredClaims = jwt -> {
+            if (jwt.getExpiresAt() == null || jwt.getIssuedAt() == null || jwt.getId() == null
+                    || jwt.getId().isBlank() || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
+                return OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token",
+                        "Required JWT claims are missing.", null));
+            }
+            return OAuth2TokenValidatorResult.success();
+        };
+        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefaultWithIssuer(jwtProperties.getIssuer()),
+                new AudienceValidator(jwtProperties.getAudience()), requiredClaims);
+        decoder.setJwtValidator(validator);
+        return decoder;
+    }
+
+    @Bean
+    public Converter<Jwt, AbstractAuthenticationToken> jwtAuthenticationConverter() {
+        return new TenantJwtAuthenticationConverter();
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/component/TenantJwtAuthenticationConverter.java
+package org.lite.project.cashiersaas.component;
+
+import org.lite.project.cashiersaas.enums.Role;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+public class TenantJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
+
+    @Override
+    public AbstractAuthenticationToken convert(Jwt jwt) {
+        UUID userId = requiredUuidClaim(jwt, "sub");
+        UUID sessionId = requiredUuidClaim(jwt, "session_id");
+        if ("ACCOUNT".equals(jwt.getClaimAsString("scope"))) {
+            AccountPrincipal principal = new AccountPrincipal(userId, requiredEmail(jwt), sessionId);
+            Set<SimpleGrantedAuthority> authorities = Set.of(new SimpleGrantedAuthority("SCOPE_ACCOUNT"));
+            return new UsernamePasswordAuthenticationToken(principal, null, authorities);
+        }
+
+        if (!"MERCHANT".equals(jwt.getClaimAsString("scope"))) {
+            throw new BadCredentialsException("JWT scope is invalid.");
+        }
+
+        UUID tenantId = requiredUuidClaim(jwt, "tenant_id");
+        UUID outletId = requiredUuidClaim(jwt, "outlet_id");
+        UUID membershipId = requiredUuidClaim(jwt, "membership_id");
+        Set<Role> roles = requiredRoles(jwt);
+
+        TenantPrincipal principal = new TenantPrincipal(userId, tenantId, outletId, membershipId, sessionId, roles);
+        Set<SimpleGrantedAuthority> authorities = roles.stream()
+                .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+        return new UsernamePasswordAuthenticationToken(principal, null, authorities);
+    }
+
+    private String requiredEmail(Jwt jwt) {
+        String email = jwt.getClaimAsString("email");
+        if (email == null || email.isBlank()) {
+            throw new BadCredentialsException("JWT claim 'email' is required.");
+        }
+        return email;
+    }
+
+    private UUID requiredUuidClaim(Jwt jwt, String claimName) {
+        String claimValue = jwt.getClaimAsString(claimName);
+        if (claimValue == null || claimValue.isBlank()) {
+            throw new BadCredentialsException("JWT claim '" + claimName + "' must be a UUID.");
+        }
+
+        try {
+            return UUID.fromString(claimValue);
+        } catch (IllegalArgumentException exception) {
+            throw new BadCredentialsException("JWT claim '" + claimName + "' must be a UUID.", exception);
+        }
+    }
+
+    private Set<Role> requiredRoles(Jwt jwt) {
+        List<String> roleClaims = jwt.getClaimAsStringList("roles");
+        if (roleClaims == null || roleClaims.isEmpty()) {
+            throw new BadCredentialsException("JWT claim 'roles' is required.");
+        }
+
+        try {
+            return roleClaims.stream()
+                    .map(Role::valueOf)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        } catch (IllegalArgumentException exception) {
+            throw new BadCredentialsException("JWT contains an unsupported role.", exception);
+        }
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/component/JwtTokenService.java
+package org.lite.project.cashiersaas.component;
+
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.configuration.JwtProperties;
+import org.lite.project.cashiersaas.enums.Role;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class JwtTokenService {
+
+    private final JwtEncoder jwtEncoder;
+    private final JwtProperties jwtProperties;
+
+    public String generateAccessToken(MerchantTokenContext context) {
+        requireTokenSubject(context);
+
+        Instant issuedAt = Instant.now();
+        List<String> roleNames = context.getRoles().stream().map(Role::name).distinct().toList();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.getIssuer())
+                .audience(List.of(jwtProperties.getAudience()))
+                .subject(context.getUserId().toString())
+                .issuedAt(issuedAt)
+                .expiresAt(context.getExpiresAt())
+                .id(UUID.randomUUID().toString())
+                .claim("tenant_id", context.getTenantId().toString())
+                .claim("outlet_id", context.getOutletId().toString())
+                .claim("membership_id", context.getMembershipId().toString())
+                .claim("session_id", context.getSessionId().toString())
+                .claim("scope", "MERCHANT")
+                .claim("email", context.getEmail())
+                .claim("roles", roleNames)
+                .build();
+
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256)
+                .type("JWT")
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    public String generateAccountAccessToken(UUID userId, String email, UUID sessionId) {
+        return generateAccountAccessToken(userId, email, sessionId,
+                Instant.now().plus(jwtProperties.getAccessTokenTtl()));
+    }
+
+    public String generateAccountAccessToken(UUID userId, String email, UUID sessionId, Instant expiresAt) {
+        Objects.requireNonNull(userId, "userId is required.");
+        Objects.requireNonNull(email, "email is required.");
+        Objects.requireNonNull(sessionId, "sessionId is required.");
+        Objects.requireNonNull(expiresAt, "expiresAt is required.");
+        if (email.isBlank()) {
+            throw new IllegalArgumentException("email is required.");
+        }
+
+        Instant issuedAt = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.getIssuer())
+                .audience(List.of(jwtProperties.getAudience()))
+                .subject(userId.toString())
+                .issuedAt(issuedAt)
+                .expiresAt(expiresAt)
+                .id(UUID.randomUUID().toString())
+                .claim("email", email)
+                .claim("scope", "ACCOUNT")
+                .claim("session_id", sessionId.toString())
+                .build();
+
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256)
+                .type("JWT")
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    private void requireTokenSubject(MerchantTokenContext context) {
+        Objects.requireNonNull(context, "context is required.");
+        Objects.requireNonNull(context.getUserId(), "userId is required.");
+        Objects.requireNonNull(context.getTenantId(), "tenantId is required.");
+        Objects.requireNonNull(context.getOutletId(), "outletId is required.");
+        Objects.requireNonNull(context.getMembershipId(), "membershipId is required.");
+        Objects.requireNonNull(context.getSessionId(), "sessionId is required.");
+        Objects.requireNonNull(context.getEmail(), "email is required.");
+        Objects.requireNonNull(context.getExpiresAt(), "expiresAt is required.");
+
+        if (context.getEmail().isBlank()) {
+            throw new IllegalArgumentException("email is required.");
+        }
+        if (context.getRoles() == null || context.getRoles().isEmpty()) {
+            throw new IllegalArgumentException("At least one role is required.");
+        }
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/AuthSessionService.java
+package org.lite.project.cashiersaas.service;
+
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.AccountPrincipal;
+import org.lite.project.cashiersaas.component.JwtTokenService;
+import org.lite.project.cashiersaas.component.MerchantTokenContext;
+import org.lite.project.cashiersaas.configuration.JwtProperties;
+import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.AuthRefreshTokenEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.AuthSessionEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
+import org.lite.project.cashiersaas.enums.Role;
+import org.lite.project.cashiersaas.exception.ErrorMessage;
+import org.lite.project.cashiersaas.exception.runtime.SessionInvalidException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.repository.AuthRefreshTokenRepository;
+import org.lite.project.cashiersaas.repository.AuthSessionRepository;
+import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
+import org.lite.project.cashiersaas.repository.OutletRepository;
+import org.lite.project.cashiersaas.repository.SubscriptionRepository;
+import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class AuthSessionService {
+    private static final SecureRandom RANDOM = new SecureRandom();
+
+    private final AuthSessionRepository sessionRepository;
+    private final AuthRefreshTokenRepository tokenRepository;
+    private final TenantMembershipRepository membershipRepository;
+    private final SubscriptionRepository subscriptionRepository;
+    private final OutletRepository outletRepository;
+    private final MembershipOutletAccessRepository accessRepository;
+    private final JwtTokenService jwtTokenService;
+    private final JwtProperties jwtProperties;
+
+    @Transactional
+    public IssuedTokens start(StaffUserEntity user) {
+        Instant now = Instant.now();
+        AuthSessionEntity session = AuthSessionEntity.start(user, now.plus(jwtProperties.getRefreshTokenTtl()));
+        sessionRepository.persist(session);
+        String rawRefresh = newRefreshToken();
+        tokenRepository.persist(AuthRefreshTokenEntity.issue(session, digest(rawRefresh), session.getExpiresAt()));
+        Instant accessExpiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
+        String access = jwtTokenService.generateAccountAccessToken(user.getId(), user.getEmail(),
+                session.getId(), accessExpiry);
+        return new IssuedTokens(access, accessExpiry, rawRefresh,
+                user.isPendingProfile() ? "COMPLETE_ONBOARDING" : "SELECT_MERCHANT_OUTLET", null, null, null);
+    }
+
+
+    @Transactional
+    public IssuedTokens selectMerchant(AccountPrincipal principal, TenantMembershipEntity membership,
+                                       OutletEntity outlet, SubscriptionEntity subscription) {
+        AuthSessionEntity session = sessionRepository.findById(principal.getSessionId(), principal.getUserId())
+                .orElseThrow(SessionInvalidException::new);
+        sessionRepository.lockAndRefresh(session);
+        if (!session.isUsableAt(Instant.now()) || !membership.getUser().getId().equals(principal.getUserId())) {
+            throw new SessionInvalidException();
+        }
+        if (!membership.getTenant().isFnbEnabled()) {
+            throw new SessionInvalidException();
+        }
+        session.selectMerchant(membership, outlet);
+        Instant expiresAt = merchantAccessExpiry(session, subscription);
+        String access = jwtTokenService.generateAccessToken(MerchantTokenContext.builder()
+                .userId(principal.getUserId())
+                .tenantId(membership.getTenant().getId())
+                .outletId(outlet.getId())
+                .membershipId(membership.getId())
+                .sessionId(session.getId())
+                .email(membership.getUser().getEmail())
+                .roles(List.of(membership.getRole()))
+                .expiresAt(expiresAt)
+                .build());
+        return new IssuedTokens(access, expiresAt, null, "OPERATE", membership.getTenant().getId(),
+                outlet.getId(), membership.getRole());
+    }
+
+    @Transactional(noRollbackFor = SessionInvalidException.class)
+    public IssuedTokens refresh(String rawRefresh) {
+        AuthRefreshTokenEntity token = tokenRepository.findByDigest(digestValidated(rawRefresh))
+                .orElseThrow(SessionInvalidException::new);
+        AuthSessionEntity session = token.getSession();
+        sessionRepository.lockAndRefresh(session);
+        tokenRepository.refresh(token);
+        Instant now = Instant.now();
+        if (!session.isUsableAt(now) || !token.isUnusedAt(now)) {
+            session.revoke(now);
+            throw new SessionInvalidException();
+        }
+        StaffUserEntity user = session.getUser();
+        IssuedTokens access = issueForExistingSession(session, user, now);
+        token.consume(now);
+        String newRawRefresh = newRefreshToken();
+        tokenRepository.persist(AuthRefreshTokenEntity.issue(session, digest(newRawRefresh), session.getExpiresAt()));
+        return new IssuedTokens(access.getAccessToken(), access.getExpiresAt(), newRawRefresh,
+                access.getNextStep(), access.getTenantId(), access.getOutletId(), access.getRole());
+    }
+
+    @Transactional
+    public void logout(String rawRefresh) {
+        if (rawRefresh == null || rawRefresh.length() != 43) {
+            return;
+        }
+        tokenRepository.findByDigest(digest(rawRefresh)).ifPresent(token -> {
+            AuthSessionEntity session = token.getSession();
+            sessionRepository.lockAndRefresh(session);
+            session.revoke(Instant.now());
+        });
+    }
+
+    private IssuedTokens issueForExistingSession(AuthSessionEntity session, StaffUserEntity user, Instant now) {
+        if (session.getTenant() == null) {
+            if (!user.isActive() && !user.isPendingProfile()) {
+                session.revoke(now);
+                throw new SessionInvalidException();
+            }
+            Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
+            String access = jwtTokenService.generateAccountAccessToken(user.getId(), user.getEmail(),
+                    session.getId(), expiry);
+            return new IssuedTokens(access, expiry, null,
+                    user.isPendingProfile() ? "COMPLETE_ONBOARDING" : "SELECT_MERCHANT_OUTLET", null, null, null);
+        }
+        if (!user.isActive() || !session.getTenant().isActive() || !session.getTenant().isFnbEnabled()) {
+            session.revoke(now);
+            throw new SessionInvalidException();
+        }
+        UUID tenantId = session.getTenant().getId();
+        UUID outletId = session.getOutlet().getId();
+        TenantMembershipEntity membership = membershipRepository.findActive(user.getId(), tenantId)
+                .filter(value -> value.getId().equals(session.getMembership().getId()))
+                .filter(value -> value.getRole() == session.getRole())
+                .orElse(null);
+        SubscriptionEntity subscription = subscriptionRepository.findActiveForTenant(tenantId).orElse(null);
+        if (membership == null || subscription == null || !subscription.isActiveAt(now)
+                || outletRepository.findActive(tenantId, outletId).isEmpty()
+                || accessRepository.findAccess(tenantId, membership.getId(), outletId).isEmpty()) {
+            session.revoke(now);
+            throw new SessionInvalidException();
+        }
+        Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
+        if (subscription.getEndsAt() != null) {
+            expiry = min(expiry, subscription.getEndsAt());
+        }
+        String access = jwtTokenService.generateAccessToken(MerchantTokenContext.builder()
+                .userId(user.getId())
+                .tenantId(tenantId)
+                .outletId(outletId)
+                .membershipId(membership.getId())
+                .sessionId(session.getId())
+                .email(user.getEmail())
+                .roles(List.of(membership.getRole()))
+                .expiresAt(expiry)
+                .build());
+        return new IssuedTokens(access, expiry, null, "OPERATE", tenantId, outletId, membership.getRole());
+    }
+
+    private Instant merchantAccessExpiry(AuthSessionEntity session, SubscriptionEntity subscription) {
+        Instant now = Instant.now();
+        if (subscription == null || !subscription.isActiveAt(now)
+                || !subscription.getTenant().getId().equals(session.getTenant().getId())) {
+            throw new OperationConflictException(ErrorMessage.SUBSCRIPTION_INACTIVE.getMessage());
+        }
+        Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
+        return subscription.getEndsAt() == null ? expiry : min(expiry, subscription.getEndsAt());
+    }
+
+    private Instant min(Instant first, Instant second) {
+        return first.isBefore(second) ? first : second;
+    }
+
+    private String newRefreshToken() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String digestValidated(String value) {
+        if (value == null || value.length() != 43) {
+            throw new SessionInvalidException();
+        }
+        return digest(value);
+    }
+
+    private String digest(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.", exception);
+        }
+    }
+
+    @Getter
+    @RequiredArgsConstructor
+    public static class IssuedTokens {
+        private final String accessToken;
+        private final Instant expiresAt;
+        private final String refreshToken;
+        private final String nextStep;
+        private final UUID tenantId;
+        private final UUID outletId;
+        private final Role role;
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/service/MerchantAccessGuard.java
+package org.lite.project.cashiersaas.service;
+
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.MerchantAccessContext;
+import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.enums.Role;
+import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
+import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.MerchantAccessRepository;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Component
+@RequiredArgsConstructor
+public class MerchantAccessGuard {
+    private final MerchantAccessRepository accessRepository;
+
+    public MerchantAccessContext requireOutlet(TenantPrincipal principal, UUID outletId) {
+        principal.requireOutlet(outletId);
+        MerchantAccessRepository.OutletAccess access = accessRepository.findOutlet(
+                        principal.getUserId(), principal.getTenantId(), outletId, principal.getRoles(), Instant.now())
+                .orElseThrow(ResourceNotFoundException::new);
+        TenantMembershipEntity membership = access.getMembership();
+        return new MerchantAccessContext(membership.getTenant(), access.getOutlet(), membership);
+    }
+
+    public TenantMembershipEntity requireMember(TenantPrincipal principal) {
+        return accessRepository.findMember(principal.getUserId(), principal.getTenantId(),
+                        principal.getRoles(), Instant.now())
+                .orElseThrow(ResourceNotFoundException::new);
+    }
+
+    public MerchantAccessContext requireOwner(TenantPrincipal principal, UUID outletId) {
+        MerchantAccessContext context = requireOutlet(principal, outletId);
+        if (context.getMembership().getRole() != Role.OWNERMERCHANT) {
+            throw new ResourceNotFoundException();
+        }
+        return context;
+    }
+}
+
+SOURCE FILE: src/main/java/org/lite/project/cashiersaas/repository/MerchantAccessRepository.java
+package org.lite.project.cashiersaas.repository;
+
+import com.blazebit.persistence.CriteriaBuilderFactory;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Tuple;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.MembershipOutletAccessEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
+import org.lite.project.cashiersaas.enums.Role;
+import org.lite.project.cashiersaas.shared.StatusConstants;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+@Repository
+@RequiredArgsConstructor
+public class MerchantAccessRepository {
+    private final EntityManager entityManager;
+    private final CriteriaBuilderFactory criteriaBuilderFactory;
+
+    public Optional<TenantMembershipEntity> findMember(UUID userId, UUID tenantId, Set<Role> roles, Instant now) {
+        return criteriaBuilderFactory.create(entityManager, TenantMembershipEntity.class, "membership")
+                .innerJoin("membership.user", "user")
+                .innerJoin("membership.tenant", "tenant")
+                .innerJoin("tenant.businessType", "businessType")
+                .fetch("membership.tenant")
+                .where("membership.user.id").eq(userId)
+                .where("membership.tenant.id").eq(tenantId)
+                .where("membership.active").eq(true)
+                .where("membership.role").in(roles)
+                .where("user.status").eq(StatusConstants.ACTIVE)
+                .where("tenant.status").eq(StatusConstants.ACTIVE)
+                .where("businessType.code").eq("FNB")
+                .where("businessType.active").eq(true)
+                .whereExists()
+                    .from(SubscriptionEntity.class, "subscription")
+                    .select("subscription.id")
+                    .where("subscription.tenant.id").eqExpression("tenant.id")
+                    .where("subscription.planCode").eq("FREETIER")
+                    .where("subscription.status").eq(StatusConstants.ACTIVE)
+                    .where("subscription.startsAt").le(now)
+                    .whereOr()
+                        .where("subscription.endsAt").isNull()
+                        .where("subscription.endsAt").gt(now)
+                    .endOr()
+                .end()
+                .setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    public Optional<OutletAccess> findOutlet(UUID userId, UUID tenantId, UUID outletId,
+                                             Set<Role> roles, Instant now) {
+        return criteriaBuilderFactory.create(entityManager, Tuple.class)
+                .from(MembershipOutletAccessEntity.class, "access")
+                .innerJoin("access.membership", "membership")
+                .innerJoin("membership.user", "user")
+                .innerJoin("membership.tenant", "tenant")
+                .innerJoin("tenant.businessType", "businessType")
+                .innerJoin("access.outlet", "outlet")
+                .select("membership")
+                .select("outlet")
+                .fetch("membership.tenant")
+                .where("access.tenant.id").eq(tenantId)
+                .where("membership.tenant.id").eq(tenantId)
+                .where("outlet.tenant.id").eq(tenantId)
+                .where("membership.user.id").eq(userId)
+                .where("outlet.id").eq(outletId)
+                .where("membership.active").eq(true)
+                .where("membership.role").in(roles)
+                .where("user.status").eq(StatusConstants.ACTIVE)
+                .where("tenant.status").eq(StatusConstants.ACTIVE)
+                .where("businessType.code").eq("FNB")
+                .where("businessType.active").eq(true)
+                .where("outlet.active").eq(true)
+                .whereExists()
+                    .from(SubscriptionEntity.class, "subscription")
+                    .select("subscription.id")
+                    .where("subscription.tenant.id").eqExpression("tenant.id")
+                    .where("subscription.planCode").eq("FREETIER")
+                    .where("subscription.status").eq(StatusConstants.ACTIVE)
+                    .where("subscription.startsAt").le(now)
+                    .whereOr()
+                        .where("subscription.endsAt").isNull()
+                        .where("subscription.endsAt").gt(now)
+                    .endOr()
+                .end()
+                .setMaxResults(1).getResultList().stream()
+                .map(row -> new OutletAccess(row.get(0, TenantMembershipEntity.class),
+                        row.get(1, OutletEntity.class)))
+                .findFirst();
+    }
+
+    @Getter
+    @RequiredArgsConstructor
+    public static class OutletAccess {
+        private final TenantMembershipEntity membership;
+        private final OutletEntity outlet;
+    }
+}
+

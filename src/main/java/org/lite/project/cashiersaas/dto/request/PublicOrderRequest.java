@@ -9,8 +9,9 @@ import java.util.UUID;
 
 @Getter @Setter
 public class PublicOrderRequest {
+    @NotNull private org.lite.project.cashiersaas.enums.ServiceType serviceType = org.lite.project.cashiersaas.enums.ServiceType.DINE_IN;
     @NotBlank @Size(max = 80) private String customerLabel;
-    @NotEmpty @Size(max = 50) private List<@Valid Item> items;
+    @NotEmpty @Size(max = 50) private List<@NotNull @Valid Item> items;
 
     @Getter @Setter public static class Item {
         @NotNull private UUID productId;

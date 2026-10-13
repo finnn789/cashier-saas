@@ -10,6 +10,7 @@ import org.lite.project.cashiersaas.shared.response.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -19,58 +20,91 @@ import java.util.UUID;
 public class FnbCatalogController {
     private final FnbCatalogService service;
 
-    @PostMapping("/merchant/outlets/{outletId}/fnb/categories") @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<FnbCategoryResponse> createCategory(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @Valid @RequestBody FnbCategoryRequest request) {
+    @PostMapping("/merchant/outlets/{outletId}/fnb/categories")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<FnbCategoryResponse> createCategory(@AuthenticationPrincipal TenantPrincipal principal,
+                                                           @PathVariable UUID outletId,
+                                                           @Valid @RequestBody FnbCategoryRequest request) {
         return ApiResponse.created("Kategori dibuat.", service.createCategory(principal, outletId, request));
     }
+
     @PutMapping("/merchant/outlets/{outletId}/fnb/categories/{id}")
-    public ApiResponse<FnbCategoryResponse> updateCategory(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID id, @Valid @RequestBody FnbCategoryRequest request) {
+    public ApiResponse<FnbCategoryResponse> updateCategory(@AuthenticationPrincipal TenantPrincipal principal,
+                                                           @PathVariable UUID outletId,
+                                                           @PathVariable UUID id,
+                                                           @Valid @RequestBody FnbCategoryRequest request) {
         return ApiResponse.success("Kategori diperbarui.", service.updateCategory(principal, outletId, id, request));
     }
+
     @DeleteMapping("/merchant/outlets/{outletId}/fnb/categories/{id}")
-    public ApiResponse<FnbCategoryResponse> archiveCategory(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID id) {
+    public ApiResponse<FnbCategoryResponse> archiveCategory(@AuthenticationPrincipal TenantPrincipal principal,
+                                                            @PathVariable UUID outletId,
+                                                            @PathVariable UUID id) {
         return ApiResponse.success("Kategori diarsipkan.", service.archiveCategory(principal, outletId, id));
     }
+
     @GetMapping("/cashier/outlets/{outletId}/fnb/categories")
-    public ApiResponse<List<FnbCategoryResponse>> categories(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId) {
+    public ApiResponse<List<FnbCategoryResponse>> categories(@AuthenticationPrincipal TenantPrincipal principal,
+                                                             @PathVariable UUID outletId) {
         return ApiResponse.success("Kategori diambil.", service.categories(principal, outletId));
     }
-    @PostMapping("/merchant/outlets/{outletId}/fnb/products") @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<FnbProductResponse> createProduct(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @Valid @RequestBody FnbProductRequest request) {
+
+    @PostMapping("/merchant/outlets/{outletId}/fnb/products")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<FnbProductResponse> createProduct(@AuthenticationPrincipal TenantPrincipal principal,
+                                                         @PathVariable UUID outletId,
+                                                         @Valid @RequestBody FnbProductRequest request) {
         return ApiResponse.created("Produk dibuat.", service.createProduct(principal, outletId, request));
     }
+
     @PutMapping("/merchant/outlets/{outletId}/fnb/products/{id}")
-    public ApiResponse<FnbProductResponse> updateProduct(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID id, @Valid @RequestBody FnbProductRequest request) {
+    public ApiResponse<FnbProductResponse> updateProduct(@AuthenticationPrincipal TenantPrincipal principal,
+                                                         @PathVariable UUID outletId,
+                                                         @PathVariable UUID id,
+                                                         @Valid @RequestBody FnbProductRequest request) {
         return ApiResponse.success("Produk diperbarui.", service.updateProduct(principal, outletId, id, request));
     }
+
     @DeleteMapping("/merchant/outlets/{outletId}/fnb/products/{id}")
-    public ApiResponse<FnbProductResponse> archiveProduct(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID id) {
+    public ApiResponse<FnbProductResponse> archiveProduct(@AuthenticationPrincipal TenantPrincipal principal,
+                                                          @PathVariable UUID outletId,
+
+                                                          @PathVariable UUID id) {
         return ApiResponse.success("Produk diarsipkan.", service.archiveProduct(principal, outletId, id));
     }
+
     @GetMapping("/cashier/outlets/{outletId}/fnb/products")
     public ApiResponse<List<FnbProductResponse>> products(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId) {
         return ApiResponse.success("Produk diambil.", service.products(principal, outletId));
     }
-    @PostMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups") @ResponseStatus(HttpStatus.CREATED)
+
+    @PostMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups")
+    @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<FnbOptionGroupResponse> createGroup(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @Valid @RequestBody FnbOptionGroupRequest request) {
         return ApiResponse.created("Grup pilihan dibuat.", service.createGroup(principal, outletId, productId, request));
     }
+
     @PutMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups/{id}")
     public ApiResponse<FnbOptionGroupResponse> updateGroup(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID id, @Valid @RequestBody FnbOptionGroupRequest request) {
         return ApiResponse.success("Grup pilihan diperbarui.", service.updateGroup(principal, outletId, productId, id, request));
     }
+
     @GetMapping("/cashier/outlets/{outletId}/fnb/products/{productId}/groups")
     public ApiResponse<List<FnbOptionGroupResponse>> groups(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId) {
         return ApiResponse.success("Grup pilihan diambil.", service.groups(principal, outletId, productId));
     }
-    @PostMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups/{groupId}/options") @ResponseStatus(HttpStatus.CREATED)
+
+    @PostMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups/{groupId}/options")
+    @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<FnbOptionResponse> createOption(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID groupId, @Valid @RequestBody FnbOptionRequest request) {
         return ApiResponse.created("Pilihan dibuat.", service.createOption(principal, outletId, productId, groupId, request));
     }
+
     @PutMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups/{groupId}/options/{id}")
     public ApiResponse<FnbOptionResponse> updateOption(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID groupId, @PathVariable UUID id, @Valid @RequestBody FnbOptionRequest request) {
         return ApiResponse.success("Pilihan diperbarui.", service.updateOption(principal, outletId, productId, groupId, id, request));
     }
+
     @GetMapping("/cashier/outlets/{outletId}/fnb/products/{productId}/groups/{groupId}/options")
     public ApiResponse<List<FnbOptionResponse>> options(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID groupId) {
         return ApiResponse.success("Pilihan diambil.", service.options(principal, outletId, productId, groupId));

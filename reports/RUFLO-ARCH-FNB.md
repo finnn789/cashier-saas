@@ -1,0 +1,23 @@
+Completed architecture review against memory baseline **2**. Reviewed only the supplied source bundle: task instructions, repository guidance, `.ai/MEMORY.md`, `.ai/ARCHITECTURE.md`, architect configuration, six F&B services, two repositories, and `SalesOrderEntity`. No tools or independent filesystem access were used.
+
+**Architecture findings**
+
+- **Pay First:** QR and POS checkout create `NEW / UNPAID` orders. Settlement atomically advances them to `CONFIRMED / PAID`; kitchen transitions require payment and proceed strictly through `PREPARING → READY → COMPLETED`. Cancellation and discounts require `NEW / UNPAID`. Repeating a kitchen transition fails rather than returning an idempotent success.
+- **Pricing:** Both checkout paths share server-side pricing with tenant/outlet product lookup, availability checks, option ownership/cardinality validation, duplicate-option rejection, and `BigDecimal` calculations rounded `HALF_UP` to two decimals. Orders retain monetary totals and tax/service rate snapshots. Discounts recalculate charges against the discounted subtotal using those saved rates. Item/option snapshot factories are called, but their implementations are absent; exact saved names and effective unit prices cannot be verified.
+- **Checkout idempotency:** Keys are validated and shared across QR/POS within a tenant. Replay checks source, outlet and fingerprint; QR additionally checks table and status-token validity. Fingerprints preserve item order while sorting option IDs. QR replay requires a currently valid QR before returning an existing order; POS replay requires current table validity. These restrictions should be documented.
+- **Payments:** Direct settlement checks tendered amounts, rejects existing payment or pending gateway attempts, and detects conflicting key reuse. Mock initiation leaves the order unpaid; successful resolution settles it, while failure leaves it unpaid. Terminal resolution supports matching-outcome replay and rejects conflicting outcomes. Payment keys are checked across payment and gateway-attempt stores.
+- **Concurrency and transactions:** Checkout, payment, gateway resolution and kitchen mutations acquire a tenant-row `PESSIMISTIC_WRITE` lock. This coordinates participating writers across all outlets of that tenant, with a potential throughput cost. Catalog locking is invoked, but its implementation is unavailable. Settlement, audit persistence and table reconciliation participate in the annotated service transaction; `flush()` is not commit.
+- **Audit:** Supplied services explicitly record payment settlement, gateway creation/resolution and kitchen transitions with actors. Cancellation authorization/audit, discount audit, audit timestamps and table-state reconciliation internals are outside this bundle.
+- **Reports:** Paid-sales queries constrain both payment and order by tenant/outlet, use payment time with `[start, end)` boundaries, require `PAID`, and exclude `CANCELLED`. Completion is not required. Collections subtract cash change; net sales subtract order discounts. Product totals use item line totals without allocating order discounts, tax or service charges, and group renamed products separately by snapshot name. Cancellation counts separately use order `updatedAt`.
+
+**Corrections and evidence limits**
+
+The architecture snapshot broadly matches these sources. It should additionally document replay restrictions, kitchen retry behavior, gateway pending/failed states, report metric definitions and cancellation time semantics.
+
+Payment validation relies partly on omitted DTO/controller validation: these services do not independently validate payment-key syntax or consistently handle null tendered amounts. This is an unverified boundary, not proof of an externally reachable defect.
+
+Order uniqueness annotations are visible; deployed constraints, payment-per-order uniqueness, complete authorization, kitchen queue filtering, token construction and after-commit publication cannot be verified from this bundle.
+
+Migration filenames and Flyway/Liquibase/JPA settings appear only as assertions in `.ai/ARCHITECTURE.md`; no migration listing or configuration source was supplied. Their current accuracy and deployment compatibility remain unverified.
+
+**Testing:** Not run by policy. **Changed files:** None. Existing work was untouched. This completes the source architecture review and does not certify end-to-end readiness.
