@@ -1,0 +1,19 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryId": "{{categoryId}}",
+      "name": "Nasi Goreng KedaiMbo",
+      "description": "Nasi goreng dengan telur",
+      "price": 25000,
+      "imageUrl": "",
+      "available": true,
+      "displayOrder": 1
+    }
+order: 1000

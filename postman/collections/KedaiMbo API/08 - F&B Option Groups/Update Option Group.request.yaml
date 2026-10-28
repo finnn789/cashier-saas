@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}/groups/{{groupId}}"
+method: PUT
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Tingkat Pedas",
+      "required": false,
+      "minimumSelections": 0,
+      "maximumSelections": 1,
+      "displayOrder": 1
+    }
+order: 3000

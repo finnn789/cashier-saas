@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/onboarding/intent"
+method: PUT
+headers:
+  Accept: application/json
+  Content-Type: application/json
+  Authorization: Bearer {{accountToken}}
+body:
+  type: json
+  content: |-
+    {
+      "intent": "OWNER"
+    }
+auth:
+  type: noauth
+order: 1000
