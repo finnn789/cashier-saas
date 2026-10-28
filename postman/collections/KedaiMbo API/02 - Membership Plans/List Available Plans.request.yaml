@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/public/plans"
+method: GET
+headers:
+  Accept: application/json
+auth:
+  type: noauth
+order: 1000

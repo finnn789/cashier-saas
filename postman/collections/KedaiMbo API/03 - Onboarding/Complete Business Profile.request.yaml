@@ -1,0 +1,20 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/onboarding/{{tenantId}}/business-profile"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+  Authorization: Bearer {{accountToken}}
+body:
+  type: json
+  content: |-
+    {
+      "businessName": "Tombo Ati",
+      "outletName": "Tombo Ati Pusat",
+      "address": "Jl. Merdeka No. 10",
+      "phoneNumber": "081234567890",
+      "timeZone": "Asia/Jakarta"
+    }
+auth:
+  type: noauth
+order: 4000

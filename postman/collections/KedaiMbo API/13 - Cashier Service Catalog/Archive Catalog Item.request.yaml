@@ -1,0 +1,6 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/catalog-items/{{itemId}}"
+method: DELETE
+headers:
+  Accept: application/json
+order: 4000

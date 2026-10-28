@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/onboarding/status"
+method: GET
+headers:
+  Accept: application/json
+  Authorization: Bearer {{accountToken}}
+auth:
+  type: noauth
+order: 2000
