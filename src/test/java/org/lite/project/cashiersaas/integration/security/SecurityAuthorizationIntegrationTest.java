@@ -1,14 +1,13 @@
 package org.lite.project.cashiersaas.integration.security;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Tag;
+import org.lite.project.cashiersaas.integration.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.lite.project.cashiersaas.component.JwtTokenService;
 import org.lite.project.cashiersaas.component.MerchantTokenContext;
 import org.lite.project.cashiersaas.configuration.JwtProperties;
 import org.lite.project.cashiersaas.enums.Role;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
@@ -23,9 +22,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
-@Tag("integration")
-@SpringBootTest
-class SecurityAuthorizationIntegrationTest {
+class SecurityAuthorizationIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private MockMvc mockMvc;
 

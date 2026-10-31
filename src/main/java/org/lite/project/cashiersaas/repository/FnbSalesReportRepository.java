@@ -179,7 +179,7 @@ public class FnbSalesReportRepository {
         public final BigDecimal service;
 
         public SummaryRow(BigDecimal subtotal, BigDecimal netSales, BigDecimal total, BigDecimal amountCollected,
-                          long count, BigDecimal discount, BigDecimal tax, BigDecimal service) {
+                          Long count, BigDecimal discount, BigDecimal tax, BigDecimal service) {
             this.subtotal = subtotal;
             this.netSales = netSales;
             this.total = total;
@@ -197,7 +197,7 @@ public class FnbSalesReportRepository {
         public final long quantity;
         public final BigDecimal grossSales;
 
-        public ProductRow(UUID productId, String name, long quantity, BigDecimal grossSales) {
+        public ProductRow(UUID productId, String name, Long quantity, BigDecimal grossSales) {
             this.productId = productId;
             this.name = name;
             this.quantity = quantity;
@@ -211,7 +211,7 @@ public class FnbSalesReportRepository {
         public final BigDecimal netSales;
         public final BigDecimal amountCollected;
 
-        public MethodRow(PaymentMethod method, long count, BigDecimal netSales, BigDecimal amountCollected) {
+        public MethodRow(PaymentMethod method, Long count, BigDecimal netSales, BigDecimal amountCollected) {
             this.method = method;
             this.count = count;
             this.netSales = netSales;

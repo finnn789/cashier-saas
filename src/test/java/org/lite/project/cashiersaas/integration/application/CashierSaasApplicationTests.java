@@ -1,12 +1,9 @@
 package org.lite.project.cashiersaas.integration.application;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Tag;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.lite.project.cashiersaas.integration.support.AbstractPostgresIntegrationTest;
 
-@Tag("integration")
-@SpringBootTest
-class CashierSaasApplicationTests {
+class CashierSaasApplicationTests extends AbstractPostgresIntegrationTest {
 
     @Test
     void contextLoads() {

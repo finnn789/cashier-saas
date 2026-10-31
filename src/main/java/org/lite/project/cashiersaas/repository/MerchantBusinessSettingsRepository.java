@@ -4,7 +4,6 @@ import com.blazebit.persistence.CriteriaBuilderFactory;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
-import org.lite.project.cashiersaas.entity.shared.sales.CashierSaleEntity;
 import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
@@ -16,8 +15,7 @@ public class MerchantBusinessSettingsRepository {
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
     public boolean hasCurrencyUse(UUID tenantId) {
-        return exists(SalesOrderEntity.class, "salesOrder", tenantId)
-                || exists(CashierSaleEntity.class, "cashierSale", tenantId);
+        return exists(SalesOrderEntity.class, "salesOrder", tenantId);
     }
 
     private <T> boolean exists(Class<T> entityType, String alias, UUID tenantId) {

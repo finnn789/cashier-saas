@@ -25,9 +25,13 @@ public class FnbPosOrderRequest {
     @Getter
     @Setter
     public static class Item {
-        @NotNull private UUID productId;
-        @Min(1) @Max(100) private int quantity;
-        @Size(max = 500) private String note;
-        @NotNull @Size(max = 100) private List<@NotNull UUID> optionIds;
+        @NotNull
+        private UUID productId;
+        @Min(1) @Max(100)
+        private int quantity;
+        @Size(max = 500)
+        private String note;
+        @NotNull @Size(max = 100)
+        private List<@NotNull UUID> optionIds;
     }
 }

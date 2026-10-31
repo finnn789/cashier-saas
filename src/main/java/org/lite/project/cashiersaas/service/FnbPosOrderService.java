@@ -75,7 +75,8 @@ public class FnbPosOrderService {
             if (request.getTableId() != null) throw new InvalidOperationException("Takeaway tidak dapat memakai meja.");
             return null;
         }
-        if (request.getServiceType() != ServiceType.DINE_IN) throw new InvalidOperationException("Tipe layanan tidak valid.");
+        if (request.getServiceType() != ServiceType.DINE_IN)
+            throw new InvalidOperationException("Tipe layanan tidak valid.");
         if (request.getTableId() == null) return null;
         DiningTableEntity table = tables.find(context.getTenant().getId(), context.getOutlet().getId(), request.getTableId())
                 .orElseThrow(ResourceNotFoundException::new);
