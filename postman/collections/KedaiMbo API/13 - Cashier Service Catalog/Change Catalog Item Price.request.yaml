@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/catalog-items/{{itemId}}/price"
+method: PUT
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "unitPrice": 12000,
+      "reason": "Penyesuaian harga layanan"
+    }
+order: 3000

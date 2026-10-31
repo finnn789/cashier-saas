@@ -1,0 +1,27 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/sales"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Idempotency-Key
+    value: "{{saleKey}}"
+    description: Gunakan key yang sama saat retry payload yang sama. Ganti untuk transaksi baru.
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "customerName": "Pelanggan KedaiMbo",
+      "items": [
+        {
+          "catalogItemId": "{{itemId}}",
+          "quantity": 1
+        }
+      ],
+      "paymentMethod": "CASH",
+      "tenderedAmount": 20000,
+      "paymentReference": ""
+    }
+order: 1000

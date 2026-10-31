@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/auth/select-merchant"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+  Authorization: Bearer {{accountToken}}
+body:
+  type: json
+  content: |-
+    {
+      "tenantId": "{{tenantId}}",
+      "outletId": "{{outletId}}"
+    }
+auth:
+  type: noauth
+order: 4000

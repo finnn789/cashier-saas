@@ -1,0 +1,6 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/sales/{{saleId}}"
+method: GET
+headers:
+  Accept: application/json
+order: 3000

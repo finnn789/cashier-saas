@@ -1,0 +1,62 @@
+[
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\reports\\TASK-038.md",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\reports\\TASK-038.md",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\ai\\state.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\ai\\system_prompt.md",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\cases\\faq\\service.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\cases\\faq\\tool.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\config.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\ai\\state.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\ai\\system_prompt.md",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\cases\\faq\\service.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\cases\\faq\\tool.py",
+        "Kind":  "add"
+    },
+    {
+        "WorkerEvents":  "TASK-038-events.jsonl",
+        "Path":  "E:\\Java\\cashier-saas\\Ai-services\\app\\config.py",
+        "Kind":  "add"
+    }
+]

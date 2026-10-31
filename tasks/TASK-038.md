@@ -1,0 +1,42 @@
+# TASK-038 — AI Service foundation
+
+## Binding provider amendment — 2026-10-11, memory19
+
+User selected OpenRouter and authorized continuation after official LangChain/OpenRouter docs confirmed `uv add langchain-openrouter`. This supersedes every Ollama-only requirement below. Initial execution was interrupted to change provider; preserve and review partial files. Orchestrator owns pyproject/uv.lock/.env.example/README/PLAN updates; they are expected concurrent baseline changes, not worker violations. Do not edit them.
+
+Implement OpenRouter ONLY using installed `langchain_openrouter.ChatOpenRouter` (0.2.9); read installed source to verify exact constructors/async/tool APIs. Configuration: AI_PROVIDER=openrouter, AI_MODEL required nonblank (no paid model selected implicitly), OPENROUTER_API_KEY SecretStr required only at explicit runtime construction, fixed OpenRouter API endpoint via official integration (no arbitrary configurable remote key destination), AI_MAX_OUTPUT_TOKENS=1024 (validated bounded), existing request timeout/graph steps/temperature. Do not retain Ollama client/settings or fallback. Explicit API key passed to client from Settings, never read by model tool or prompt; no model calls. Report sanitized missing-key/config failures and precise client timeout/retry/token bounds. Dedicated SDK may differ from ChatOpenAI; verify installed API rather than copying an incompatible example. Preserve original seven-path reservation and all limits, no tests/startup/dependency/provider/DB calls. Re-read this amendment before final report. Foundation is still trusted-adapter-only, not full endpoint acceptance.
+
+Official sources: https://docs.langchain.com/oss/python/integrations/chat/openrouter and https://openrouter.ai/docs/guides/community/langchain.
+
+## Source-review corrections within original reservation
+
+Before final acceptance address these concrete source findings:
+- Installed ChatOpenRouter default base_url reads OPENROUTER_API_BASE. Explicitly pin constructor base_url="https://openrouter.ai/api/v1" so environment cannot redirect the credential, as required by binding endpoint policy. Do not add configurable destination.
+- Settings must suppress input values in validation errors; load_settings must convert configuration parsing errors to a fixed sanitized failure without chaining raw inputs. Freeze Settings or snapshot/revalidate it in the public CustomerServiceAgent constructor so caller mutation/direct construction cannot bypass bounded runtime config. Do not silently expose key/DSN via error rendering.
+- Reject multiple, invalid or unknown model tool calls before another provider turn; do not forward an AIMessage with unmatched tool calls, and do not merely take the first call if the provider ignores parallel_tool_calls=False. Route deterministically to a bounded clarification reply. Validate question-only arguments and keep tenant scope closure-bound.
+- Persist checkpoints and final accurate report; earlier Ollama checkpoint is historical and must be explicitly superseded.
+- SDK source finding: langchain-openrouter0.2.9 max_retries=0 omits retry_config, but openrouter/chat.py defaults UNSET to a 3,600,000ms backoff. Explicitly disable SDK retries with the supported call parameter `retries=None` propagated to send_async (verify installed parameter forwarding), or an explicit SDK client with retry_config=None and pinned server. Keep outer timeout. Do not claim max_retries=0 alone disables underlying SDK retries.
+- Final source-review gap: load_settings must also catch pydantic_settings.SettingsError (e.g. invalid JSON from environment), not only pydantic.ValidationError. Route AIMessage.invalid_tool_calls to terminal tool_rejected even when tool_calls is empty; never accept parsed-invalid calls as a completed answer. Verify all three final corrections explicitly in report.
+
+User authorization: 2026-10-11 asks to read Ai-services/PLAN.md and delegate to agents. You are the designated Python implementation worker, not the orchestrator. Memory baseline: 17 (setup baseline16, delegation recorded17). Read AGENTS.md, Ai-services/PLAN.md, pyproject.toml, .env.example and this packet. The Java worker template is not applicable to this standalone Python slice. Prior UNIT tasks remain paused. Do not resume TASK-037.
+
+Baseline: reports/artifacts/AI-SERVICES-20261011-DELEGATION/baseline.csv and git-status-before.txt. Preserve existing dirty work. Before application edits acknowledge baseline/reservation in Ai-services/reports/TASK-038.md; update the report after each meaningful checkpoint and before handoff. No canonical .ai writes, nested agents, tests/test files, builds, application startup, dependency changes/install, provider calls, Redis/DB/network operations or generated code. You may read installed dependency source to verify APIs. Never read real .env files or credentials.
+
+Exact reserved writes (all new):
+- Ai-services/app/config.py
+- Ai-services/app/ai/state.py
+- Ai-services/app/ai/agent.py
+- Ai-services/app/ai/system_prompt.md
+- Ai-services/app/cases/faq/service.py
+- Ai-services/app/cases/faq/tool.py
+- Ai-services/reports/TASK-038.md
+
+Reviewed architecture for this bounded foundation:
+1. No HTTP entry point, auth verifier, queue implementation or business tools yet. These modules are called only from future trusted adapters. No fabricated customer identities, tenant inference, approved FAQ content, backend success, tickets or order facts.
+2. Settings uses Pydantic Settings and existing env names. Validate model/provider and positive bounded AI timeout/step/temperature values when explicitly constructing the AI runtime, not on module import. Support Ollama only for now. Secret values use SecretStr and do not appear in repr/logs/errors; avoid echoing configuration validation input. Do not require inactive Meta/gRPC settings for foundation. No singleton carrying request context. No automatic .env loading or network on import. Expose Settings and explicit load_settings().
+3. Immutable RequestContext with validated nonblank tenant_id, channel (web/whatsapp), subject_id, conversation_id. It is an internal trusted value, NOT authorization proof. Context contains no JWT, provider credential or phone number. No public client can construct authorized context through this slice.
+4. FAQ service accepts an explicitly supplied approved collection keyed by tenant; no example business claims. Return only entries of current tenant, bounded question/answer sizes and result count. Empty knowledge produces clarification/escalation wording, never invented facts. Expose FaqService and constructor contract in report. FAQ tool factory captures immutable trusted context server-side; model arguments must never include selectable tenant/customer/routing identity. Treat user messages and FAQ content as untrusted data, never instructions.
+5. build_agent(settings: Settings, faq_service: FaqService) -> CustomerServiceAgent; async respond(context: RequestContext, message: str, history: ... = ...) -> AgentReply. Document precise concrete history/response signatures. Shared model/compiled graph may be reused but every call gets isolated state and bound context/tools. Use actual LangGraph and ChatOllama APIs from installed versions. Bound input/history/tool results, model timeout, graph steps/tool calls; clean cancellation; sanitize exceptions. No mutable shared per-user history or in-memory checkpoint presented as durable memory. Never serialize context/secrets into prompts or model tool schemas. Bound tools to FAQ ONLY. No fake stubs for status/ticket operations. Reply explicitly states backend operations unavailable when needed.
+6. System prompt: concise Indonesian customer service, ask missing details, use only approved FAQ, never claim order lookup/payment/refund/ticket success, offer human escalation without claiming it occurred. Prompt rules supplement server-side isolation, not its replacement.
+
+Acceptance: concrete foundation implementation under exact reserved paths, reusable isolated graph + tenant-scoped FAQ, explicit configuration and downstream signatures, failure/limit handling reviewed statically. Do not claim full service READY FOR TESTING: this is FOUNDATION SUBMITTED FOR SOURCE REVIEW, HTTP/auth/queue/Meta/Spring remain unimplemented. Report changed files, API/source evidence, limitations and recommended future scenarios; tests NOT RUN BY POLICY.

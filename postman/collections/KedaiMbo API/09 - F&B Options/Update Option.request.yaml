@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}/groups/{{groupId}}/options/{{optionId}}"
+method: PUT
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Pedas",
+      "priceAdjustment": 2000,
+      "available": true,
+      "displayOrder": 1,
+      "priceChangeReason": "Tambahan sambal"
+    }
+order: 3000

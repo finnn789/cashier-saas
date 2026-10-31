@@ -1,0 +1,27 @@
+$kind: http-request
+description: Memerlukan token ACCOUNT. Response sukses otomatis menyimpan tenantId dan outletId dari pilihan pertama ke collection variables. Daftar kosong menghapus kedua variabel agar ID sebelumnya tidak terpakai.
+url: "{{baseUrl}}/api/v1/auth/outlets"
+method: GET
+headers:
+  Accept: application/json
+  Authorization: Bearer {{accountToken}}
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+          const response = pm.response.json();
+          if (response.success && Array.isArray(response.data)) {
+              const choice = response.data[0];
+              if (choice && choice.tenantId && choice.outletId) {
+                  pm.collectionVariables.set("tenantId", choice.tenantId);
+                  pm.collectionVariables.set("outletId", choice.outletId);
+              } else {
+                  pm.collectionVariables.unset("tenantId");
+                  pm.collectionVariables.unset("outletId");
+              }
+          }
+      }
+    language: text/javascript
+order: 3000

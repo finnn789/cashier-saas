@@ -1,0 +1,32 @@
+{
+  "version": "0.1",
+  "project": {
+    "name": "KedaiMbo API",
+    "baseUrl": "http://localhost:8080"
+  },
+  "default": {
+    "workspace": "main",
+    "collection": "kedaimbo-api"
+  },
+  "workspaces": {
+    "main": {
+      "id": "7ecabbf5-c5ff-4cf6-8fc1-fa2c871cd737",
+      "name": "My Workspace",
+      "type": "personal"
+    }
+  },
+  "collections": {
+    "kedaimbo-api": {
+      "id": "27489349-26b2d778-a8ec-4ce9-81be-5d78f21f9082",
+      "name": "KedaiMbo API",
+      "workspace": "main",
+      "path": "postman/KedaiMbo.postman_collection.json"
+    },
+    "fnb-catalog": {
+      "id": "27489349-deee8abd-9661-46bf-a458-ebc438084783",
+      "name": "F&B Catalog Controller",
+      "workspace": "main",
+      "path": "postman/FnbCatalogController.postman_collection.json"
+    }
+  }
+}

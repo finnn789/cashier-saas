@@ -1,5 +1,9 @@
 # Context index
 
+- Multichannel minimal schema (memory34, SOURCE REVIEWED/READY FOR TESTING): six mapped tables31 columns and frozen0001_channels snapshot match offline. Direct ChatService with scoped SQLAlchemy queries; platform identities separate; no inbox/outbox/queue worker. Six unit modules adapted,78 static methods not executed. Evidence: Ai-services/docs/channel-schema.md, docs/progress/channels-orchestrator-review.md, minimal-final-evidence.json and minimal-schema-evidence.json. WA transport/durable recovery deferred; no DB/API/.env operations; Java UNIT pause preserved.
+
+- SQLAlchemy chat refactor (memory31, SOURCE REVIEWED/READY FOR TESTING): Ai-services/app/chat/entities.py contains five mapped models; repositories.py owns expression queries; worker.py uses named operations; migrations/env.py uses Base.metadata. Two existing unit modules adapted (78 static methods overall), tests NOT RUN for refactor. Evidence: Ai-services/docs/progress/sqlalchemy-orchestrator-review.md, sqlalchemy-worker-progress.md and sqlalchemy-final-evidence.json. Historical74 unit passes are pre-refactor only.
+
 - Telegram unit tests (memory29,74 pass/0 failures/errors/skips): Ai-services/tests/unit, Ai-services/docs/progress/telegram-unit-review.md, telegram-unit-final-run.txt and telegram-unit-final-evidence.json. One narrow OpenRouter Retry-After parser regression fixed; no real API/DB/migrations or Java UNIT execution. Unit mock boundaries remain explicit.
 
 - Telegram persistent conversation (memory26, source reviewed/READY FOR TESTING): Ai-services/docs/telegram-conversation-design.md, docs/progress/telegram-orchestrator-review.md, telegram-worker-progress.md, telegram-final-evidence.json, and current README. Current minimal polling source supersedes old LangGraph/demo summaries; PostgreSQL migration/runtime/testing pending. Prior UNIT pause unchanged.

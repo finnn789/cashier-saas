@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/public/fnb/menu/{{qrToken}}/orders"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Idempotency-Key
+    value: "{{publicOrderKey}}"
+    description: Gunakan key yang sama saat retry payload yang sama. Ganti untuk transaksi baru.
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "serviceType": "DINE_IN",
+      "customerLabel": "Pelanggan KedaiMbo",
+      "items": [
+        {
+          "productId": "{{productId}}",
+          "quantity": 1,
+          "note": "Tanpa bawang",
+          "optionIds": []
+        }
+      ]
+    }
+auth:
+  type: noauth
+order: 2000

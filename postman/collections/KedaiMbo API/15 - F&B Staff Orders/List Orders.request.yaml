@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders?page=0&size=20"
+method: GET
+headers:
+  - key: Accept
+    value: application/json
+queryParams:
+  - key: page
+    value: "0"
+  - key: size
+    value: "20"
+  - key: status
+    value: ""
+    disabled: true
+  - key: paymentStatus
+    value: ""
+    disabled: true
+  - key: source
+    value: ""
+    disabled: true
+order: 2000

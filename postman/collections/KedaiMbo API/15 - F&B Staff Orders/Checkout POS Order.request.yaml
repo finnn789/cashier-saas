@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Idempotency-Key
+    value: "{{posOrderKey}}"
+    description: Gunakan key yang sama saat retry payload yang sama. Ganti untuk transaksi baru.
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "serviceType": "DINE_IN",
+      "tableId": "{{tableId}}",
+      "customerLabel": "Pelanggan Meja 1",
+      "items": [
+        {
+          "productId": "{{productId}}",
+          "quantity": 1,
+          "note": "Pedas sedang",
+          "optionIds": []
+        }
+      ]
+    }
+order: 1000
