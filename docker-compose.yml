@@ -1,0 +1,72 @@
+# One-command demo:  docker compose up -d --build        (postgres + backend, demo seed)
+# With AI service:   docker compose --profile ai up -d --build
+# Copy .env.example to .env first; CASHIER_JWT_SECRET_B64 is mandatory.
+name: cashier-saas
+
+services:
+  postgres:
+    # 17 (not 16): V1__initial_schema.sql is a pg_dump 18 file using `SET transaction_timeout` (PG17+).
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cashier_saas
+      POSTGRES_USER: cashier
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cashier_demo}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cashier -d cashier_saas"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: demo
+      CASHIER_DB_URL: jdbc:postgresql://postgres:5432/cashier_saas
+      CASHIER_DB_USERNAME: cashier
+      CASHIER_DB_PASSWORD: ${POSTGRES_PASSWORD:-cashier_demo}
+      CASHIER_JWT_SECRET_B64: ${CASHIER_JWT_SECRET_B64:?set CASHIER_JWT_SECRET_B64 in .env (see .env.example)}
+      CASHIER_JWT_ISSUER: ${CASHIER_JWT_ISSUER:-cashier-saas}
+      CASHIER_JWT_AUDIENCE: ${CASHIER_JWT_AUDIENCE:-cashier-saas-api}
+      CASHIER_REFRESH_COOKIE_SECURE: "false"
+      CASHIER_GRPC_PORT: "9090"
+    ports:
+      - "${BACKEND_HTTP_PORT:-8080}:8080"
+      - "${BACKEND_GRPC_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  ai-services:
+    profiles: ["ai"]
+    build:
+      context: ./Ai-services
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cashier:${POSTGRES_PASSWORD:-cashier_demo}@postgres:5432/cashier_ai
+      CASHIER_GRPC_HOST: backend
+      CASHIER_GRPC_PORT: "9090"
+      CASHIER_GRPC_USE_TLS: "false"
+      AI_TENANT_ID: ${AI_TENANT_ID:-00000000-0000-4000-8000-0000000000b1}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+    ports:
+      - "${AI_HTTP_PORT:-8001}:8001"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
