@@ -1,0 +1,102 @@
+test_history_order_and_current_user_once (test_ai.PromptTests.test_history_order_and_current_user_once) ... ok
+test_maximum_emoji_profile_and_current_keep_complete_newest_pairs (test_ai.PromptTests.test_maximum_emoji_profile_and_current_keep_complete_newest_pairs) ... ok
+test_profile_is_bounded_json_data (test_ai.PromptTests.test_profile_is_bounded_json_data) ... ok
+test_trimming_keeps_newest_complete_pairs (test_ai.PromptTests.test_trimming_keeps_newest_complete_pairs) ... ok
+test_ambiguous_transport_is_never_retried (test_ai.ProviderTests.test_ambiguous_transport_is_never_retried) ... ok
+test_body_cancellation_propagates_and_exits_context (test_ai.ProviderTests.test_body_cancellation_propagates_and_exits_context) ... ok
+test_exact_response_byte_limit_and_one_byte_over (test_ai.ProviderTests.test_exact_response_byte_limit_and_one_byte_over) ... ok
+test_http_failure_classifications_without_reading_body (test_ai.ProviderTests.test_http_failure_classifications_without_reading_body) ... ok
+test_interrupted_body_is_safe_unknown_without_retry (test_ai.ProviderTests.test_interrupted_body_is_safe_unknown_without_retry) ... ok
+test_invalid_response_shapes_are_safe (test_ai.ProviderTests.test_invalid_response_shapes_are_safe) ... ok
+test_long_answer_is_truncated_and_metadata_defaults (test_ai.ProviderTests.test_long_answer_is_truncated_and_metadata_defaults) ... ok
+test_missing_configuration_never_posts (test_ai.ProviderTests.test_missing_configuration_never_posts) ... ok
+test_oversized_stream_stops_reading (test_ai.ProviderTests.test_oversized_stream_stops_reading) ... ok
+test_rate_limit_delay_is_bounded (test_ai.ProviderTests.test_rate_limit_delay_is_bounded) ... ok
+test_success_fixed_endpoint_and_bounded_payload (test_ai.ProviderTests.test_success_fixed_endpoint_and_bounded_payload) ... ok
+test_very_long_decimal_retry_after_remains_rate_limit (test_ai.ProviderTests.test_very_long_decimal_retry_after_remains_rate_limit) ... FAIL
+test_await_owned_cancellation_waits_for_cleanup (test_channel.ChannelTests.test_await_owned_cancellation_waits_for_cleanup) ... ok
+test_finished_and_failed_runner_stop_without_sdk_stop (test_channel.ChannelTests.test_finished_and_failed_runner_stop_without_sdk_stop) ... ok
+test_native_dispatcher_stop_awaits_polling_child_finally (test_channel.ChannelTests.test_native_dispatcher_stop_awaits_polling_child_finally) ... ok
+test_readiness_requires_live_healthy_owned_tasks (test_channel.ChannelTests.test_readiness_requires_live_healthy_owned_tasks) ... ok
+test_repeated_stop_shares_cleanup_and_cancelled_worker_still_closes (test_channel.ChannelTests.test_repeated_stop_shares_cleanup_and_cancelled_worker_still_closes) ... ok
+test_startup_cancellation_closes_fake_resources_before_propagation (test_channel.ChannelTests.test_startup_cancellation_closes_fake_resources_before_propagation) ... ok
+test_startup_webhook_rejection_and_sdk_failure_close_fake_resources (test_channel.ChannelTests.test_startup_webhook_rejection_and_sdk_failure_close_fake_resources) ... ok
+test_stop_before_startup_waits_for_observation (test_channel.ChannelTests.test_stop_before_startup_waits_for_observation) ... ok
+test_supervised_worker_failure_stops_poller (test_channel.ChannelTests.test_supervised_worker_failure_stops_poller) ... ok
+test_empty_allowlist_and_missing_ai_credentials (test_config.ConfigurationTests.test_empty_allowlist_and_missing_ai_credentials) ... ok
+test_invalid_allowlists_do_not_echo_input (test_config.ConfigurationTests.test_invalid_allowlists_do_not_echo_input) ... ok
+test_invalid_scopes_have_safe_errors (test_config.ConfigurationTests.test_invalid_scopes_have_safe_errors) ... ok
+test_process_environment_and_dotenv_loaded_once (test_config.ConfigurationTests.test_process_environment_and_dotenv_loaded_once) ... ok
+test_settings_repr_and_invalid_database_errors_hide_secrets (test_config.ConfigurationTests.test_settings_repr_and_invalid_database_errors_hide_secrets) ... ok
+test_all_successful_delivery_finishes_done (test_conversation.ConversationTests.test_all_successful_delivery_finishes_done) ... ok
+test_commands_reset_only_new_and_never_call_provider (test_conversation.ConversationTests.test_commands_reset_only_new_and_never_call_provider) ... ok
+test_current_user_history_order_and_atomic_answer (test_conversation.ConversationTests.test_current_user_history_order_and_atomic_answer) ... ok
+test_future_retry_waits_outside_transaction_without_busy_query (test_conversation.ConversationTests.test_future_retry_waits_outside_transaction_without_busy_query) ... ok
+test_hard_and_exhausted_errors_create_error_without_assistant (test_conversation.ConversationTests.test_hard_and_exhausted_errors_create_error_without_assistant) ... ok
+test_processing_crash_recovers_error_and_unknown_send_suppresses_tail (test_conversation.ConversationTests.test_processing_crash_recovers_error_and_unknown_send_suppresses_tail) ... ok
+test_ready_delivery_marks_sending_before_send_and_persists_result (test_conversation.ConversationTests.test_ready_delivery_marks_sending_before_send_and_persists_result) ... ok
+test_retry_reuses_existing_user_and_session (test_conversation.ConversationTests.test_retry_reuses_existing_user_and_session) ... ok
+test_transient_provider_schedules_retry_without_assistant (test_conversation.ConversationTests.test_transient_provider_schedules_retry_without_assistant) ... ok
+test_unknown_and_fatal_delivery_suppress_tail_without_resending (test_conversation.ConversationTests.test_unknown_and_fatal_delivery_suppress_tail_without_resending) ... ok
+test_advisory_lock_denial_never_becomes_owned (test_database.DatabaseTests.test_advisory_lock_denial_never_becomes_owned) ... ok
+test_cancelled_close_invalidates_then_disposes_before_propagating (test_database.DatabaseTests.test_cancelled_close_invalidates_then_disposes_before_propagating) ... ok
+test_close_failure_timeout_and_invalidate_failure_are_safe (test_database.DatabaseTests.test_close_failure_timeout_and_invalidate_failure_are_safe) ... ok
+test_dispose_error_is_safe_even_after_close_failure (test_database.DatabaseTests.test_dispose_error_is_safe_even_after_close_failure) ... ok
+test_invalidated_owner_never_reconnects (test_database.DatabaseTests.test_invalidated_owner_never_reconnects) ... ok
+test_invalidation_during_transaction_removes_ownership (test_database.DatabaseTests.test_invalidation_during_transaction_removes_ownership) ... ok
+test_migration_version_missing_rolls_back_and_closes (test_database.DatabaseTests.test_migration_version_missing_rolls_back_and_closes) ... ok
+test_successful_close_disposes_and_releases_ownership (test_database.DatabaseTests.test_successful_close_disposes_and_releases_ownership) ... ok
+test_transaction_commit_rollback_and_ping (test_database.DatabaseTests.test_transaction_commit_rollback_and_ping) ... ok
+test_active_session_reuse_and_scoped_new_reset (test_repository.RepositoryTests.test_active_session_reuse_and_scoped_new_reset) ... ok
+test_identity_upsert_retains_returned_identity_and_refreshes_profile (test_repository.RepositoryTests.test_identity_upsert_retains_returned_identity_and_refreshes_profile) ... ok
+test_missing_identity_stops_before_inbox_insert (test_repository.RepositoryTests.test_missing_identity_stops_before_inbox_insert) ... ok
+test_reply_and_outbox_preserve_scope_and_order (test_repository.RepositoryTests.test_reply_and_outbox_preserve_scope_and_order) ... ok
+test_sequence_scope_mismatch_never_inserts_message (test_repository.RepositoryTests.test_sequence_scope_mismatch_never_inserts_message) ... ok
+test_access_checks_cover_every_command (test_telegram_intake.IntakeTests.test_access_checks_cover_every_command) ... ok
+test_cancellation_during_retry_sleep_has_no_fatal_signal_or_next_attempt (test_telegram_intake.IntakeTests.test_cancellation_during_retry_sleep_has_no_fatal_signal_or_next_attempt) ... ok
+test_command_normalization_and_deep_link (test_telegram_intake.IntakeTests.test_command_normalization_and_deep_link) ... ok
+test_empty_allowlist_accepts_private_human (test_telegram_intake.IntakeTests.test_empty_allowlist_accepts_private_human) ... ok
+test_fatal_handler_suspends_until_cancelled_and_logs_safe_message (test_telegram_intake.IntakeTests.test_fatal_handler_suspends_until_cancelled_and_logs_safe_message) ... ok
+test_injected_update_id_and_commit_before_handler_return (test_telegram_intake.IntakeTests.test_injected_update_id_and_commit_before_handler_return) ... ok
+test_input_cap_and_empty_inputs (test_telegram_intake.IntakeTests.test_input_cap_and_empty_inputs) ... ok
+test_mutable_profile_and_fallback_names (test_telegram_intake.IntakeTests.test_mutable_profile_and_fallback_names) ... ok
+test_ownership_loss_is_fatal_without_retry (test_telegram_intake.IntakeTests.test_ownership_loss_is_fatal_without_retry) ... ok
+test_six_supported_aborts_have_bounded_backoff_outside_transactions (test_telegram_intake.IntakeTests.test_six_supported_aborts_have_bounded_backoff_outside_transactions) ... Telegram intake waiting for database availability.
+Telegram intake waiting for database availability.
+Telegram intake waiting for database availability.
+Telegram intake waiting for database availability.
+Telegram intake waiting for database availability.
+Telegram intake waiting for database availability.
+ok
+test_transient_abort_retries_inside_handler (test_telegram_intake.IntakeTests.test_transient_abort_retries_inside_handler) ... ok
+test_transient_commit_exit_retries_same_update_and_message (test_telegram_intake.IntakeTests.test_transient_commit_exit_retries_same_update_and_message) ... Telegram intake waiting for database availability.
+ok
+test_unknown_commit_failure_and_owner_loss_suspend_safely (test_telegram_intake.IntakeTests.test_unknown_commit_failure_and_owner_loss_suspend_safely) ... ok
+test_fatal_api_errors_are_safe_and_terminal (test_telegram_sender.SenderTests.test_fatal_api_errors_are_safe_and_terminal) ... ok
+test_network_and_timeout_are_unknown_without_retry (test_telegram_sender.SenderTests.test_network_and_timeout_are_unknown_without_retry) ... ok
+test_rate_limit_pending_and_retry_exhaustion (test_telegram_sender.SenderTests.test_rate_limit_pending_and_retry_exhaustion) ... ok
+test_server_failure_has_bounded_attempts (test_telegram_sender.SenderTests.test_server_failure_has_bounded_attempts) ... ok
+test_success_returns_persistable_message_id_without_parse_mode (test_telegram_sender.SenderTests.test_success_returns_persistable_message_id_without_parse_mode) ... ok
+test_utf16_chunks_preserve_content_and_boundaries (test_telegram_sender.SenderTests.test_utf16_chunks_preserve_content_and_boundaries) ... ok
+
+======================================================================
+FAIL: test_very_long_decimal_retry_after_remains_rate_limit (test_ai.ProviderTests.test_very_long_decimal_retry_after_remains_rate_limit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\arips\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\arips\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "E:\Java\cashier-saas\Ai-services\tests\unit\test_ai.py", line 187, in test_very_long_decimal_retry_after_remains_rate_limit
+    self.assertEqual(caught.exception.code, "AI_RATE_LIMIT")
+AssertionError: 'AI_INVALID_RESPONSE' != 'AI_RATE_LIMIT'
+- AI_INVALID_RESPONSE
++ AI_RATE_LIMIT
+
+
+----------------------------------------------------------------------
+Ran 73 tests in 2.340s
+
+FAILED (failures=1)

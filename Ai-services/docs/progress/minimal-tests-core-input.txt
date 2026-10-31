@@ -1,0 +1,1102 @@
+Minimal schema source reviewed:6 tables31 columns6 FKs3 indexes, zero metadata-vs-frozen-declaration differences; no migration/DB/tests executed. Now author ONLY tests/unit/test_repository.py, tests/unit/test_conversation.py and docs/progress/minimal-tests-core-worker.md. All queued API/Worker cases are superseded by human's most-minimal choice. Preserve applicable meaningful ownership/history/prompt/transaction cases, replace obsolete queue assertions with direct ChatService cases. Do not preserve obsolete compatibility APIs. No production/schema/config/dependency writes, no tools/test execution/live operations.
+Use current candidate Repo/ChatService source supplied below. Repo has upsert_user, find_duplicate_incoming, resolve_conversation, insert_message, completed_history and register_telegram_channel; public argument types exact. Tests capture real SQLAlchemy expressions compiled with PostgreSQL dialect, proper scalar/execute side effects; insert_message now scalar owner lookup then scalar INSERT RETURNING int then execute last_message_at update with rowcount1. Cover tenant/channel/platform ownership via exists/joins, wrong conversation no insert, identity conflict separatedplatform, duplicate lookup acrosssessions, NULL AIexternalids, active/reset state and history roles/orphans/current exclusion/boundedorder. No fake persistence backend or realDB. Model/constraint inspections are unit assertions to run later, not claims of enforced live constraints.
+ChatService tests use stdlib unittest/AsyncMock/specs and transaction-marker context managers. USER preparation commit before AI; ASSISTANT new txn before return; dup storedTEXT returnsNone no provider/send, commands NEW-onlyreset/noAI, ephemeral errors no assistant history, bounded explicit transient retry outsideDB with module.sleep patched safely, no retry on unknowntransport, inputlimit and promptcurrentonce/order. Repo returnsUUID user/conversation IDs, int message IDs. ChatService has no sender or Worker; do not import app.chat.worker. Keep finite timeout/cancellation cleanup for any tasks. All typed helpers; no runtime commands. Return complete proposed files plusreport, NOT a plan.
+
+SOURCE PATH: docs/progress/minimal-stage-b1/app/chat/repositories.py
+'''Tenant- and channel-scoped SQLAlchemy operations for minimal chat storage.'''
+
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import and_, exists, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.sql import Executable
+
+from app.chat.entities import ChannelAccount, ChannelUser, Conversation, Message, Tenant
+
+Row = dict[str, Any]
+TENANTS = Tenant.__table__
+CHANNELS = ChannelAccount.__table__
+USERS = ChannelUser.__table__
+CONVERSATIONS = Conversation.__table__
+MESSAGES = Message.__table__
+PLATFORMS = frozenset(('TELEGRAM', 'WHATSAPP'))
+
+
+async def register_telegram_channel(
+    connection: AsyncConnection,
+    tenant_id: UUID,
+    external_bot_id: int,
+    username: str | None,
+) -> UUID:
+    '''Provision the local tenant and bot without changing existing ownership.'''
+    if not isinstance(tenant_id, UUID) or external_bot_id <= 0:
+        raise ValueError('TELEGRAM_CHANNEL_INVALID')
+    external_account_id = str(external_bot_id)
+    await connection.execute(
+        pg_insert(TENANTS).values(id=tenant_id).on_conflict_do_nothing(
+            index_elements=[TENANTS.c.id]
+        )
+    )
+    await connection.execute(
+        pg_insert(CHANNELS).values(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            platform='TELEGRAM',
+            external_account_id=external_account_id,
+            username=username,
+        ).on_conflict_do_nothing(
+            index_elements=[CHANNELS.c.platform, CHANNELS.c.external_account_id]
+        )
+    )
+    channel_id = await connection.scalar(
+        select(CHANNELS.c.id).where(
+            CHANNELS.c.tenant_id == tenant_id,
+            CHANNELS.c.platform == 'TELEGRAM',
+            CHANNELS.c.external_account_id == external_account_id,
+        )
+    )
+    if channel_id is None:
+        raise RuntimeError('CHANNEL_ACCOUNT_UNAVAILABLE')
+    await connection.execute(
+        update(CHANNELS).where(
+            CHANNELS.c.id == channel_id,
+            CHANNELS.c.tenant_id == tenant_id,
+            CHANNELS.c.platform == 'TELEGRAM',
+            CHANNELS.c.external_account_id == external_account_id,
+        ).values(username=username)
+    )
+    return channel_id
+
+
+class Repository:
+    def __init__(self, tenant_id: UUID, channel_id: UUID, platform: str) -> None:
+        if not isinstance(tenant_id, UUID) or not isinstance(channel_id, UUID):
+            raise ValueError('REPOSITORY_SCOPE_INVALID')
+        if platform not in PLATFORMS:
+            raise ValueError('REPOSITORY_PLATFORM_INVALID')
+        self.tenant_id = tenant_id
+        self.channel_id = channel_id
+        self.platform = platform
+
+    async def _first(self, connection: AsyncConnection, statement: Executable) -> Row | None:
+        result = await connection.execute(statement)
+        mapping = result.mappings().first()
+        return dict(mapping) if mapping is not None else None
+
+    def _channel_exists(self):
+        return exists(
+            select(CHANNELS.c.id).where(
+                CHANNELS.c.id == self.channel_id,
+                CHANNELS.c.tenant_id == self.tenant_id,
+                CHANNELS.c.platform == self.platform,
+            )
+        )
+
+    def _owned_conversation(self, user_id: UUID, external_chat_id: str):
+        return and_(
+            self._channel_exists(),
+            CONVERSATIONS.c.channel_id == self.channel_id,
+            CONVERSATIONS.c.platform == self.platform,
+            CONVERSATIONS.c.user_id == user_id,
+            CONVERSATIONS.c.external_chat_id == external_chat_id,
+        )
+
+    async def upsert_user(
+        self,
+        connection: AsyncConnection,
+        external_user_id: str,
+        username: str | None,
+        first_name: str | None,
+    ) -> UUID:
+        if not external_user_id or len(external_user_id) > 128:
+            raise ValueError('EXTERNAL_USER_ID_INVALID')
+        if not await connection.scalar(select(self._channel_exists())):
+            raise RuntimeError('CHANNEL_ACCOUNT_UNAVAILABLE')
+        statement = pg_insert(USERS).values(
+            id=uuid4(),
+            platform=self.platform,
+            external_user_id=external_user_id,
+            username=username,
+            first_name=first_name,
+        )
+        user_id = await connection.scalar(
+            statement.on_conflict_do_update(
+                index_elements=[USERS.c.platform, USERS.c.external_user_id],
+                set_={
+                    'username': statement.excluded.username,
+                    'first_name': statement.excluded.first_name,
+                },
+            ).returning(USERS.c.id)
+        )
+        if user_id is None:
+            raise RuntimeError('USER_NOT_RETURNED')
+        return user_id
+
+    async def find_duplicate_incoming(
+        self,
+        connection: AsyncConnection,
+        user_id: UUID,
+        external_chat_id: str,
+        external_message_id: str,
+    ) -> bool:
+        '''Find a USER provider ID across all sessions of this owner and chat.'''
+        if not external_message_id or len(external_message_id) > 512:
+            raise ValueError('EXTERNAL_MESSAGE_ID_INVALID')
+        found = await connection.scalar(
+            select(MESSAGES.c.id).select_from(
+                MESSAGES.join(
+                    CONVERSATIONS,
+                    MESSAGES.c.conversation_id == CONVERSATIONS.c.id,
+                ).join(
+                    CHANNELS,
+                    and_(
+                        CONVERSATIONS.c.channel_id == CHANNELS.c.id,
+                        CONVERSATIONS.c.platform == CHANNELS.c.platform,
+                    ),
+                )
+            ).where(
+                CHANNELS.c.tenant_id == self.tenant_id,
+                CHANNELS.c.id == self.channel_id,
+                CHANNELS.c.platform == self.platform,
+                CONVERSATIONS.c.user_id == user_id,
+                CONVERSATIONS.c.external_chat_id == external_chat_id,
+                MESSAGES.c.role == 'USER',
+                MESSAGES.c.external_message_id == external_message_id,
+            ).limit(1)
+        )
+        return found is not None
+
+    async def resolve_conversation(
+        self,
+        connection: AsyncConnection,
+        user_id: UUID,
+        external_chat_id: str,
+        reset: bool = False,
+    ) -> UUID:
+        if not isinstance(user_id, UUID) or not external_chat_id or len(external_chat_id) > 128:
+            raise ValueError('CONVERSATION_OWNER_INVALID')
+        if not await connection.scalar(select(self._channel_exists())):
+            raise RuntimeError('CHANNEL_ACCOUNT_UNAVAILABLE')
+        if reset:
+            await connection.execute(
+                update(CONVERSATIONS).where(
+                    self._owned_conversation(user_id, external_chat_id),
+                    CONVERSATIONS.c.status == 'ACTIVE',
+                ).values(status='CLOSED')
+            )
+        conversation_id = await connection.scalar(
+            select(CONVERSATIONS.c.id).where(
+                self._owned_conversation(user_id, external_chat_id),
+                CONVERSATIONS.c.status == 'ACTIVE',
+            ).limit(1)
+        )
+        if conversation_id is not None:
+            return conversation_id
+        conversation_id = await connection.scalar(
+            insert(CONVERSATIONS).values(
+                id=uuid4(),
+                channel_id=self.channel_id,
+                platform=self.platform,
+                user_id=user_id,
+                external_chat_id=external_chat_id,
+                status='ACTIVE',
+            ).returning(CONVERSATIONS.c.id)
+        )
+        if conversation_id is None:
+            raise RuntimeError('CONVERSATION_NOT_RETURNED')
+        return conversation_id
+
+    async def insert_message(
+        self,
+        connection: AsyncConnection,
+        conversation_id: UUID,
+        user_id: UUID,
+        external_chat_id: str,
+        role: str,
+        content: str,
+        external_message_id: str | None = None,
+    ) -> int:
+        if role not in ('USER', 'ASSISTANT') or not content:
+            raise ValueError('MESSAGE_INVALID')
+        if role == 'USER' and (not external_message_id or len(external_message_id) > 512):
+            raise ValueError('EXTERNAL_MESSAGE_ID_INVALID')
+        if role == 'ASSISTANT' and external_message_id is not None:
+            raise ValueError('ASSISTANT_EXTERNAL_ID_INVALID')
+        owned = await connection.scalar(
+            select(CONVERSATIONS.c.id).where(
+                CONVERSATIONS.c.id == conversation_id,
+                self._owned_conversation(user_id, external_chat_id),
+                CONVERSATIONS.c.status == 'ACTIVE',
+            )
+        )
+        if owned is None:
+            raise RuntimeError('CONVERSATION_SCOPE_MISMATCH')
+        message_id = await connection.scalar(
+            insert(MESSAGES).values(
+                conversation_id=conversation_id,
+                external_message_id=external_message_id,
+                role=role,
+                content=content,
+            ).returning(MESSAGES.c.id)
+        )
+        if message_id is None:
+            raise RuntimeError('MESSAGE_NOT_RETURNED')
+        result = await connection.execute(
+            update(CONVERSATIONS).where(
+                CONVERSATIONS.c.id == conversation_id,
+                self._owned_conversation(user_id, external_chat_id),
+                CONVERSATIONS.c.status == 'ACTIVE',
+            ).values(last_message_at=func.now())
+        )
+        if result.rowcount != 1:
+            raise RuntimeError('CONVERSATION_SCOPE_MISMATCH')
+        return int(message_id)
+
+    async def completed_history(
+        self,
+        connection: AsyncConnection,
+        conversation_id: UUID,
+        user_id: UUID,
+        external_chat_id: str,
+        before_message_id: int,
+        limit: int = 64,
+    ) -> list[tuple[str, str]]:
+        '''Pair recent ordered roles; an unmatched USER is replaced by the next USER.'''
+        if not 1 <= limit <= 64:
+            raise ValueError('HISTORY_LIMIT_INVALID')
+        result = await connection.execute(
+            select(MESSAGES.c.role, MESSAGES.c.content).select_from(
+                MESSAGES.join(
+                    CONVERSATIONS,
+                    MESSAGES.c.conversation_id == CONVERSATIONS.c.id,
+                ).join(
+                    CHANNELS,
+                    and_(
+                        CONVERSATIONS.c.channel_id == CHANNELS.c.id,
+                        CONVERSATIONS.c.platform == CHANNELS.c.platform,
+                    ),
+                )
+            ).where(
+                CHANNELS.c.tenant_id == self.tenant_id,
+                CHANNELS.c.id == self.channel_id,
+                CHANNELS.c.platform == self.platform,
+                CONVERSATIONS.c.id == conversation_id,
+                CONVERSATIONS.c.user_id == user_id,
+                CONVERSATIONS.c.external_chat_id == external_chat_id,
+                MESSAGES.c.id < before_message_id,
+            ).order_by(MESSAGES.c.id.desc()).limit(limit)
+        )
+        pending_user: str | None = None
+        pairs: list[tuple[str, str]] = []
+        for role, content in reversed(result.all()):
+            if role == 'USER':
+                pending_user = content
+            elif role == 'ASSISTANT' and pending_user is not None:
+                pairs.append((pending_user, content))
+                pending_user = None
+        return pairs
+
+
+SOURCE PATH: docs/progress/minimal-stage-b1/app/chat/service.py
+'''Serial chat use cases with short database transactions.'''
+
+import asyncio
+
+from app.ai.openrouter import AIError, OpenRouterClient
+from app.ai.prompts import MAX_INPUT_CHARS, build_prompt
+from app.chat.repositories import Repository
+from app.core.database import Database
+
+
+class ChatService:
+    def __init__(
+        self,
+        database: Database,
+        repository: Repository,
+        ai: OpenRouterClient,
+    ) -> None:
+        self.database = database
+        self.repository = repository
+        self.ai = ai
+        self._serial = asyncio.Lock()
+
+    async def handle(
+        self,
+        *,
+        external_user_id: str,
+        external_chat_id: str,
+        external_message_id: str,
+        username: str | None,
+        first_name: str | None,
+        kind: str,
+        content: str,
+    ) -> str | None:
+        '''Handle one permitted SDK message; None means a duplicate TEXT was stored.'''
+        if kind not in ('TEXT', 'START', 'NEW', 'SESSION', 'INVALID', 'UNSUPPORTED'):
+            raise ValueError('MESSAGE_KIND_INVALID')
+        if not external_chat_id or len(external_chat_id) > 128:
+            raise ValueError('EXTERNAL_CHAT_ID_INVALID')
+        if not external_message_id or len(external_message_id) > 512:
+            raise ValueError('EXTERNAL_MESSAGE_ID_INVALID')
+        if kind == 'TEXT' and (not content.strip() or len(content) > MAX_INPUT_CHARS):
+            kind = 'INVALID'
+        display_name = (first_name or username or external_user_id).strip()
+        if not display_name:
+            display_name = external_user_id
+        async with self._serial:
+            async with self.database.transaction() as connection:
+                user_id = await self.repository.upsert_user(
+                    connection, external_user_id, username, first_name
+                )
+                if kind == 'TEXT':
+                    if await self.repository.find_duplicate_incoming(
+                        connection, user_id, external_chat_id, external_message_id
+                    ):
+                        return None
+                if kind in ('INVALID', 'UNSUPPORTED'):
+                    return self._command_answer(kind, display_name, None)
+                conversation_id = await self.repository.resolve_conversation(
+                    connection, user_id, external_chat_id, reset=kind == 'NEW'
+                )
+                if kind != 'TEXT':
+                    return self._command_answer(kind, display_name, conversation_id)
+                current_id = await self.repository.insert_message(
+                    connection,
+                    conversation_id,
+                    user_id,
+                    external_chat_id,
+                    'USER',
+                    content,
+                    external_message_id,
+                )
+                pairs = await self.repository.completed_history(
+                    connection, conversation_id, user_id, external_chat_id, current_id
+                )
+                prompt = build_prompt(display_name, username, pairs, content)
+            completion = None
+            for attempt in range(1, 4):
+                try:
+                    completion = await self.ai.reply(prompt)
+                    break
+                except AIError as error:
+                    if not error.retryable or attempt == 3:
+                        return self._error_message(error.code)
+                    await asyncio.sleep(max(error.delay, attempt * 5))
+            if completion is None:
+                raise RuntimeError('AI_COMPLETION_MISSING')
+            async with self.database.transaction() as connection:
+                await self.repository.insert_message(
+                    connection,
+                    conversation_id,
+                    user_id,
+                    external_chat_id,
+                    'ASSISTANT',
+                    completion.content,
+                )
+            return completion.content
+
+    def _command_answer(self, kind: str, name: str, session_id: object) -> str:
+        if kind == 'START':
+            return f'Halo, {name}! Silakan kirim pertanyaan. Sesi: {session_id}'
+        if kind == 'NEW':
+            return f'Sesi baru dibuat, {name}. Sesi: {session_id}'
+        if kind == 'SESSION':
+            return f'{name}, sesi aktif Anda: {session_id}'
+        if kind == 'INVALID':
+            return 'Kirim pesan teks berisi 1 sampai 4000 karakter.'
+        return 'Perintah tersedia: /start, /new, /session.'
+
+    def _error_message(self, code: str) -> str:
+        if code == 'AI_NOT_CONFIGURED':
+            return 'AI belum dikonfigurasi. Operator perlu mengisi OPENROUTER_API_KEY dan AI_MODEL.'
+        if code in ('AI_HTTP_401', 'AI_HTTP_403'):
+            return 'Akses AI ditolak. Hubungi operator untuk memeriksa konfigurasi.'
+        if code == 'AI_HTTP_402':
+            return 'Saldo layanan AI tidak mencukupi. Hubungi operator.'
+        if code == 'AI_TRANSPORT_UNKNOWN':
+            return (
+                'Koneksi AI terputus; hasil permintaan tidak diketahui. '
+                'Kirim pertanyaan baru bila perlu.'
+            )
+        return 'Layanan AI belum dapat menjawab. Silakan kirim pertanyaan baru nanti.'
+
+
+SOURCE PATH: tests/unit/test_repository.py
+"""Repository contracts over captured PostgreSQL SQLAlchemy expressions."""
+
+import re
+import unittest
+from typing import Any
+from unittest.mock import AsyncMock, Mock
+from uuid import UUID, uuid4
+
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.sql import Executable
+from sqlalchemy.sql.elements import TextClause
+
+from app.chat.repositories import Repository
+
+
+class RepositoryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.repository = Repository("unit-scope", 71)
+        self.connection = Mock(spec=AsyncConnection)
+        self.connection.execute = AsyncMock()
+        self.connection.scalar = AsyncMock(return_value=3)
+        self.inbox: dict[str, Any] = {
+            "id": uuid4(), "identity_id": uuid4(), "chat_id": 7, "update_id": 81
+        }
+
+    def result(self, row: dict[str, Any] | None) -> Mock:
+        result = Mock()
+        result.mappings.return_value.first.return_value = row
+        return result
+
+    def statement(self, index: int) -> tuple[str, dict[str, Any]]:
+        call = self.connection.execute.await_args_list[index]
+        self.assertEqual(len(call.args), 1)
+        self.assertFalse(call.kwargs)
+        return self.compiled(call.args[0])
+
+    def compiled(self, statement: Executable) -> tuple[str, dict[str, Any]]:
+        self.assertNotIsInstance(statement, TextClause)
+        compiled = statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"render_postcompile": True},
+        )
+        return re.sub(r"\s+", " ", str(compiled)).strip(), dict(compiled.params)
+
+    def assert_scoped(self, sql: str, parameters: dict[str, Any]) -> None:
+        self.assertRegex(sql, r"\bscope\s*=")
+        self.assertRegex(sql, r"\bbot_id\s*=")
+        self.assertIn("unit-scope", parameters.values())
+        self.assertIn(71, parameters.values())
+
+    async def test_identity_upsert_retains_returned_identity_and_refreshes_profile(self) -> None:
+        identity = uuid4()
+        for username, name in (("old", "Old"), ("new", "New")):
+            self.connection.execute.side_effect = [self.result({"id": identity}), self.result(None)]
+            await self.repository.intake(
+                self.connection, 7, username, name, None, name,
+                81, 7, 21, "TEXT", "hello",
+            )
+        for index, username, name in ((0, "old", "Old"), (2, "new", "New")):
+            sql, parameters = self.statement(index)
+            self.assertIn("ON CONFLICT (scope, bot_id, telegram_user_id) DO UPDATE", sql)
+            for column in ("username", "first_name", "last_name", "display_name"):
+                self.assertIn(f"{column} = excluded.{column}", sql)
+            self.assertIn("updated_at = now()", sql)
+            self.assertIn("last_seen_at = now()", sql)
+            self.assertEqual(parameters["scope"], "unit-scope")
+            self.assertEqual(parameters["bot_id"], 71)
+            self.assertEqual(parameters["username"], username)
+            self.assertEqual(parameters["first_name"], name)
+            self.assertEqual(parameters["display_name"], name)
+            self.assertEqual(parameters["telegram_user_id"], 7)
+            inbox_sql, inbox_parameters = self.statement(index + 1)
+            self.assertIn("ON CONFLICT (scope, bot_id, update_id) DO NOTHING", inbox_sql)
+            self.assertEqual(inbox_parameters["scope"], "unit-scope")
+            self.assertEqual(inbox_parameters["bot_id"], 71)
+            self.assertEqual(inbox_parameters["identity_id"], identity)
+            self.assertEqual(
+                (inbox_parameters["update_id"], inbox_parameters["chat_id"], inbox_parameters["message_id"]),
+                (81, 7, 21),
+            )
+
+    async def test_missing_identity_stops_before_inbox_insert(self) -> None:
+        self.connection.execute.return_value = self.result(None)
+        with self.assertRaisesRegex(RuntimeError, "^IDENTITY_NOT_RETURNED$"):
+            await self.repository.intake(
+                self.connection, 7, None, "Name", None, "Name",
+                81, 7, 21, "TEXT", "hello",
+            )
+        self.assertEqual(self.connection.execute.await_count, 1)
+
+    async def test_active_session_reuse_and_scoped_new_reset(self) -> None:
+        session = {"id": uuid4()}
+        self.connection.execute.return_value = self.result(session)
+        self.assertEqual(await self.repository.session(self.connection, self.inbox), session)
+        self.assertEqual(self.connection.execute.await_count, 1)
+        sql, parameters = self.statement(0)
+        self.assert_scoped(sql, parameters)
+        self.assertIn("ACTIVE", parameters.values())
+        self.assertIn(self.inbox["identity_id"], parameters.values())
+        self.assertIn(7, parameters.values())
+        self.connection.execute.reset_mock()
+        self.connection.execute.side_effect = [self.result(None), self.result(None), self.result(session)]
+        self.assertEqual(
+            await self.repository.session(self.connection, self.inbox, reset=True), session
+        )
+        reset_sql, reset_parameters = self.statement(0)
+        self.assertIn("UPDATE conversation_sessions", reset_sql)
+        self.assert_scoped(reset_sql, reset_parameters)
+        self.assertEqual(reset_parameters["status"], "CLOSED")
+        self.assertIn("ACTIVE", reset_parameters.values())
+        self.assertIn(self.inbox["identity_id"], reset_parameters.values())
+        self.assertIn(7, reset_parameters.values())
+        insert_sql, insert_parameters = self.statement(2)
+        self.assertIn("INSERT INTO conversation_sessions", insert_sql)
+        self.assertIsInstance(insert_parameters["id"], UUID)
+        self.assertEqual(insert_parameters["identity_id"], self.inbox["identity_id"])
+        self.assertEqual(insert_parameters["chat_id"], 7)
+        self.assertEqual(insert_parameters["scope"], "unit-scope")
+        self.assertEqual(insert_parameters["bot_id"], 71)
+
+    async def test_sequence_scope_mismatch_never_inserts_message(self) -> None:
+        session = uuid4()
+        self.connection.scalar.return_value = None
+        with self.assertRaisesRegex(RuntimeError, "^SESSION_SCOPE_MISMATCH$"):
+            await self.repository.message(
+                self.connection, self.inbox, session, "USER", "hello"
+            )
+        self.connection.execute.assert_not_awaited()
+        statement = self.connection.scalar.await_args.args[0]
+        sql, parameters = self.compiled(statement)
+        self.assertIn("UPDATE conversation_sessions", sql)
+        self.assertIn("RETURNING conversation_sessions.last_sequence", sql)
+        self.assert_scoped(sql, parameters)
+        self.assertIn(session, parameters.values())
+        self.assertIn(self.inbox["identity_id"], parameters.values())
+        self.assertIn(7, parameters.values())
+        self.assertRegex(sql, r"last_sequence\s*=\s*conversation_sessions\.last_sequence\s*\+")
+
+    async def test_reply_and_outbox_preserve_scope_and_order(self) -> None:
+        session, user = uuid4(), uuid4()
+        assistant = await self.repository.message(
+            self.connection, self.inbox, session, "ASSISTANT", "answer",
+            reply_to=user, model="model", response_id="provider-id",
+        )
+        sql, parameters = self.statement(0)
+        self.assertIn("INSERT INTO conversation_messages", sql)
+        self.assertIsInstance(assistant, UUID)
+        self.assertEqual(parameters["id"], assistant)
+        self.assertEqual(
+            (parameters["sequence"], parameters["reply_to_id"], parameters["model"], parameters["provider_response_id"]),
+            (3, user, "model", "provider-id"),
+        )
+        self.assertEqual(parameters["scope"], "unit-scope")
+        self.assertEqual(parameters["bot_id"], 71)
+        await self.repository.outbox(
+            self.connection, self.inbox, session, "AI", ["first", "second"], assistant
+        )
+        for index, number, content in ((1, 0, "first"), (2, 1, "second")):
+            sql, parameters = self.statement(index)
+            self.assertIn(
+                "ON CONFLICT (scope, bot_id, inbox_id, response_kind, chunk_number) DO NOTHING",
+                sql,
+            )
+            self.assertEqual(
+                (parameters["scope"], parameters["bot_id"], parameters["identity_id"],
+                 parameters["chat_id"], parameters["session_id"], parameters["inbox_id"]),
+                ("unit-scope", 71, self.inbox["identity_id"], 7, session, self.inbox["id"]),
+            )
+            self.assertEqual(
+                (parameters["assistant_message_id"], parameters["chunk_number"], parameters["content"]),
+                (assistant, number, content),
+            )
+
+    async def test_completed_history_is_fully_scoped_and_chronological(self) -> None:
+        result = Mock()
+        result.mappings.return_value.all.return_value = [
+            {"user_content": "new", "answer": "answer-new"},
+            {"user_content": "old", "answer": "answer-old"},
+        ]
+        self.connection.execute.return_value = result
+        session = uuid4()
+        pairs = await self.repository.completed_history(self.connection, self.inbox, session)
+        self.assertEqual(pairs, [("old", "answer-old"), ("new", "answer-new")])
+        sql, parameters = self.statement(0)
+        self.assertIn("JOIN conversation_messages AS assistant_message ON", sql)
+        self.assertIn("JOIN telegram_inbox AS completed_inbox ON", sql)
+        for column in ("scope", "bot_id", "identity_id", "chat_id", "session_id"):
+            self.assertIn(
+                f"assistant_message.{column} = user_message.{column}", sql
+            )
+        self.assertIn("assistant_message.reply_to_id = user_message.id", sql)
+        for column in ("scope", "bot_id", "identity_id", "chat_id"):
+            self.assertIn(f"completed_inbox.{column} = user_message.{column}", sql)
+        self.assertRegex(sql, r"user_message\.inbox_id\s*!=\s*%\(")
+        self.assertIn("ORDER BY user_message.sequence DESC", sql)
+        self.assertIn("DONE", parameters.values())
+        self.assertIn("USER", parameters.values())
+        self.assertIn("ASSISTANT", parameters.values())
+        self.assertIn(self.inbox["id"], parameters.values())
+        self.assertIn(session, parameters.values())
+        self.assertIn(self.inbox["identity_id"], parameters.values())
+        self.assertIn(7, parameters.values())
+        self.assertIn(32, parameters.values())
+        self.assert_scoped(sql, parameters)
+
+    async def test_existing_user_and_queue_reads_are_scoped(self) -> None:
+        self.connection.execute.return_value = self.result({"id": uuid4()})
+        session = uuid4()
+        await self.repository.existing_user_message(self.connection, self.inbox, session)
+        sql, parameters = self.statement(0)
+        self.assert_scoped(sql, parameters)
+        for value in (self.inbox["identity_id"], 7, session, self.inbox["id"], "USER"):
+            self.assertIn(value, parameters.values())
+        await self.repository.next_inbox(self.connection)
+        sql, parameters = self.statement(1)
+        self.assert_scoped(sql, parameters)
+        self.assertIn("ORDER BY telegram_inbox.received_order", sql)
+        for status in ("PENDING", "RETRY", "READY"):
+            self.assertIn(status, parameters.values())
+        await self.repository.pending_outbox(self.connection, self.inbox)
+        sql, parameters = self.statement(2)
+        self.assert_scoped(sql, parameters)
+        self.assertIn("ORDER BY telegram_outbox.chunk_number", sql)
+        for value in (self.inbox["identity_id"], 7, self.inbox["id"], "PENDING"):
+            self.assertIn(value, parameters.values())
+
+    async def test_recovery_correlates_earlier_failed_chunks_with_same_queue(self) -> None:
+        await self.repository.recover_sending(self.connection)
+        await self.repository.suppress_tails_after_unknown(self.connection)
+        sending_sql, sending_parameters = self.statement(0)
+        self.assert_scoped(sending_sql, sending_parameters)
+        for value in ("SENDING", "UNKNOWN", "CRASH_DURING_SEND"):
+            self.assertIn(value, sending_parameters.values())
+        tail_sql, tail_parameters = self.statement(1)
+        self.assert_scoped(tail_sql, tail_parameters)
+        self.assertIn("EXISTS (SELECT", tail_sql)
+        for column in ("scope", "bot_id", "inbox_id", "response_kind"):
+            self.assertIn(f"previous.{column} = telegram_outbox.{column}", tail_sql)
+        self.assertIn("previous.chunk_number < telegram_outbox.chunk_number", tail_sql)
+        for value in ("PENDING", "FAILED", "UNKNOWN", "PREVIOUS_CHUNK_UNKNOWN"):
+            self.assertIn(value, tail_parameters.values())
+
+    async def test_terminal_delivery_and_tail_updates_keep_owner_scope(self) -> None:
+        chunk = {"id": uuid4(), "response_kind": "AI", "chunk_number": 0}
+        await self.repository.mark_sending(self.connection, self.inbox, chunk)
+        await self.repository.mark_outbox_result(
+            self.connection, self.inbox, chunk, "UNKNOWN", "SAFE_CODE", None, None, 0
+        )
+        await self.repository.fail_later_chunks(self.connection, self.inbox, chunk)
+        for index in range(3):
+            sql, parameters = self.statement(index)
+            self.assert_scoped(sql, parameters)
+            for value in (self.inbox["identity_id"], 7, self.inbox["id"], chunk["id"]):
+                if index < 2 or value != chunk["id"]:
+                    self.assertIn(value, parameters.values())
+        tail_sql, tail_parameters = self.statement(2)
+        self.assertIn("telegram_outbox.chunk_number >", tail_sql)
+        for value in ("AI", 0, "PENDING", "FAILED", "PREVIOUS_CHUNK_FAILED"):
+            self.assertIn(value, tail_parameters.values())
+
+
+SOURCE PATH: tests/unit/test_conversation.py
+"""Worker orchestration with named repository methods and transaction markers."""
+
+import asyncio
+import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
+from uuid import UUID, uuid4
+
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+import app.chat.worker as worker_module
+from app.ai.openrouter import AIError, Completion, OpenRouterClient
+from app.channels.telegram.sender import Delivery, Sender
+from app.chat.repositories import Repository
+from app.chat.worker import Worker
+from app.core.database import Database
+
+
+class TransactionMarkers:
+    def __init__(self, connection: Mock) -> None:
+        self.connection = connection
+        self.active = False
+        self.number = 0
+        self.events: list[tuple[str, int]] = []
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Mock]:
+        if self.active:
+            raise AssertionError("Nested transaction")
+        self.number += 1
+        number = self.number
+        self.active = True
+        self.events.append(("begin", number))
+        try:
+            yield self.connection
+        except BaseException:
+            self.events.append(("rollback", number))
+            raise
+        else:
+            self.events.append(("commit", number))
+        finally:
+            self.active = False
+
+
+class ConversationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.connection = Mock(spec=AsyncConnection)
+        self.boundary = TransactionMarkers(self.connection)
+        self.database = Mock(spec=Database)
+        self.database.transaction = Mock(side_effect=self.boundary.transaction)
+        self.repository = Mock(spec=Repository)
+        self.ai = Mock(spec=OpenRouterClient)
+        self.ai.reply = AsyncMock(side_effect=self.complete)
+        self.sender = Mock(spec=Sender)
+        self.sender.send = AsyncMock(side_effect=self.send)
+        self.worker = Worker(self.database, self.repository, self.ai, self.sender)
+        self.session_id, self.user_id, self.assistant_id = uuid4(), uuid4(), uuid4()
+        self.inbox: dict[str, Any] = {
+            "id": uuid4(), "identity_id": uuid4(), "chat_id": 7,
+            "update_id": 81, "session_id": None, "kind": "TEXT",
+            "content": "current", "attempts": 0, "status": "PENDING",
+            "next_attempt_at": None,
+        }
+        self.identity = {"display_name": "Name", "username": "handle"}
+        self.operations: list[tuple[str, tuple[Any, ...], int]] = []
+        self.messages: list[tuple[str, int]] = []
+        self.outboxes: list[tuple[tuple[Any, ...], int]] = []
+        self.repository.recover_sending = AsyncMock(side_effect=self.recover_sending)
+        self.repository.suppress_tails_after_unknown = AsyncMock(side_effect=self.suppress_tails)
+        self.repository.processing_inboxes = AsyncMock(return_value=[])
+        self.repository.next_inbox = AsyncMock()
+        self.repository.identity = AsyncMock(return_value=self.identity)
+        self.repository.session = AsyncMock(return_value={"id": self.session_id})
+        self.repository.existing_user_message = AsyncMock(return_value=None)
+        self.repository.completed_history = AsyncMock(
+            return_value=[("old", "answer-old"), ("new", "answer-new")]
+        )
+        self.repository.message = AsyncMock(side_effect=self.capture_message)
+        self.repository.outbox = AsyncMock(side_effect=self.capture_outbox)
+        self.repository.mark_processing = AsyncMock(side_effect=self.mark_processing)
+        self.repository.mark_retry = AsyncMock(side_effect=self.mark_retry)
+        self.repository.mark_ready = AsyncMock(side_effect=self.mark_ready)
+        self.repository.mark_command_ready = AsyncMock(side_effect=self.mark_command_ready)
+        self.repository.pending_outbox = AsyncMock(return_value=None)
+        self.repository.has_failed_outbox = AsyncMock(return_value=False)
+        self.repository.mark_done = AsyncMock(side_effect=self.mark_done)
+        self.repository.mark_delivery_failed = AsyncMock(side_effect=self.mark_delivery_failed)
+        self.repository.mark_sending = AsyncMock(side_effect=self.mark_sending)
+        self.repository.mark_outbox_result = AsyncMock(side_effect=self.mark_outbox_result)
+        self.repository.fail_later_chunks = AsyncMock(side_effect=self.fail_later_chunks)
+
+    def record(self, name: str, connection: Mock, *values: Any) -> None:
+        self.assertTrue(self.boundary.active)
+        self.assertIs(connection, self.connection)
+        self.operations.append((name, values, self.boundary.number))
+
+    async def recover_sending(self, connection: Mock) -> None:
+        self.record("recover_sending", connection)
+
+    async def suppress_tails(self, connection: Mock) -> None:
+        self.record("suppress_tails", connection)
+
+    async def capture_message(
+        self, connection: Mock, inbox: dict[str, Any], session_id: UUID,
+        role: str, content: str, reply_to: UUID | None = None,
+        model: str | None = None, response_id: str | None = None,
+    ) -> UUID:
+        self.record("message", connection, role, content, reply_to, model, response_id)
+        self.assertIs(inbox, self.inbox)
+        self.assertEqual(session_id, self.session_id)
+        self.messages.append((role, self.boundary.number))
+        if role == "USER":
+            return self.user_id
+        if role == "ASSISTANT":
+            return self.assistant_id
+        raise AssertionError("Unexpected message role")
+
+    async def capture_outbox(
+        self, connection: Mock, inbox: dict[str, Any], session_id: UUID,
+        kind: str, chunks: list[str], assistant_id: UUID | None = None,
+    ) -> None:
+        self.record("outbox", connection, kind, chunks, assistant_id)
+        self.assertIs(inbox, self.inbox)
+        self.assertEqual(session_id, self.session_id)
+        self.outboxes.append(((connection, inbox, session_id, kind, chunks, assistant_id), self.boundary.number))
+
+    async def mark_processing(self, connection: Mock, inbox: dict[str, Any], session_id: UUID) -> None:
+        self.record("processing", connection, inbox, session_id)
+
+    async def mark_retry(
+        self, connection: Mock, inbox: dict[str, Any], code: str, next_attempt: datetime,
+    ) -> None:
+        self.record("retry", connection, inbox, code, next_attempt)
+
+    async def mark_ready(
+        self, connection: Mock, inbox: dict[str, Any], error_code: str | None,
+    ) -> None:
+        self.record("ready", connection, inbox, error_code)
+
+    async def mark_command_ready(
+        self, connection: Mock, inbox: dict[str, Any], session_id: UUID,
+    ) -> None:
+        self.record("command_ready", connection, inbox, session_id)
+
+    async def mark_done(self, connection: Mock, inbox: dict[str, Any]) -> None:
+        self.record("done", connection, inbox)
+
+    async def mark_delivery_failed(self, connection: Mock, inbox: dict[str, Any]) -> None:
+        self.record("delivery_failed", connection, inbox)
+
+    async def mark_sending(
+        self, connection: Mock, inbox: dict[str, Any], chunk: dict[str, Any],
+    ) -> None:
+        self.record("sending", connection, inbox, chunk)
+
+    async def mark_outbox_result(
+        self, connection: Mock, inbox: dict[str, Any], chunk: dict[str, Any],
+        status: str, code: str | None, message_id: int | None,
+        next_attempt: datetime | None, retry_after: int,
+    ) -> None:
+        self.record(
+            "outbox_result", connection, inbox, chunk, status, code,
+            message_id, next_attempt, retry_after,
+        )
+
+    async def fail_later_chunks(
+        self, connection: Mock, inbox: dict[str, Any], chunk: dict[str, Any],
+    ) -> None:
+        self.record("fail_later_chunks", connection, inbox, chunk)
+
+    async def complete(self, messages: list[dict[str, str]]) -> Completion:
+        self.assertFalse(self.boundary.active)
+        self.assertEqual(self.boundary.events[-1], ("commit", 1))
+        self.assertEqual(self.operations[-1][0], "processing")
+        self.assertEqual(self.operations[-1][2], 1)
+        return Completion("answer", "model", "provider-id")
+
+    async def send(self, chat: int, content: str, attempts: int) -> Delivery:
+        self.assertFalse(self.boundary.active)
+        self.assertEqual(self.operations[-1][0], "sending")
+        self.assertEqual(self.boundary.events[-1][0], "commit")
+        return Delivery("SENT", message_id=91)
+
+    def chunk(self) -> dict[str, Any]:
+        return {
+            "id": uuid4(), "content": "answer", "attempts": 0,
+            "next_attempt_at": None, "response_kind": "AI", "chunk_number": 0,
+        }
+
+    async def test_current_user_history_order_and_atomic_answer(self) -> None:
+        await self.worker.process(self.inbox)
+        messages = self.ai.reply.await_args.args[0]
+        self.assertEqual(messages[2:], [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "answer-old"},
+            {"role": "user", "content": "new"},
+            {"role": "assistant", "content": "answer-new"},
+            {"role": "user", "content": "current"},
+        ])
+        self.assertEqual(sum(item["content"] == "current" for item in messages), 1)
+        self.repository.completed_history.assert_awaited_once_with(
+            self.connection, self.inbox, self.session_id
+        )
+        assistant_call = self.repository.message.await_args_list[1]
+        self.assertEqual(assistant_call.args[3:5], ("ASSISTANT", "answer"))
+        self.assertEqual(
+            assistant_call.kwargs,
+            {"reply_to": self.user_id, "model": "model", "response_id": "provider-id"},
+        )
+        self.assertEqual(self.outboxes[0][0][3:], ("AI", ["answer"], self.assistant_id))
+        self.assertEqual(self.messages, [("USER", 1), ("ASSISTANT", 2)])
+        self.assertEqual(self.operations[-2][0], "outbox")
+        self.assertEqual(self.operations[-1], ("ready", (self.inbox, None), 2))
+        self.assertEqual(self.outboxes[0][1], 2)
+        self.assertEqual(
+            self.boundary.events,
+            [("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)],
+        )
+
+    async def test_outbox_failure_rolls_back_answer_transaction_without_ready_or_provider_repeat(self) -> None:
+        async def failed_outbox(
+            connection: Mock, inbox: dict[str, Any], session_id: UUID,
+            kind: str, chunks: list[str], assistant_id: UUID | None = None,
+        ) -> None:
+            await self.capture_outbox(connection, inbox, session_id, kind, chunks, assistant_id)
+            self.assertEqual((kind, chunks, assistant_id), ("AI", ["answer"], self.assistant_id))
+            raise RuntimeError("unit-outbox-failure")
+
+        self.repository.outbox.side_effect = failed_outbox
+        with self.assertRaisesRegex(RuntimeError, "^unit-outbox-failure$"):
+            await self.worker.process(self.inbox)
+        self.assertEqual(self.messages, [("USER", 1), ("ASSISTANT", 2)])
+        self.assertEqual(self.outboxes[0][1], 2)
+        self.assertEqual(
+            self.boundary.events,
+            [("begin", 1), ("commit", 1), ("begin", 2), ("rollback", 2)],
+        )
+        self.assertFalse(self.boundary.active)
+        self.assertEqual([item[0] for item in self.operations if item[0] == "processing"], ["processing"])
+        self.assertFalse(any(item[0] == "ready" for item in self.operations))
+        self.ai.reply.assert_awaited_once()
+        self.repository.outbox.assert_awaited_once()
+        self.sender.send.assert_not_awaited()
+
+    async def test_commands_reset_only_new_and_never_call_provider(self) -> None:
+        for kind, reset in (("START", False), ("SESSION", False), ("NEW", True)):
+            with self.subTest(kind=kind):
+                self.inbox["kind"] = kind
+                self.inbox["session_id"] = None
+                self.repository.session.reset_mock()
+                await self.worker.process(self.inbox)
+                self.repository.session.assert_awaited_once_with(
+                    self.connection, self.inbox, reset=reset
+                )
+                self.assertEqual(self.outboxes[-1][0][3], "COMMAND")
+                self.assertIn(str(self.session_id), self.outboxes[-1][0][4][0])
+                self.assertEqual(self.operations[-1][0], "command_ready")
+                self.assertEqual(self.operations[-1][1], (self.inbox, self.session_id))
+        self.ai.reply.assert_not_awaited()
+        self.repository.message.assert_not_awaited()
+
+    async def test_retry_reuses_existing_user_and_session(self) -> None:
+        self.inbox["session_id"] = self.session_id
+        self.inbox["attempts"] = 1
+        self.repository.existing_user_message.return_value = {"id": self.user_id}
+        await self.worker.process(self.inbox)
+        self.repository.session.assert_not_awaited()
+        self.repository.existing_user_message.assert_awaited_once_with(
+            self.connection, self.inbox, self.session_id
+        )
+        self.repository.message.assert_awaited_once()
+        self.assertEqual(self.repository.message.await_args.args[3], "ASSISTANT")
+        self.assertEqual(self.repository.message.await_args.kwargs["reply_to"], self.user_id)
+
+    async def test_transient_provider_schedules_retry_without_assistant(self) -> None:
+        self.ai.reply.side_effect = AIError("AI_RATE_LIMIT", retryable=True, delay=17)
+        before = datetime.now(timezone.utc)
+        await self.worker.process(self.inbox)
+        self.repository.mark_retry.assert_awaited_once()
+        args = self.repository.mark_retry.await_args.args
+        self.assertEqual(args[:3], (self.connection, self.inbox, "AI_RATE_LIMIT"))
+        self.assertGreaterEqual(args[3], before + timedelta(seconds=17))
+        self.assertEqual(self.operations[-1][0], "retry")
+        self.assertEqual(self.operations[-1][2], 2)
+        self.assertEqual(self.repository.message.await_count, 1)
+        self.assertEqual(self.repository.message.await_args.args[3], "USER")
+        self.repository.outbox.assert_not_awaited()
+        self.repository.mark_ready.assert_not_awaited()
+
+    async def test_hard_and_exhausted_errors_create_error_without_assistant(self) -> None:
+        for code, retryable, attempts in (
+            ("AI_TRANSPORT_UNKNOWN", False, 0),
+            ("AI_TEMPORARY", True, 2),
+        ):
+            with self.subTest(code=code):
+                self.repository.existing_user_message.return_value = {"id": self.user_id}
+                self.inbox["session_id"] = self.session_id
+                self.inbox["attempts"] = attempts
+                self.ai.reply.side_effect = AIError(code, retryable=retryable)
+                self.repository.message.reset_mock()
+                await self.worker.process(self.inbox)
+                self.repository.message.assert_not_awaited()
+                self.assertEqual(self.outboxes[-1][0][3], "ERROR")
+                self.assertEqual(self.operations[-1][0], "ready")
+                self.assertEqual(self.operations[-1][1], (self.inbox, code))
+                self.assertEqual(self.outboxes[-1][1], self.operations[-1][2])
+        self.repository.mark_retry.assert_not_awaited()
+
+    async def test_ready_delivery_marks_sending_before_send_and_persists_result(self) -> None:
+        self.inbox["status"] = "READY"
+        chunk = self.chunk()
+        self.repository.pending_outbox.return_value = chunk
+        await self.worker.deliver(self.inbox)
+        self.ai.reply.assert_not_awaited()
+        self.repository.pending_outbox.assert_awaited_once_with(self.connection, self.inbox)
+        self.repository.mark_sending.assert_awaited_once_with(self.connection, self.inbox, chunk)
+        self.sender.send.assert_awaited_once_with(7, "answer", 1)
+        self.repository.mark_outbox_result.assert_awaited_once_with(
+            self.connection, self.inbox, chunk, "SENT", None, 91, None, 0
+        )
+        self.assertEqual(self.operations[-1][0], "outbox_result")
+        self.assertEqual(self.operations[-1][2], 2)
+        self.assertEqual(
+            self.boundary.events,
+            [("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)],
+        )
+
+    async def test_future_retry_waits_outside_transaction_without_busy_query(self) -> None:
+        chunk = self.chunk()
+        chunk["next_attempt_at"] = datetime.now(timezone.utc) + timedelta(seconds=60)
+        self.repository.pending_outbox.return_value = chunk
+        sleeps: list[float] = []
+
+        async def stop_after_sleep(delay: float) -> None:
+            self.assertFalse(self.boundary.active)
+            sleeps.append(delay)
+            self.worker.stopping.set()
+
+        proxy = SimpleNamespace(sleep=stop_after_sleep)
+        with patch.object(worker_module, "asyncio", proxy):
+            await self.worker.deliver(self.inbox)
+        self.assertEqual(sleeps, [1.0])
+        self.repository.pending_outbox.assert_awaited_once()
+        self.repository.mark_sending.assert_not_awaited()
+        self.repository.mark_outbox_result.assert_not_awaited()
+        self.repository.has_failed_outbox.assert_not_awaited()
+        self.sender.send.assert_not_awaited()
+        self.ai.reply.assert_not_awaited()
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_unknown_and_fatal_delivery_suppress_tail_without_resending(self) -> None:
+        for status in ("UNKNOWN", "FAILED"):
+            with self.subTest(status=status):
+                chunk = self.chunk()
+                self.repository.pending_outbox.side_effect = [chunk, None]
+                self.repository.has_failed_outbox.return_value = True
+
+                async def classified_send(chat: int, content: str, attempts: int) -> Delivery:
+                    self.assertFalse(self.boundary.active)
+                    self.assertEqual(self.boundary.events[-1][0], "commit")
+                    self.assertEqual(self.operations[-1][0], "sending")
+                    return Delivery(status, "SAFE_CODE")
+
+                self.sender.send.side_effect = classified_send
+                self.sender.send.reset_mock()
+                await self.worker.deliver(self.inbox)
+                self.repository.fail_later_chunks.assert_awaited_with(
+                    self.connection, self.inbox, chunk
+                )
+                self.assertEqual(self.operations[-1][0], "fail_later_chunks")
+                self.assertEqual(self.operations[-1][2], self.operations[-2][2])
+                await self.worker.deliver(self.inbox)
+                self.sender.send.assert_awaited_once()
+                self.repository.mark_delivery_failed.assert_awaited_with(
+                    self.connection, self.inbox
+                )
+                self.assertEqual(self.operations[-1][0], "delivery_failed")
+        self.ai.reply.assert_not_awaited()
+
+    async def test_all_successful_delivery_finishes_done(self) -> None:
+        self.repository.pending_outbox.return_value = None
+        self.repository.has_failed_outbox.return_value = False
+        await self.worker.deliver(self.inbox)
+        self.repository.mark_done.assert_awaited_once_with(self.connection, self.inbox)
+        self.repository.mark_delivery_failed.assert_not_awaited()
+        self.assertEqual(self.operations[-1][0], "done")
+        self.sender.send.assert_not_awaited()
+        self.ai.reply.assert_not_awaited()
+
+    async def test_processing_crash_recovers_error_and_unknown_send_suppresses_tail(self) -> None:
+        self.inbox["session_id"] = self.session_id
+        self.repository.processing_inboxes.return_value = [self.inbox]
+        await self.worker.recover()
+        self.repository.recover_sending.assert_awaited_once_with(self.connection)
+        self.repository.suppress_tails_after_unknown.assert_awaited_once_with(self.connection)
+        self.repository.processing_inboxes.assert_awaited_once_with(self.connection)
+        self.assertEqual(
+            [item[0] for item in self.operations],
+            ["recover_sending", "suppress_tails", "outbox", "ready"],
+        )
+        self.assertEqual({item[2] for item in self.operations}, {1})
+        self.assertEqual(self.outboxes[0][0][3], "ERROR")
+        self.assertEqual(self.operations[-1][1], (self.inbox, "AI_CRASH_UNKNOWN"))
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+        self.assertTrue(self.worker.healthy)
+        self.ai.reply.assert_not_awaited()
+        self.sender.send.assert_not_awaited()
+        self.repository.message.assert_not_awaited()
+

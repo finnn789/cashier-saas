@@ -1,0 +1,1500 @@
+# Telegram durable long polling implementation contract
+
+Orchestrator baseline canonical memory version: 25 (parent .ai/MEMORY.md).
+User authorized implementation 13 October 2026 and worker delegation/progress notes.
+Previous instruction forbids TASK.md/report-task files; this contract and the unique
+progress note replace that paperwork. Do not create tasks/TASK-* or reports/TASK-*.
+
+You are the code-writing executor. Implement the full acceptance path in
+docs/telegram-conversation-design.md, revised to aiogram LONG POLLING ONLY.
+Read current source; canonical history describes older removed source. Preserve
+all unrelated changes. Git status currently fails to access root parent; use provided
+docs/progress/telegram-baseline.json hashes for comparison. No claim of clean tree.
+
+## Reserved writes
+
+- app/ai/** (new settings, client, prompts/types as needed)
+- app/chat/** (identity/session/persistence/worker as needed)
+- app/core/database.py and app/core/__init__.py if needed
+- app/channels/telegram/** (existing bot plus focused handlers/settings/sender)
+- app/config.py and app/application.py
+- app/openrouter.py (remove once callers use new location; no compatibility stub)
+- pyproject.toml, uv.lock, alembic.ini, migrations/**
+- .env.example (template only; retain current variables)
+- README.md
+- docs/progress/telegram-worker-progress.md (unique progress report)
+
+No other writes. Do not read, print or write real .env, saved credentials, parent
+canonical .ai, Java source/SQL, .codex, .agents, unrelated scaffolds or tests.
+No application/provider/Telegram/DB calls, no migrations applied, no runtime startup,
+no unit/API/integration tests. AST and whitespace/static checks permitted. Dependency
+resolution via uv lock/sync permitted, but do not claim runtime acceptance. Never
+bypass sandbox/approval. No nested agents. Return findings and progress to orchestrator.
+
+## Architecture and required behavior
+
+Keep Python >=3.12 FastAPI+aiogram. Keep main.py and existing / and /health contracts.
+Use SQLAlchemy async + asyncpg + Alembic, PostgreSQL AI database configured only by
+DATABASE_URL. Do not silently use SQLite or memory. No secrets/default credentials.
+Root config loads .env once (override=False); settings compose Telegram/AI/DB. Move
+OpenRouter-specific settings and client into app/ai; unchanged OPENROUTER_API_KEY and
+AI_MODEL variable names. Named readable classes/functions, explicit type hints,
+early returns, no clever one-liners, no deep closures/lambdas/unneeded factories or
+Java-style patterns. async resource ownership explicit; catch actual exception types.
+
+Identity keyed by server-owned service scope+bot.id+Telegram user.id. Username is
+optional mutable profile, display name prefers first+last name, never auth key.
+All operational DB queries constrained to scope and bot/identity/session where needed;
+composite FKs/constraints prevent cross-scope links. One ACTIVE session per identity/chat.
+History survives restart; /start greets identified user without resetting, /new closes
+old and creates new session; /session shows current reference. Every command/text
+requires private, non-bot, optional allowlist authorization. No Cashier business access.
+
+Five persistent tables identity/session/messages/inbox/outbox with BIGINT Telegram IDs,
+UUID internal IDs, UTC timestamps, unique update IDs, unique USER per inbox, unique
+ASSISTANT per user turn, ordered messages, outbox keyed by inbox/response kind/chunk
+(also command/errors without an ASSISTANT message). /new and text ordered in one
+serial worker; same user/history isolated from all others. Poller only intake.
+
+Maintain Dispatcher.start_polling(handle_as_tasks=False, handle_signals=False,
+close_bot_session=False). Handler must commit identity+inbox before returning; DB
+temporary failure waits/retries inside intake without advancing offset. Aiogram catches
+ordinary handler exceptions, so merely raising a DB error loses durable guarantees:
+inspect INSTALLED aiogram source and implement clear intake failure supervisor/stop
+so unknown intake failure cannot advance offset. Get update_id via dispatcher Update
+injection or narrow update middleware; no reflection/monkeypatch/private SDK overrides.
+Don't call provider during intake. One process/poller/worker, no reload. Single poller
+ownership must be enforced for same bot at DB level (e.g. scoped advisory lock held by
+dedicated connection) if needed for safe PROCESSING recovery; no multiworker leases.
+Reject active webhook, do not remove it/drop updates automatically.
+
+Worker uses short DB transactions, never across provider/send I/O. Save USER once,
+construct bounded history of successful completed pairs + current USER once, system
+instruction and bounded untrusted profile data; no profile-as-system instructions.
+Max input4000/output1024 tokens, timeout45s baseline. Conservative context budget
+with documented model window requirement. Retry transient provider failures bounded,
+no auto retry 401/402/403 or ambiguous provider timeout unless explicitly documented.
+Store provider response ID/model and ASSISTANT+outbox+turn result atomically. Error
+messages go outbox but not model history. A persisted AI answer must never be regenerated
+just because sending failed. Sequential chunks respect Telegram UTF16 limits.
+SENDING recovered as UNKNOWN after crash, no blind resend; stop remaining chunks of
+that response on UNKNOWN/fatal failure so user doesn't get a tail without head. Persist
+retry_after on429; other explicit temporary errors bounded; no raw token/URL exceptions.
+Worker waits for delivery terminal or retry scheduled according to documented serial
+ordering. Health ready includes DB/poller/worker/ownership; liveness existing /health
+unchanged. Shutdown stop intake, bounded worker grace, await/cancel safely then close
+Bot, HTTP and DB resources without orphan children. Cancellation at startup also cleans.
+
+## Checkpoints and delivery
+
+Before edits, write unique progress note listing baseline25, reservations, approach.
+After every meaningful checkpoint update changed files, acceptance progress, evidence,
+test status NOT RUN BY POLICY, remaining work. Do not hide partial failures. Final
+update must include exact files, architecture contracts, dependency lock result,
+static evidence, remaining setup/risk, recommended later test scenarios. Return concise
+completion summary to orchestrator. Code must be end-to-end implemented, not stubs.
+README in Indonesian: set DATABASE_URL and scope, uv sync --locked, uv run alembic
+upgrade head as OPERATOR step (do not execute), uv run main.py/F5 one process; Telegram
+commands and recovery/24h pending-update/delivery-UNKNOWN limitation.
+
+
+EXECUTION AMENDMENT: Your worker environment is read-only and shell is blocked. DO NOT USE TOOLS, do not request changes to permissions. Implement by returning full replacement/new file contents in the output JSON schema; the orchestrator will inspect and apply your exact authored content within reserved paths. This is actual code authorship, not a plan. Include all application/migration/config/documentation files required for end-to-end behavior. Do not emit uv.lock contents; dependency resolution will be done by orchestrator after pyproject review. No tests or network. Include a complete checkpoint progress string. Reserved writes unchanged. Keep code readable and avoid excessive patterns. Use SQLAlchemy async and PostgreSQL, actual Alembic migration. Return ALL complete file contents, no omissions/placeholders. The current source bundle follows.
+
+FILE: docs/telegram-conversation-design.md
+# Rancangan Telegram, identitas user, dan conversation session
+
+Tanggal: 13 Oktober 2026, Asia/Jakarta. Status: rancangan untuk implementasi berikutnya.
+Dokumen ini merupakan desain, bukan laporan task. Tidak ada perubahan aplikasi,
+konfigurasi rahasia atau database pada tahap ini. Transport yang dipilih tetap
+aiogram long polling yang sudah terpasang.
+
+## 1. Kondisi source yang diperiksa
+
+- `app/channels/telegram/bot.py` menjalankan aiogram long polling. Startup justru
+  menolak bot dengan webhook aktif. Belum ada route HTTP webhook Telegram.
+- `app/config.py` memuat konfigurasi Telegram dan OpenRouter dalam satu Settings.
+- `app/openrouter.py` menerima satu teks; payload hanya system prompt dan pesan
+  terakhir. Tidak memuat riwayat, profil user, atau session percakapan.
+- `app/application.py` membuat client OpenRouter dan memulai polling melalui lifespan.
+- `pyproject.toml` belum mempunyai dependency persistence PostgreSQL.
+- Direktori `app/ai` dan `app/chat` tersedia tetapi belum berisi source aktif.
+- Catatan canonical parent masih menggambarkan source lama yang lebih kompleks;
+  desain ini mengikuti source saat ini. Git status tidak dapat diperoleh karena
+  Git gagal mengakses path root parent; tidak ada klaim working tree bersih.
+
+## 2. Batas rancangan dan asumsi
+
+Tahap pertama melayani pesan teks private dari manusia, tetap menggunakan allowlist
+opsional. Grup, media, dan pesan edit tidak diproses sebagai percakapan baru.
+Semua command melewati pemeriksaan identitas dan akses yang sama.
+Identitas Telegram belum membuktikan kepemilikan akun Cashier atau hak tenant.
+Tidak ada akses data kasir sebelum mekanisme pengaitan akun yang terverifikasi.
+
+PostgreSQL memakai database AI tersendiri, dikelola AI Service. Tabel Cashier tidak
+diubah. Untuk bot tahap awal, satu bot memiliki satu service scope dari konfigurasi
+server. Bot ke scope dipetakan server-side; teks user tidak dapat memilih scope.
+Satu scope demo tidak boleh dianggap sebagai tenant bisnis yang terautentikasi.
+Jika nanti satu bot melayani banyak merchant, kontrak pengaitan akun harus dirancang
+sebelum membuka akses bisnis.
+
+## 3. Struktur direktori yang dituju
+
+```text
+app/
+  application.py                   # wiring, lifespan, routes
+  config.py                        # komposisi settings dan pemuatan .env sekali
+  ai/
+    __init__.py
+    config.py                      # OpenRouterSettings
+    openrouter.py                  # client provider dan AIError
+    prompts.py                     # system instruction dan profil tampilan
+  channels/telegram/
+    bot.py                         # Bot, Dispatcher, polling, lifecycle
+    config.py                      # TelegramSettings
+    handlers.py                    # handler teks/command dan intake persisten
+    sender.py                      # pengiriman chunk dan status delivery
+  chat/
+    identity_service.py            # upsert profil berdasarkan Telegram ID
+    session_service.py             # session aktif, /new, /start, /session
+    conversation_service.py        # urutan pemrosesan dan konstruksi history
+    repositories.py                # query yang selalu dibatasi scope/identity
+    models.py                      # model persistence
+    worker.py                      # pemroses inbox dan outbox PostgreSQL
+  core/
+    database.py                    # engine/session async PostgreSQL
+migrations/                        # migrasi AI Service sendiri
+```
+
+Pemindahan meliputi field `openrouter_key` dan `ai_model` ke OpenRouterSettings,
+serta client `app/openrouter.py` ke `app/ai/openrouter.py`. Application dan handler
+menggunakan import baru. Settings global menyusun settings AI, Telegram, dan DB.
+Nama `OPENROUTER_API_KEY` serta `AI_MODEL` tetap berlaku; kredensial tetap berada
+di environment/.env, bukan di source `app/ai`. Ini pemindahan tanggung jawab kode.
+
+Konfigurasi tambahan: `DATABASE_URL` dan service scope server-side.
+Tidak diperlukan URL webhook, secret webhook, endpoint publik, atau tunnel HTTPS.
+Gunakan SQLAlchemy async, asyncpg, dan Alembic saat implementasi. Tidak perlu
+Redis, LangGraph, atau queue eksternal untuk acceptance path pertama.
+
+## 4. Identitas user dan nama
+
+Ambil profil dari `message.from_user` pada objek aiogram Message: `id`, `username`,
+`first_name`, `last_name`, `is_bot`, dan bahasa jika tersedia. `message.chat.id`
+menjadi alamat pengiriman. `update_id` berasal dari Update yang diberikan dispatcher,
+bukan dari Message.
+Telegram mendokumentasikan ID user sebagai pengenal unik dan username sebagai
+field opsional: [Telegram User](https://core.telegram.org/bots/api#user).
+
+- Kunci identitas: `(service_scope_id, bot_id, telegram_user_id)`.
+- `username` bukan primary key dan tidak digunakan untuk otorisasi.
+- Display name: gabungan first name/last name; fallback username, lalu label user.
+- Update profil setiap pesan diterima, termasuk mengosongkan username jika hilang.
+- ID user/chat disimpan BIGINT; ID internal aplikasi memakai UUID.
+- Dua user dengan nama sama tetap memiliki profil dan riwayat berbeda.
+
+AI dapat menyapa nama yang tersimpan. Profil masuk sebagai data terstruktur dalam
+konteks, bukan instruksi system yang digabungkan langsung dari nama user. Nama,
+username, dan isi chat tidak memberi hak akses atau mengubah aturan AI.
+
+## 5. Model data PostgreSQL
+
+| Tabel | Isi utama | Constraint penting |
+| --- | --- | --- |
+| `telegram_identities` | UUID, scope, bot ID, Telegram user ID, username, first/last/display name, created/updated/last seen | UNIQUE(scope, bot, Telegram user ID) |
+| `conversation_sessions` | UUID, scope, identity ID, chat ID, status ACTIVE/CLOSED, last sequence, created/last activity/closed at | Satu ACTIVE per (scope, bot, identity, chat); partial unique index |
+| `conversation_messages` | UUID, scope, session ID, sequence, role USER/ASSISTANT, content, inbound update ID, reply-to ID, model, provider response ID, timestamps | UNIQUE(session, sequence); satu USER per update dan satu ASSISTANT per reply-to USER |
+| `telegram_inbox` | UUID, scope, bot ID, update ID, identity, chat ID, message ID, urutan penerimaan, jenis command/text, normalized content, status, attempts, next attempt, error code | UNIQUE(scope, bot, update ID) |
+| `telegram_outbox` | UUID, scope, session/inbox reference, assistant message reference opsional, chunk number, text, status, Telegram sent message ID, retry data | UNIQUE(inbox, jenis respons, chunk number) |
+
+Semua foreign key antar tabel memeriksa scope yang sama, bukan hanya UUID.
+Index history pada `(scope, session_id, sequence)`; index pending job pada
+`(status, next_attempt_at)`. Waktu disimpan UTC/timestamptz.
+Outbox juga menyimpan salam, hasil command, dan error; tidak semua outbox menunjuk
+pesan ASSISTANT. Status turn provider disimpan pada inbox.
+Jangan menyimpan bot token, API key, atau payload mentah penuh.
+Konten chat diperlukan untuk history tetapi tidak ditulis ke log aplikasi.
+Retensi history perlu keputusan operasional sebelum produksi; /new menutup session,
+bukan menghapus data. Penghapusan data adalah fungsi terpisah dari reset konteks.
+
+## 6. Flow end to end
+
+```mermaid
+sequenceDiagram
+    participant U as User Telegram
+    participant T as Telegram
+    participant P as aiogram Poller dan Handler
+    participant D as PostgreSQL
+    participant W as Conversation Worker
+    participant A as OpenRouter
+    U->>T: Pesan private
+    P->>T: getUpdates long polling
+    T-->>P: Update pesan private
+    P->>P: Validasi jenis pesan dan akses user
+    P->>D: Transaksi upsert identity + insert inbox unik
+    D-->>P: Commit
+    P->>T: getUpdates berikutnya dengan offset maju
+    W->>D: Ambil inbox pending sesuai urutan penerimaan
+    W->>D: Cari/buat session + simpan USER
+    W->>D: Muat history session yang sama
+    W->>A: Profile + history + pesan sekarang
+    A-->>W: Jawaban
+    W->>D: Transaksi ASSISTANT + chunks outbox + inbox selesai
+    W->>T: Kirim chunks pending
+    T-->>W: message_id / hasil delivery
+    W->>D: Simpan status tiap chunk
+    T-->>U: Jawaban dengan konteks percakapan
+```
+
+Pertahankan `Dispatcher.start_polling(..., handle_as_tasks=False)` agar handler
+intake ditunggu secara serial. Handler memvalidasi dan menyimpan identity/inbox;
+OpenRouter dipanggil worker terpisah. Update yang tidak didukung atau tidak diizinkan
+diabaikan. Update duplikat menyelesaikan intake tanpa job baru.
+
+Telegram mengonfirmasi update saat getUpdates memakai offset lebih tinggi:
+[getUpdates](https://core.telegram.org/bots/api#getupdates). Identity dan inbox wajib
+commit sebelum handler selesai. Saat DB sementara tidak tersedia, intake melakukan
+retry dengan backoff yang dapat dibatalkan saat shutdown; jangan melanjutkan batch
+atau polling berikutnya sebelum commit.
+Jangan hanya melempar exception DB dan menganggap Telegram akan mengulang pesan:
+dispatcher aiogram menangani exception pemrosesan dan polling dapat melanjutkan
+offset. Retry persistence berada dalam intake; kegagalan tak terduga yang mengancam
+persistence menghentikan poller melalui supervisor lifecycle.
+Rujukan: [aiogram Dispatcher](https://docs.aiogram.dev/en/latest/_modules/aiogram/dispatcher/dispatcher.html).
+
+Inbox adalah antrean persisten; worker membuat USER sekali saja. Constraint DB
+menangani update yang diterima ulang setelah restart. Telegram menyimpan update
+belum diterima maksimal 24 jam; outage panjang sebelum intake commit tetap dapat
+kehilangan update. Durabilitas berlaku setelah pesan masuk database.
+
+Gunakan satu proses, satu poller, dan satu worker pada tahap awal, tanpa reload atau
+beberapa Uvicorn worker. Startup memeriksa DB dan bot, serta tetap menolak webhook
+aktif. Jangan menghapus webhook atau pending updates otomatis. FastAPI tetap
+mengelola health dan lifecycle. Shutdown menghentikan intake, memberi waktu terbatas
+bagi worker, kemudian menutup bot, HTTP client, dan engine DB; job tersimpan yang
+belum selesai dilanjutkan pada startup berikutnya.
+
+## 7. Kontrol session dan urutan
+
+- Pesan pertama membuat session ACTIVE secara atomik.
+- Pesan berikutnya memakai session yang sama, termasuk setelah restart server.
+- `/start` menyapa display name dan memakai/membuat session aktif tanpa reset history.
+- `/new` menutup session aktif dan membuat session baru; history lama tetap tersimpan.
+- `/session` menampilkan referensi session dan nama user, tanpa data user lain.
+- Tidak ada expiry otomatis pada tahap pertama agar percakapan tidak hilang mendadak.
+
+Session ditentukan server dari scope/bot/identity/chat, bukan dari teks atau session
+ID yang dikirim user. Constraint session aktif menangani race pembuatan session.
+Satu worker memproses inbox sesuai urutan penerimaan, termasuk command /new,
+sehingga respons pesan lama diselesaikan sebelum reset berikutnya. Pemrosesan AI
+masih serial untuk semua user pada tahap awal; session setiap user tetap terisolasi.
+Konsekuensinya, respons AI lambat dapat menunda user berikutnya.
+
+Transaksi DB dibuat singkat dan tidak ditahan selama panggilan AI. Pada restart
+tanpa proses lama yang masih berjalan, pulihkan inbox PROCESSING yang belum memiliki
+jawaban tersimpan. Jika jawaban/outbox sudah ada, lanjutkan delivery saja.
+Paralelisasi per user dan lease/fencing baru ditambahkan bila throughput memerlukan.
+
+## 8. History dan kegagalan
+
+ConversationService memilih pasangan USER/ASSISTANT selesai dari session aktif,
+mengurutkan sequence, lalu menambahkan USER saat ini tepat sekali. Riwayat penuh
+disimpan; history ke provider dibatasi anggaran konteks model. Buang pasangan tertua
+lebih dahulu, sisakan system instruction, profil seperlunya, dan pesan sekarang.
+Tetap gunakan batas input 4000 karakter, output 1024 token dan timeout 45 detik
+sebagai baseline. Pemanggilan memakai array `messages`:
+[OpenRouter API](https://openrouter.ai/docs/api_reference/overview).
+
+- Kegagalan provider disimpan sebagai status turn/error code; pesan aman dikirim
+  melalui outbox, tidak dicampurkan sebagai jawaban model ke history sukses.
+- Retry hanya kegagalan sementara dengan batas attempts dan backoff; 401/402/403
+  tidak diulang otomatis. Timeout ambigu dapat menyebabkan biaya provider berulang;
+  tidak ada klaim exactly-once terhadap provider.
+- Jawaban disimpan bersama outbox sebelum dikirim. Restart pengirim menggunakan
+  outbox yang ada, tidak memanggil model lagi jika jawaban sudah tersimpan.
+- Status chunk: PENDING, SENDING, SENT, FAILED, UNKNOWN. Respons sukses menyimpan
+  Telegram message ID. 429 dijadwalkan mengikuti retry_after. Timeout/crash setelah
+  send dapat berarti terkirim tetapi acknowledgment hilang; tandai UNKNOWN dan
+  jangan kirim ulang otomatis. Telegram sendMessage tidak memberi jaminan
+  exactly-once, sehingga delivery ambigu perlu penanganan operasional.
+- Urutan per session tetap menunggu delivery selesai atau terminal/UNKNOWN sebelum
+  turn berikutnya diproses. Chunk sukses tidak diulang.
+- Health readiness memeriksa DB dan kondisi worker; liveness tetap ringan.
+
+## 9. Urutan implementasi dan acceptance
+
+1. Pindahkan konfigurasi/client OpenRouter ke app/ai, perbarui semua import.
+2. Tambahkan persistence serta migrasi identity/session/message/inbox/outbox.
+3. Hubungkan polling yang ada ke penyimpanan identity dan ConversationService.
+4. Hubungkan handler intake serial ke inbox persisten dan satu worker yang dikelola
+   lifespan. Tidak ada tahap migrasi ke webhook.
+5. Implementasikan command session, history budget, recovery, dan sender outbox.
+
+Acceptance yang harus diverifikasi setelah implementasi selesai:
+
+- Nama tampil benar dengan/tanpa username; perubahan username tidak membuat user baru.
+- Dua user, termasuk nama sama, tidak pernah membaca history satu sama lain.
+- Pertanyaan lanjutan menggunakan history session aktif; restart tetap melanjutkan.
+- /new membuat session baru dan tidak memasukkan history lama ke prompt baru.
+- Update duplikat tidak membuat pesan/session/job ganda.
+- Dua pesan berdekatan dan /new diproses sesuai urutan yang disimpan.
+- Allowlist berlaku untuk teks, /start, dan command lain.
+- DB gagal tidak membuat intake selesai atau polling melanjutkan offset; retry dan
+  pembatalan shutdown diperiksa menggunakan perilaku dispatcher yang sebenarnya.
+- Hanya satu poller berjalan; webhook aktif tetap menyebabkan startup ditolak.
+- Job tersimpan yang belum selesai pulih setelah restart.
+- Provider gagal dan delivery ambigu mempunyai status yang dapat ditelusuri.
+- Tidak ada token/secret atau isi chat penuh pada log.
+
+## 10. Aturan coding Python untuk implementasi
+
+- Utamakan keterbacaan, kesederhanaan, dan kemudahan pemeliharaan. Hindari one-liner
+  cerdik atau sintaks ringkas yang menyulitkan pembacaan.
+- Gunakan nama variabel, fungsi, dan class yang deskriptif serta type hint untuk
+  parameter dan return value.
+- Pilih if/for/while sederhana ketika lebih jelas daripada comprehension atau
+  ekspresi kompleks. Gunakan early return untuk mengurangi nesting.
+- Hindari fungsi bersarang dalam, lambda tanpa manfaat jelas, decorator yang tidak
+  diperlukan, metaclass, dan teknik dinamis. Decorator framework tetap diperbolehkan.
+- Gunakan class biasa jika sesuai; jangan memaksakan pola Java, interface, factory,
+  base service, atau helper yang tidak dibutuhkan ke Python.
+- Fungsi kecil memiliki satu tanggung jawab. Handler berupa method/fungsi bernama
+  yang menerima dependency secara eksplisit, bukan closure besar di startup.
+- Alur async, pembuatan task, cancellation, shutdown, dan penutupan resource harus
+  terlihat jelas. Exception ditangani dengan tipe spesifik pada batas yang sesuai.
+- async/await, async context manager, dan task background diperlukan agar polling,
+  worker, dan HTTP tidak saling memblokir; sintaks lanjutan lain perlu alasan singkat.
+- Mulai dari satu worker serial dan PostgreSQL; hindari abstraksi concurrency sebelum
+  ada kebutuhan nyata. Pisahkan file hanya untuk tanggung jawab yang benar-benar ada.
+
+Belum menjalankan unit/API/integration test, aplikasi, provider, atau database.
+Pengujian dilakukan setelah implementasi end to end dan permintaan testing eksplisit.
+
+FILE: app/config.py
+"""Configuration with environment variables taking precedence over .env."""
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+@dataclass(frozen=True)
+class Settings:
+    telegram_token: str = field(repr=False)
+    openrouter_key: str = field(repr=False)
+    ai_model: str
+    allowed_user_ids: frozenset[int]
+
+
+def load_settings() -> Settings:
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    raw_ids = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip()
+    try:
+        allowed_ids = frozenset(int(item.strip()) for item in raw_ids.split(",") if item.strip())
+        if any(user_id <= 0 for user_id in allowed_ids):
+            raise ValueError
+    except ValueError:
+        raise RuntimeError("TELEGRAM_ALLOWED_USER_IDS harus berisi ID positif dipisahkan koma.") from None
+    return Settings(
+        telegram_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
+        openrouter_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
+        ai_model=os.getenv("AI_MODEL", "").strip(),
+        allowed_user_ids=allowed_ids,
+    )
+
+FILE: app/application.py
+"""FastAPI application for the AI Service."""
+
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
+from fastapi import FastAPI
+import aiohttp
+
+from app.channels.telegram.bot import TelegramChannel, start_telegram_channel
+from app.config import load_settings
+from app.openrouter import OpenRouterClient
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = load_settings()
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        ai = OpenRouterClient(settings, session)
+        channel: TelegramChannel = await start_telegram_channel(settings, ai)
+        try:
+            yield
+        finally:
+            await channel.stop()
+
+
+app = FastAPI(title="AI Service", lifespan=lifespan)
+
+
+@app.get("/")
+async def read_root():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+FILE: app/openrouter.py
+"""Bounded asynchronous OpenRouter text completion client."""
+
+import asyncio
+import json
+
+import aiohttp
+
+from app.config import Settings
+
+ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+MAX_INPUT_CHARS = 4000
+MAX_OUTPUT_CHARS = 12000
+MAX_RESPONSE_BYTES = 262144
+
+
+class AIError(Exception):
+    """Safe user-facing error without provider details."""
+
+
+class OpenRouterClient:
+    def __init__(self, settings: Settings, session: aiohttp.ClientSession) -> None:
+        self._key = settings.openrouter_key
+        self._model = settings.ai_model
+        self._session = session
+
+    async def reply(self, text: str) -> str:
+        if not self._key or not self._model:
+            raise AIError("AI belum dikonfigurasi. Isi OPENROUTER_API_KEY dan AI_MODEL di .env.")
+        if not text.strip() or len(text) > MAX_INPUT_CHARS:
+            raise AIError("Kirim pesan teks berisi 1 sampai 4000 karakter.")
+        payload = {
+            "model": self._model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Anda asisten yang membantu. Jawab ringkas dalam bahasa Indonesia, "
+                        "kecuali pengguna meminta bahasa lain. Jangan mengaku memiliki akses "
+                        "ke data kasir atau melakukan tindakan di sistem bisnis."
+                    ),
+                },
+                {"role": "user", "content": text},
+            ],
+            "max_tokens": 1024,
+            "stream": False,
+        }
+        try:
+            async with self._session.post(
+                ENDPOINT,
+                headers={"Authorization": f"Bearer {self._key}"},
+                json=payload,
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=45, connect=10),
+            ) as response:
+                if response.status in (401, 403):
+                    raise AIError("Akses OpenRouter ditolak. Periksa API key dan izin model.")
+                if response.status == 402:
+                    raise AIError("Saldo OpenRouter tidak mencukupi. Periksa akun OpenRouter.")
+                if response.status == 429:
+                    raise AIError("Batas permintaan AI tercapai. Coba lagi nanti.")
+                if response.status != 200:
+                    raise AIError("Layanan AI belum dapat menjawab. Periksa model atau coba lagi nanti.")
+                body = bytearray()
+                async for chunk in response.content.iter_chunked(8192):
+                    body.extend(chunk)
+                    if len(body) > MAX_RESPONSE_BYTES:
+                        raise AIError("Respons AI terlalu besar. Coba pertanyaan yang lebih singkat.")
+                data = json.loads(body)
+                content = data["choices"][0]["message"]["content"]
+                if not isinstance(content, str) or not content.strip():
+                    raise AIError("AI tidak memberikan jawaban teks. Coba lagi nanti.")
+                answer = content.strip()
+                if len(answer) > MAX_OUTPUT_CHARS:
+                    answer = answer[:MAX_OUTPUT_CHARS] + "\n[Jawaban dipotong.]"
+                return answer
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            raise AIError("Koneksi AI bermasalah atau melewati batas waktu. Coba lagi nanti.") from None
+        except (ValueError, KeyError, IndexError, TypeError):
+            raise AIError("Respons AI tidak valid. Coba lagi nanti.") from None
+
+FILE: app/channels/telegram/bot.py
+"""Minimal Telegram long-polling channel owned by the FastAPI lifespan."""
+
+import asyncio
+import logging
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramAPIError
+from aiogram.filters import CommandStart
+from aiogram.types import Message
+from aiogram.utils.token import TokenValidationError
+from app.config import Settings
+from app.openrouter import AIError, OpenRouterClient
+
+logger = logging.getLogger(__name__)
+GREETING = "Halo! Bot Telegram sudah aktif. Silakan kirim pesan."
+
+
+class TelegramChannel:
+    """Own one bot session and its single background polling task."""
+
+    def __init__(self, bot: Bot, dispatcher: Dispatcher, polling_task: asyncio.Task[None]) -> None:
+        self._bot = bot
+        self._dispatcher = dispatcher
+        self._polling_task = polling_task
+        self._cleanup_task: asyncio.Task[None] | None = None
+
+    async def stop(self) -> None:
+        """Finish one graceful cleanup even if the caller is cancelled."""
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(self._cleanup(), name="telegram-cleanup")
+        cancelled = False
+        while not self._cleanup_task.done():
+            try:
+                await asyncio.shield(self._cleanup_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        self._cleanup_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _cleanup(self) -> None:
+        """Let aiogram stop and await its children before closing the session."""
+        try:
+            # Give start_polling a turn to acquire its running lock before stopping it.
+            await asyncio.sleep(0)
+            if not self._polling_task.done():
+                try:
+                    await self._dispatcher.stop_polling()
+                except RuntimeError:
+                    # aiogram raises here only when its running lock is not held.
+                    self._polling_task.cancel()
+            try:
+                await self._polling_task
+            except asyncio.CancelledError:
+                pass
+        except Exception:
+            logger.error("Telegram polling stopped with an error.")
+        finally:
+            try:
+                await self._bot.session.close()
+            except Exception:
+                logger.error("Telegram session cleanup failed.")
+            logger.info("Telegram channel stopped.")
+
+
+async def start_telegram_channel(settings: Settings, ai: OpenRouterClient) -> TelegramChannel:
+    """Validate the configured bot and start its dispatcher without blocking FastAPI."""
+    logging.getLogger("aiogram").setLevel(logging.CRITICAL)
+    token = settings.telegram_token
+    if not token:
+        raise RuntimeError("Telegram bot is not configured: set TELEGRAM_BOT_TOKEN")
+
+    try:
+        bot = Bot(token=token)
+    except TokenValidationError:
+        raise RuntimeError("Telegram bot token is malformed: check TELEGRAM_BOT_TOKEN.") from None
+
+    dispatcher = Dispatcher()
+    dispatcher.message.register(_send_start_greeting, CommandStart())
+
+    async def send_ai_reply(message: Message) -> None:
+        user = message.from_user
+        if user is None or user.is_bot or message.text is None:
+            return
+        if message.text.lstrip().startswith("/"):
+            return
+        if settings.allowed_user_ids and user.id not in settings.allowed_user_ids:
+            return
+        try:
+            answer = await ai.reply(message.text)
+        except AIError as error:
+            answer = str(error)
+        try:
+            # Telegram limits UTF-16 units; astral Unicode takes two units.
+            chunk: list[str] = []
+            units = 0
+            for char in answer:
+                width = 2 if ord(char) > 0xFFFF else 1
+                if units + width > 4000:
+                    await message.answer("".join(chunk), parse_mode=None)
+                    chunk = []
+                    units = 0
+                chunk.append(char)
+                units += width
+            if chunk:
+                await message.answer("".join(chunk), parse_mode=None)
+        except TelegramAPIError:
+            logger.error("Telegram AI reply could not be delivered.")
+
+    dispatcher.message.register(send_ai_reply, F.chat.type == "private", F.text)
+    try:
+        await bot.get_me()
+        webhook = await bot.get_webhook_info()
+    except asyncio.CancelledError:
+        await bot.session.close()
+        raise
+    except Exception:
+        await bot.session.close()
+        raise RuntimeError("Telegram bot validation failed: check the token and Telegram connectivity.") from None
+    if webhook.url:
+        await bot.session.close()
+        raise RuntimeError("Telegram bot has a webhook configured; remove it before using polling.")
+
+    polling_task = asyncio.create_task(
+        dispatcher.start_polling(
+            bot, handle_signals=False, close_bot_session=False, handle_as_tasks=False,
+        ),
+        name="telegram-polling",
+    )
+    polling_task.add_done_callback(_observe_polling_result)
+    logger.info("Telegram channel started.")
+    return TelegramChannel(bot, dispatcher, polling_task)
+
+
+async def _send_start_greeting(message: Message) -> None:
+    await message.answer(GREETING)
+
+
+def _observe_polling_result(task: asyncio.Task[None]) -> None:
+    """Retrieve a background failure so it never becomes an unobserved task error."""
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Telegram polling stopped unexpectedly.")
+
+FILE: app/__init__.py
+"""AI Service application package."""
+
+FILE: pyproject.toml
+[project]
+name = "ai-customer-service"
+version = "0.1.0"
+description = "FastAPI AI Service served by Uvicorn"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.9.0,<4",
+    "aiogram>=3.31.0",
+    "fastapi>=0.143.0",
+    "python-dotenv>=1.2.4",
+    "uvicorn>=0.54.0",
+]
+
+[tool.uv]
+package = false
+
+
+FILE: .env.example
+# Telegram BotFather token for the local long-polling channel. Keep the real value in .env.
+TELEGRAM_BOT_TOKEN=
+
+# OpenRouter API key; keep the real value in .env.
+OPENROUTER_API_KEY=
+# Exact model ID from https://openrouter.ai/models (provider/model).
+AI_MODEL=
+# Optional: positive Telegram user IDs separated by commas. Blank allows all private users.
+TELEGRAM_ALLOWED_USER_IDS=
+
+FILE: README.md
+# FastAPI, Telegram, dan OpenRouter
+
+Bot menjawab `/start`, termasuk `/start payload`, dengan salam tetap. Pesan teks
+pribadi dari pengguna manusia dijawab melalui OpenRouter. Setiap pesan berdiri
+sendiri tanpa riwayat; bot tidak mengakses data atau tindakan aplikasi kasir.
+Pesan grup dan perintah selain `/start` diabaikan oleh handler AI. Route `/` dan
+`/health` mengembalikan `{"status":"ok"}` dan hanya memeriksa HTTP.
+
+1. Salin `.env.example` ke `.env` jika belum ada; jangan timpa file lokal.
+2. Isi konfigurasi di `.env`:
+
+   ```dotenv
+   TELEGRAM_BOT_TOKEN=token_dari_BotFather
+   OPENROUTER_API_KEY=api_key_dari_OpenRouter
+   AI_MODEL=id_model_dari_OpenRouter
+   TELEGRAM_ALLOWED_USER_IDS=
+   ```
+
+   Buat API key di https://openrouter.ai/keys dan pilih ID model persis dari
+   https://openrouter.ai/models. Tidak ada model default; biaya dan ketersediaan
+   mengikuti model serta akun Anda. Key/model kosong tetap mengizinkan `/start`,
+   tetapi pesan teks akan mendapat petunjuk konfigurasi.
+
+   `TELEGRAM_ALLOWED_USER_IDS` opsional, misalnya `123456789,987654321`. Jika kosong,
+   siapa pun yang mengirim pesan pribadi ke bot dapat memakai AI dengan akun
+   OpenRouter Anda. Variabel lingkungan yang sudah diatur diprioritaskan di atas
+   `.env`. Jangan commit token atau API key.
+3. Jalankan dari folder proyek ini:
+
+   ```powershell
+   uv sync --locked
+   uv run main.py
+   ```
+
+   Atau tekan F5 dengan konfigurasi **Uvicorn** di VS Code. Restart proses setelah
+   mengubah `.env`.
+4. Kirim `/start`, lalu kirim pertanyaan dalam chat pribadi bot.
+
+Integrasi memakai endpoint HTTPS tetap
+`https://openrouter.ai/api/v1/chat/completions` sesuai
+[dokumentasi OpenRouter](https://openrouter.ai/docs/quickstart), dengan Bearer API key.
+Batas input 4000 karakter, keluaran model 1024 token, dan timeout 45 detik tanpa
+retry aplikasi. Jawaban panjang dipecah sesuai batas Telegram. Kesalahan provider
+ditampilkan sebagai pesan aman tanpa kredensial. Startup tidak memanggil model
+atau memvalidasi key/model secara online.
+
+Gunakan satu proses tanpa reload. Token kosong/salah atau koneksi Telegram bermasalah
+menghentikan startup. Jika webhook masih aktif, hapus webhook tersebut secara manual
+sebelum memakai polling; aplikasi tidak menghapus webhook atau pending updates.
+
+FILE: main.py
+"""Local launcher for the AI Service runtime."""
+
+import uvicorn
+
+from app.application import app
+
+__all__ = ["app"]
+
+
+if __name__ == "__main__":
+    uvicorn.run("app.application:app", host="127.0.0.1", port=8001, lifespan="on")
+
+FILE: docs/progress/telegram-baseline.json
+[
+  {
+    "Path": "app\\__init__.py",
+    "Hash": "8FC70753FA3347D6877108518EA676313809F0B8C86AAC1B8283CEA2C2D41084"
+  },
+  {
+    "Path": "app\\application.py",
+    "Hash": "99E0CAC1D79576C024D53C6E5727D3A9E6E1E9DFCB9F8A5E505514E9DD5BBFBB"
+  },
+  {
+    "Path": "app\\config.py",
+    "Hash": "618E56F9410DEC8718B5550CF553A5FDE7F0374D7962B3FBE9FE8EF3DEC73104"
+  },
+  {
+    "Path": "app\\openrouter.py",
+    "Hash": "B792E3ECB31D83F3EB6308A352412DF0826F34D11C4A010431B4BF1251EF2A0A"
+  },
+  {
+    "Path": "app\\channels\\telegram\\bot.py",
+    "Hash": "E3055FFD778F3EB8DDE367756AB6B86AE9CDC6BE9D1CC8382BC9FA65A1ADA434"
+  },
+  {
+    "Path": "pyproject.toml",
+    "Hash": "E8A923F0AAE6B5153ED20F7F826196DCF7A5BE6E3F180C73B25108ADFCEC2676"
+  },
+  {
+    "Path": "uv.lock",
+    "Hash": "65172A772F0ED7D40151AC66035890695C31628C78DC25747C7292378ACFB772"
+  },
+  {
+    "Path": "main.py",
+    "Hash": "37EA2D3A9100084BE01D37FE4894156D2F1F6BFCC26E3812655D836BBEAF30B0"
+  },
+  {
+    "Path": ".env.example",
+    "Hash": "30BC99154D60DFEAA3027101ECA55D719D1740F9E2544D18543D01D42DA66F49"
+  },
+  {
+    "Path": "README.md",
+    "Hash": "B59E8023070EC5F71B0FEFCE6C5A3ED43922732E7D340083E190B9901FE51DBB"
+  },
+  {
+    "Path": "docs/telegram-conversation-design.md",
+    "Hash": "4EA31F640D5F5C8C27F7636924A0A68DE794902FCB0AE07F514EB80B570885DB"
+  }
+]
+
+INSTALLED AIOGRAM DISPATCHER SOURCE (for lifecycle/offset design):
+from __future__ import annotations
+
+import asyncio
+import contextvars
+import signal
+import sys
+import warnings
+from asyncio import CancelledError, Event, Future, Lock
+from collections.abc import AsyncGenerator, Awaitable
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any
+
+from aiogram import loggers
+from aiogram.exceptions import TelegramAPIError
+from aiogram.fsm.middleware import FSMContextMiddleware
+from aiogram.fsm.storage.base import BaseEventIsolation, BaseStorage
+from aiogram.fsm.storage.memory import DisabledEventIsolation, MemoryStorage
+from aiogram.fsm.strategy import FSMStrategy
+from aiogram.methods import GetUpdates, TelegramMethod
+from aiogram.types import Update, User
+from aiogram.types.base import UNSET, UNSET_TYPE
+from aiogram.types.update import UpdateTypeLookupError
+from aiogram.utils.backoff import Backoff, BackoffConfig
+
+from .event.bases import UNHANDLED, SkipHandler
+from .event.telegram import TelegramEventObserver
+from .middlewares.error import ErrorsMiddleware
+from .middlewares.user_context import UserContextMiddleware
+from .router import Router
+
+if TYPE_CHECKING:
+    from aiogram.client.bot import Bot
+    from aiogram.methods.base import TelegramType
+
+DEFAULT_BACKOFF_CONFIG = BackoffConfig(min_delay=1.0, max_delay=5.0, factor=1.3, jitter=0.1)
+
+
+class Dispatcher(Router):
+    """
+    Root router
+    """
+
+    def __init__(
+        self,
+        *,  # * - Preventing to pass instance of Bot to the FSM storage
+        storage: BaseStorage | None = None,
+        fsm_strategy: FSMStrategy = FSMStrategy.USER_IN_CHAT,
+        events_isolation: BaseEventIsolation | None = None,
+        disable_fsm: bool = False,
+        name: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Root router
+
+        :param storage: Storage for FSM
+        :param fsm_strategy: FSM strategy
+        :param events_isolation: Events isolation
+        :param disable_fsm: Disable FSM, note that if you disable FSM
+            then you should not use storage and events isolation
+        :param kwargs: Other arguments, will be passed as keyword arguments to handlers
+        """
+        super().__init__(name=name)
+
+        if storage and not isinstance(storage, BaseStorage):
+            msg = f"FSM storage should be instance of 'BaseStorage' not {type(storage).__name__}"
+            raise TypeError(msg)
+
+        # Telegram API provides originally only one event type - Update
+        # For making easily interactions with events here is registered handler which helps
+        # to separate Update to different event types like Message, CallbackQuery etc.
+        self.update = self.observers["update"] = TelegramEventObserver(
+            router=self,
+            event_name="update",
+        )
+        self.update.register(self._listen_update)
+
+        # Error handlers should work is out of all other functions
+        # and should be registered before all others middlewares
+        self.update.outer_middleware(ErrorsMiddleware(self))
+
+        # User context middleware makes small optimization for all other builtin
+        # middlewares via caching the user and chat instances in the event context
+        self.update.outer_middleware(UserContextMiddleware())
+
+        # FSM middleware should always be registered after User context middleware
+        # because here is used context from previous step
+        self.fsm = FSMContextMiddleware(
+            storage=storage or MemoryStorage(),
+            strategy=fsm_strategy,
+            events_isolation=events_isolation or DisabledEventIsolation(),
+        )
+        if not disable_fsm:
+            # Note that when FSM middleware is disabled, the event isolation is also disabled
+            # Because the isolation mechanism is a part of the FSM
+            self.update.outer_middleware(self.fsm)
+        self.shutdown.register(self.fsm.close)
+
+        self.workflow_data: dict[str, Any] = kwargs
+        self._running_lock = Lock()
+        self._stop_signal: Event | None = None
+        self._stopped_signal: Event | None = None
+        self._handle_update_tasks: set[asyncio.Task[Any]] = set()
+
+    def __getitem__(self, item: str) -> Any:
+        return self.workflow_data[item]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.workflow_data[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self.workflow_data[key]
+
+    def get(self, key: str, /, default: Any | None = None) -> Any | None:
+        return self.workflow_data.get(key, default)
+
+    @property
+    def storage(self) -> BaseStorage:
+        return self.fsm.storage
+
+    @property
+    def parent_router(self) -> Router | None:
+        """
+        Dispatcher has no parent router and can't be included to any other routers or dispatchers
+
+        :return:
+        """
+        return None
+
+    @parent_router.setter
+    def parent_router(self, value: Router) -> None:
+        """
+        Dispatcher is root Router then configuring parent router is not allowed
+
+        :param value:
+        :return:
+        """
+        msg = "Dispatcher can not be attached to another Router."
+        raise RuntimeError(msg)
+
+    async def feed_update(self, bot: Bot, update: Update, **kwargs: Any) -> Any:
+        """
+        Main entry point for incoming updates
+        Response of this method can be used as Webhook response
+
+        :param bot:
+        :param update:
+        """
+        loop = asyncio.get_running_loop()
+        handled = False
+        start_time = loop.time()
+
+        if update.bot != bot:
+            # Re-mounting update to the current bot instance for making possible to
+            # use it in shortcuts.
+            # Here is update is re-created because we need to propagate context to
+            # all nested objects and attributes of the Update, but it
+            # is impossible without roundtrip to JSON :(
+            # The preferred way is that pass already mounted Bot instance to this update
+            # before call feed_update method
+            update = Update.model_validate(update.model_dump(), context={"bot": bot})
+
+        try:
+            response = await self.update.wrap_outer_middleware(
+                self.update.trigger,
+                update,
+                {
+                    "dispatcher": self,
+                    **self.workflow_data,
+                    **kwargs,
+                    "bot": bot,
+                },
+            )
+            handled = response is not UNHANDLED
+            return response
+        finally:
+            finish_time = loop.time()
+            duration = (finish_time - start_time) * 1000
+            loggers.event.info(
+                "Update id=%s is %s. Duration %d ms by bot id=%d",
+                update.update_id,
+                "handled" if handled else "not handled",
+                duration,
+                bot.id,
+            )
+
+    async def feed_raw_update(self, bot: Bot, update: dict[str, Any], **kwargs: Any) -> Any:
+        """
+        Main entry point for incoming updates with automatic Dict->Update serializer
+
+        :param bot:
+        :param update:
+        :param kwargs:
+        """
+        parsed_update = Update.model_validate(update, context={"bot": bot})
+        return await self._feed_webhook_update(bot=bot, update=parsed_update, **kwargs)
+
+    @classmethod
+    async def _listen_updates(
+        cls,
+        bot: Bot,
+        polling_timeout: int = 30,
+        backoff_config: BackoffConfig = DEFAULT_BACKOFF_CONFIG,
+        allowed_updates: list[str] | None = None,
+    ) -> AsyncGenerator[Update, None]:
+        """
+        Endless updates reader with correctly handling any server-side or connection errors.
+
+        So you may not worry that the polling will stop working.
+        """
+        backoff = Backoff(config=backoff_config)
+        get_updates = GetUpdates(timeout=polling_timeout, allowed_updates=allowed_updates)
+        kwargs = {}
+        if bot.session.timeout:
+            # Request timeout can be lower than session timeout and that's OK.
+            # To prevent false-positive TimeoutError we should wait longer than polling timeout
+            kwargs["request_timeout"] = int(bot.session.timeout + polling_timeout)
+        failed = False
+        while True:
+            try:
+                updates = await bot(get_updates, **kwargs)
+            except Exception as e:  # noqa: BLE001
+                failed = True
+                # In cases when Telegram Bot API was inaccessible don't need to stop polling
+                # process because some developers can't make auto-restarting of the script
+                loggers.dispatcher.error("Failed to fetch updates - %s: %s", type(e).__name__, e)
+                # And also backoff timeout is best practice to retry any network activity
+                loggers.dispatcher.warning(
+                    "Sleep for %f seconds and try again... (tryings = %d, bot id = %d)",
+                    backoff.next_delay,
+                    backoff.counter,
+                    bot.id,
+                )
+                await backoff.asleep()
+                continue
+
+            # In case when network connection was fixed let's reset the backoff
+            # to initial value and then process updates
+            if failed:
+                loggers.dispatcher.info(
+                    "Connection established (tryings = %d, bot id = %d)",
+                    backoff.counter,
+                    bot.id,
+                )
+                backoff.reset()
+                failed = False
+
+            for update in updates:
+                yield update
+                # The getUpdates method returns the earliest 100 unconfirmed updates.
+                # To confirm an update, use the offset parameter when calling getUpdates
+                # All updates with update_id less than or equal to offset will be marked
+                # as confirmed on the server and will no longer be returned.
+                get_updates.offset = update.update_id + 1
+
+    async def _listen_update(self, update: Update, **kwargs: Any) -> Any:
+        """
+        Main updates listener
+
+        Workflow:
+        - Detect content type and propagate to observers in current router
+        - If no one filter is pass - propagate update to child routers as Update
+
+        :param update:
+        :param kwargs:
+        :return:
+        """
+        try:
+            update_type = update.event_type
+            event = update.event
+        except UpdateTypeLookupError as e:
+            warnings.warn(
+                "Detected unknown update type.\n"
+                "Seems like Telegram Bot API was updated and you have "
+                "installed not latest version of aiogram framework"
+                f"\nUpdate: {update.model_dump_json(exclude_unset=True)}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            raise SkipHandler() from e
+
+        kwargs.update(event_update=update)
+
+        return await self.propagate_event(update_type=update_type, event=event, **kwargs)
+
+    @classmethod
+    async def silent_call_request(cls, bot: Bot, result: TelegramMethod[Any]) -> None:
+        """
+        Simulate answer into WebHook
+
+        :param bot:
+        :param result:
+        :return:
+        """
+        try:
+            await bot(result)
+        except TelegramAPIError as e:
+            # In due to WebHook mechanism doesn't allow getting response for
+            # requests called in answer to WebHook request.
+            # Need to skip unsuccessful responses.
+            # For debugging here is added logging.
+            loggers.event.error("Failed to make answer: %s: %s", e.__class__.__name__, e)
+
+    async def _process_update(
+        self,
+        bot: Bot,
+        update: Update,
+        call_answer: bool = True,
+        **kwargs: Any,
+    ) -> bool:
+        """
+        Propagate update to event listeners
+
+        :param bot: instance of Bot
+        :param update: instance of Update
+        :param call_answer: need to execute response as Telegram method (like answer into webhook)
+        :param kwargs: contextual data for middlewares, filters and handlers
+        :return: status
+        """
+        try:
+            response = await self.feed_update(bot, update, **kwargs)
+            if call_answer and isinstance(response, TelegramMethod):
+                await self.silent_call_request(bot=bot, result=response)
+
+        except Exception as e:  # noqa: BLE001
+            loggers.event.exception(
+                "Cause exception while process update id=%d by bot id=%d\n%s: %s",
+                update.update_id,
+                bot.id,
+                e.__class__.__name__,
+                e,
+            )
+            return True  # because update was processed but unsuccessful
+
+        else:
+            return response is not UNHANDLED
+
+    async def _process_with_semaphore(
+        self,
+        handle_update: Awaitable[bool],
+        semaphore: asyncio.Semaphore,
+    ) -> bool:
+        """
+        Process update with semaphore to limit concurrent tasks
+
+        :param handle_update: Coroutine that processes the update
+        :param semaphore: Semaphore to limit concurrent tasks
+        :return: bool indicating the result of the update processing
+        """
+        try:
+            return await handle_update
+        finally:
+            semaphore.release()
+
+    async def _polling(
+        self,
+        bot: Bot,
+        polling_timeout: int = 30,
+        handle_as_tasks: bool = True,
+        backoff_config: BackoffConfig = DEFAULT_BACKOFF_CONFIG,
+        allowed_updates: list[str] | None = None,
+        tasks_concurrency_limit: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Internal polling process
+
+        :param bot:
+        :param polling_timeout: Long-polling wait time
+        :param handle_as_tasks: Run task for each event and no wait result
+        :param backoff_config: backoff-retry config
+        :param allowed_updates: List of the update types you want your bot to receive
+        :param tasks_concurrency_limit: Maximum number of concurrent updates to process
+            (None = no limit), used only if handle_as_tasks is True
+        :param kwargs:
+        :return:
+        """
+        user: User = await bot.me()
+        loggers.dispatcher.info(
+            "Run polling for bot @%s id=%d - %r",
+            user.username,
+            bot.id,
+            user.full_name,
+        )
+
+        # Create semaphore if tasks_concurrency_limit is specified
+        semaphore = None
+        if tasks_concurrency_limit is not None and handle_as_tasks:
+            semaphore = asyncio.Semaphore(tasks_concurrency_limit)
+
+        try:
+            async for update in self._listen_updates(
+                bot,
+                polling_timeout=polling_timeout,
+                backoff_config=backoff_config,
+                allowed_updates=allowed_updates,
+            ):
+                handle_update = self._process_update(bot=bot, update=update, **kwargs)
+                if handle_as_tasks:
+                    if semaphore:
+                        # Use semaphore to limit concurrent tasks
+                        await semaphore.acquire()
+                        handle_update_task = asyncio.create_task(
+                            self._process_with_semaphore(handle_update, semaphore),
+                        )
+                    else:
+                        handle_update_task = asyncio.create_task(handle_update)
+
+                    self._handle_update_tasks.add(handle_update_task)
+                    handle_update_task.add_done_callback(self._handle_update_tasks.discard)
+                else:
+                    await handle_update
+        finally:
+            loggers.dispatcher.info(
+                "Polling stopped for bot @%s id=%d - %r",
+                user.username,
+                bot.id,
+                user.full_name,
+            )
+
+    async def _feed_webhook_update(self, bot: Bot, update: Update, **kwargs: Any) -> Any:
+        """
+        The same with `Dispatcher.process_update()` but returns real response instead of bool
+        """
+        try:
+            return await self.feed_update(bot, update, **kwargs)
+        except Exception as e:
+            loggers.event.exception(
+                "Cause exception while process update id=%d by bot id=%d\n%s: %s",
+                update.update_id,
+                bot.id,
+                e.__class__.__name__,
+                e,
+            )
+            raise
+
+    async def feed_webhook_update(
+        self,
+        bot: Bot,
+        update: Update | dict[str, Any],
+        _timeout: float = 55,
+        **kwargs: Any,
+    ) -> TelegramMethod[TelegramType] | None:
+        if not isinstance(update, Update):  # Allow to use raw updates
+            update = Update.model_validate(update, context={"bot": bot})
+
+        ctx = contextvars.copy_context()
+        loop = asyncio.get_running_loop()
+        waiter = loop.create_future()
+
+        def release_waiter(*_: Any) -> None:
+            if not waiter.done():
+                waiter.set_result(None)
+
+        timeout_handle = loop.call_later(_timeout, release_waiter)
+
+        process_updates: Future[Any] = asyncio.ensure_future(
+            self._feed_webhook_update(bot=bot, update=update, **kwargs),
+        )
+        process_updates.add_done_callback(release_waiter, context=ctx)
+
+        def process_response(task: Future[Any]) -> None:
+            warnings.warn(
+                "Detected slow response into webhook.\n"
+                "Telegram is waiting for response only first 60 seconds and then re-send update.\n"
+                "For preventing this situation response into webhook returned immediately "
+                "and handler is moved to background and still processing update.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            result = task.result()
+            if isinstance(result, TelegramMethod):
+                asyncio.ensure_future(self.silent_call_request(bot=bot, result=result))
+
+        try:
+            try:
+                await waiter
+            except CancelledError:  # pragma: no cover
+                process_updates.remove_done_callback(release_waiter)
+                process_updates.cancel()
+                raise
+
+            if process_updates.done():
+                # TODO: handle exceptions
+                response: Any = process_updates.result()
+                if isinstance(response, TelegramMethod):
+                    return response
+
+            else:
+                process_updates.remove_done_callback(release_waiter)
+                process_updates.add_done_callback(process_response, context=ctx)
+
+        finally:
+            timeout_handle.cancel()
+
+        return None
+
+    async def stop_polling(self) -> None:
+        """
+        Execute this method if you want to stop polling programmatically
+
+        :return:
+        """
+        if not self._running_lock.locked():
+            msg = "Polling is not started"
+            raise RuntimeError(msg)
+        if not self._stop_signal or not self._stopped_signal:
+            return
+        self._stop_signal.set()
+        await self._stopped_signal.wait()
+
+    def _signal_stop_polling(self, sig: signal.Signals) -> None:
+        if not self._running_lock.locked():
+            return
+
+        loggers.dispatcher.warning("Received %s signal", sig.name)
+        if not self._stop_signal:
+            return
+        self._stop_signal.set()
+
+    async def start_polling(
+        self,
+        *bots: Bot,
+        polling_timeout: int = 10,
+        handle_as_tasks: bool = True,
+        backoff_config: BackoffConfig = DEFAULT_BACKOFF_CONFIG,
+        allowed_updates: list[str] | UNSET_TYPE | None = UNSET,
+        handle_signals: bool = True,
+        close_bot_session: bool = True,
+        tasks_concurrency_limit: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Polling runner
+
+        :param bots: Bot instances (one or more)
+        :param polling_timeout: Long-polling wait time
+        :param handle_as_tasks: Run task for each event and no wait result
+        :param backoff_config: backoff-retry config
+        :param allowed_updates: List of the update types you want your bot to receive
+               By default, all used update types are enabled (resolved from handlers)
+        :param handle_signals: handle signals (SIGINT/SIGTERM)
+        :param close_bot_session: close bot sessions on shutdown
+        :param tasks_concurrency_limit: Maximum number of concurrent updates to process
+            (None = no limit), used only if handle_as_tasks is True
+        :param kwargs: contextual data
+        :return:
+        """
+        if not bots:
+            msg = "At least one bot instance is required to start polling"
+            raise ValueError(msg)
+        if "bot" in kwargs:
+            msg = (
+                "Keyword argument 'bot' is not acceptable, "
+                "the bot instance should be passed as positional argument"
+            )
+            raise ValueError(msg)
+
+        async with self._running_lock:  # Prevent to run this method twice at a once
+            if self._stop_signal is None:
+                self._stop_signal = Event()
+            if self._stopped_signal is None:
+                self._stopped_signal = Event()
+
+            if allowed_updates is UNSET:
+                allowed_updates = self.resolve_used_update_types()
+
+            self._stop_signal.clear()
+            self._stopped_signal.clear()
+
+            if handle_signals:
+                loop = asyncio.get_running_loop()
+                with suppress(NotImplementedError):  # pragma: no cover
+                    # Signals handling is not supported on Windows
+                    # It also can't be covered on Windows
+                    loop.add_signal_handler(
+                        signal.SIGTERM,
+                        self._signal_stop_polling,
+                        signal.SIGTERM,
+                    )
+                    loop.add_signal_handler(
+                        signal.SIGINT,
+                        self._signal_stop_polling,
+                        signal.SIGINT,
+                    )
+
+            workflow_data = {
+                "dispatcher": self,
+                "bots": bots,
+                **self.workflow_data,
+                **kwargs,
+            }
+            if "bot" in workflow_data:
+                workflow_data.pop("bot")
+
+            await self.emit_startup(bot=bots[-1], **workflow_data)
+            loggers.dispatcher.info("Start polling")
+            try:
+                tasks: list[asyncio.Task[Any]] = [
+                    asyncio.create_task(
+                        self._polling(
+                            bot=bot,
+                            handle_as_tasks=handle_as_tasks,
+                            polling_timeout=polling_timeout,
+                            backoff_config=backoff_config,
+                            allowed_updates=allowed_updates,
+                            tasks_concurrency_limit=tasks_concurrency_limit,
+                            **workflow_data,
+                        ),
+                    )
+                    for bot in bots
+                ]
+                tasks.append(asyncio.create_task(self._stop_signal.wait()))
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+                for task in pending:
+                    # (mostly) Graceful shutdown unfinished tasks
+                    task.cancel()
+                    with suppress(CancelledError):
+                        await task
+                # Wait finished tasks to propagate unhandled exceptions
+                await asyncio.gather(*done)
+
+            finally:
+                loggers.dispatcher.info("Polling stopped")
+                try:
+                    await self.emit_shutdown(bot=bots[-1], **workflow_data)
+                finally:
+                    if close_bot_session:
+                        await asyncio.gather(*(bot.session.close() for bot in bots))
+                self._stopped_signal.set()
+
+    def run_polling(
+        self,
+        *bots: Bot,
+        polling_timeout: int = 10,
+        handle_as_tasks: bool = True,
+        backoff_config: BackoffConfig = DEFAULT_BACKOFF_CONFIG,
+        allowed_updates: list[str] | UNSET_TYPE | None = UNSET,
+        handle_signals: bool = True,
+        close_bot_session: bool = True,
+        tasks_concurrency_limit: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Run many bots with polling
+
+        :param bots: Bot instances (one or more)
+        :param polling_timeout: Long-polling wait time
+        :param handle_as_tasks: Run task for each event and no wait result
+        :param backoff_config: backoff-retry config
+        :param allowed_updates: List of the update types you want your bot to receive
+        :param handle_signals: handle signals (SIGINT/SIGTERM)
+        :param close_bot_session: close bot sessions on shutdown
+        :param tasks_concurrency_limit: Maximum number of concurrent updates to process
+            (None = no limit), used only if handle_as_tasks is True
+        :param kwargs: contextual data
+        :return:
+        """
+        with suppress(KeyboardInterrupt):
+            coro = self.start_polling(
+                *bots,
+                **kwargs,
+                polling_timeout=polling_timeout,
+                handle_as_tasks=handle_as_tasks,
+                backoff_config=backoff_config,
+                allowed_updates=allowed_updates,
+                handle_signals=handle_signals,
+                close_bot_session=close_bot_session,
+                tasks_concurrency_limit=tasks_concurrency_limit,
+            )
+
+            try:
+                import uvloop
+
+            except ImportError:
+                return asyncio.run(coro)
+
+            else:
+                if sys.version_info >= (3, 11):
+                    with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
+                        return runner.run(coro)
+                else:  # pragma: no cover
+                    uvloop.install()
+                    return asyncio.run(coro)
+

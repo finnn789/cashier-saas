@@ -1,0 +1,37 @@
+{
+  "status": "SOURCE REVIEWED / READY FOR TESTING",
+  "python_files_parsed": 27,
+  "missing_type_hints": [],
+  "mapped_tables": [
+    "conversation_messages",
+    "conversation_sessions",
+    "telegram_identities",
+    "telegram_inbox",
+    "telegram_outbox"
+  ],
+  "columns": 72,
+  "composite_foreign_keys": 9,
+  "indexes": 6,
+  "ddl_compilation": "success",
+  "scope_helper_annotation": "<class 'sqlalchemy.sql.selectable.FromClause'>",
+  "static_test_methods": 78,
+  "tests_executed": false,
+  "database_calls": false,
+  "startup_api_calls": false,
+  "protected_baseline_changes": [
+    "tests/unit/test_repository.py",
+    "app/chat/repositories.py",
+    "app/chat/worker.py",
+    "README.md",
+    "migrations/env.py",
+    "tests/unit/test_conversation.py"
+  ],
+  "new_source": [
+    "app/chat/entities.py"
+  ],
+  "immutable_migration": "unchanged",
+  "canonical_review_baseline": 29,
+  "phase1_checkpoint": 30,
+  "final_canonical_pending": false,
+  "final_canonical_version": 31
+}

@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "remove_paths": [],
+  "progress": "Unable to return a reliable complete runtime adaptation within this response. No files were authored or applied.",
+  "limitations": [
+    "The requested reserved files remain pending.",
+    "No tools, tests, startup, API calls, or database operations were run."
+  ]
+}

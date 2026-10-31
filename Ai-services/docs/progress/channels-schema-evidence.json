@@ -1,0 +1,19 @@
+{
+  "tables": [
+    "channel_accounts",
+    "channel_users",
+    "conversations",
+    "message_inbox",
+    "message_outbox",
+    "messages",
+    "tenant_memberships",
+    "tenants"
+  ],
+  "columns": 91,
+  "foreign_keys": 14,
+  "indexes": 7,
+  "schema_differences": [],
+  "migration_execution": false,
+  "database_connections": 0,
+  "tests_executed": false
+}

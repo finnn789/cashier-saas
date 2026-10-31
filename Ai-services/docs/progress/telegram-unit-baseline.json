@@ -1,0 +1,90 @@
+[
+  {
+    "path": "app\\__init__.py",
+    "hash": "8FC70753FA3347D6877108518EA676313809F0B8C86AAC1B8283CEA2C2D41084"
+  },
+  {
+    "path": "app\\application.py",
+    "hash": "CBD36106CAE856ACB10BEAB44B4446A35EA2EA746BBE201905F254660D3CED8B"
+  },
+  {
+    "path": "app\\config.py",
+    "hash": "E9C470F08A59719272C229ACDC871F7DB0840F4D6189B12DF85389AF6461185E"
+  },
+  {
+    "path": "app\\ai\\__init__.py",
+    "hash": "65027296CF51EF619C694494AAC1C6E9FE80EBA518C42CB40D7CAF60051CD3E2"
+  },
+  {
+    "path": "app\\ai\\config.py",
+    "hash": "D687F0BB35D507F923BB32D0AAB9DEB9FE7215F7419A6CF3CEB8172FEA7F0C48"
+  },
+  {
+    "path": "app\\ai\\openrouter.py",
+    "hash": "86405A0BC3F99C65F46A227F3DA852599D1F26BD191BC0EEC7C84D154FD2D5E3"
+  },
+  {
+    "path": "app\\ai\\prompts.py",
+    "hash": "7851E359E22DE1649F988AB045BF9401DF855F38A3AB64056C0681BC358C4552"
+  },
+  {
+    "path": "app\\channels\\telegram\\bot.py",
+    "hash": "3EEEFB6CFF2A0C61CD2E66E2ADA41026603F40109352AD7C5D0B814D048EDDE2"
+  },
+  {
+    "path": "app\\channels\\telegram\\config.py",
+    "hash": "11363E838E7F454C62CED1094E791EF0EBE1C5187F978AFB01356732D628E9CF"
+  },
+  {
+    "path": "app\\channels\\telegram\\handlers.py",
+    "hash": "1A9608870A5949AD79966EE371D858A71337BAFF4871B61B2AB37A6714928955"
+  },
+  {
+    "path": "app\\channels\\telegram\\sender.py",
+    "hash": "740F8E0D13D3033F4C1DFC6C4F8B3B1FA925529BA6A4F6F30D12A9CF7225BF68"
+  },
+  {
+    "path": "app\\chat\\__init__.py",
+    "hash": "988C59D6B1F262A2C247DCE7DC51D162FA8F59D05BE21F9B1143043778B5C6BC"
+  },
+  {
+    "path": "app\\chat\\repositories.py",
+    "hash": "867515CFDACCCB51FAC410DE717C443C857D281C79D9847C9AE7BA48133FD300"
+  },
+  {
+    "path": "app\\chat\\worker.py",
+    "hash": "EFACCC05D0C6A75963DA02CC885FBDF6547ABCF5DE0593BAFE106ADE0FBD41E0"
+  },
+  {
+    "path": "app\\core\\__init__.py",
+    "hash": "BC6FC5C3664B72C20376CE5D38052E9514C383F22790C5A58BA4008288FAF749"
+  },
+  {
+    "path": "app\\core\\database.py",
+    "hash": "C3673472AA9026BAE8DC3533D43CCA015C34D11533B40EB7327284DA189A8C9E"
+  },
+  {
+    "path": "migrations\\env.py",
+    "hash": "F086896F5DE7F2837F95297AAFAF8D808339FD848E632192C09B7B1C50558A84"
+  },
+  {
+    "path": "migrations\\versions\\0001_telegram.py",
+    "hash": "A45EF0183CC66145BDD023B997F94101B32F34079C877CF2D934E2383C8EA46E"
+  },
+  {
+    "path": "main.py",
+    "hash": "37EA2D3A9100084BE01D37FE4894156D2F1F6BFCC26E3812655D836BBEAF30B0"
+  },
+  {
+    "path": "pyproject.toml",
+    "hash": "9C0DCAE66F387FF03B0EA8884870F2F57D82C4A04FEF0B13984129A8CE7ED836"
+  },
+  {
+    "path": "uv.lock",
+    "hash": "D736C4352D4E7B5154CE7459DE190AC41E66515C31A365049B843E618A167D78"
+  },
+  {
+    "path": "README.md",
+    "hash": "BC6298F11B6D5016B2A113F161F867F1A7463A5F1C28EE95D0F8889B818CEC4F"
+  }
+]

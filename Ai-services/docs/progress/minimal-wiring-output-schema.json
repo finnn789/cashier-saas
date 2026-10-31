@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+        "additionalProperties": false
+      }
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}},
+        "required": ["path", "old", "new"],
+        "additionalProperties": false
+      }
+    },
+    "remove_paths": {"type": "array", "items": {"type": "string"}},
+    "progress": {"type": "string"},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["files", "edits", "remove_paths", "progress", "limitations"],
+  "additionalProperties": false
+}

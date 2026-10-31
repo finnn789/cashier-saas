@@ -1,0 +1,78 @@
+﻿[
+    {
+        "Path":  "app/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/ai/agent.py",
+        "SHA256":  "E05C7980442B4F6D971B10B390C40825BC5E5E779E6CDAAE434079AD3DA865D9"
+    },
+    {
+        "Path":  "app/ai/state.py",
+        "SHA256":  "0EC555862A051AA35FD9D5F0526596F4D4B5277DDB904B2C3D0B51EE876193AD"
+    },
+    {
+        "Path":  "app/ai/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/cases/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/cases/faq/service.py",
+        "SHA256":  "46B6AB8D79010BA52A0C4E0239D92846640EBDC78534FF1F9FEEB6FF16911363"
+    },
+    {
+        "Path":  "app/cases/faq/tool.py",
+        "SHA256":  "8FD53BD3A6B57FFD0A99A4377CAA6F362D47CF55FD61DFE59A8D36B68CD49A67"
+    },
+    {
+        "Path":  "app/cases/faq/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/cases/order_status/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/cases/support_ticket/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/chat/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/messaging/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/spring/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  "app/telegram/client.py",
+        "SHA256":  "8D05EF14C7F1F7D60DF0D5DFDED776AE03CD11F1F7C62B0CB237552283C8C963"
+    },
+    {
+        "Path":  "app/telegram/faq.py",
+        "SHA256":  "D6039ACF8B351D652847C40A8DF0C7C19C12BD3A22F72BAAF2F769FCDA99EBAC"
+    },
+    {
+        "Path":  "app/telegram/polling.py",
+        "SHA256":  "A1E70E4300B6A5A90D4E9E5EC990E53D4527A03DC6604D3B7B4350D07999AF29"
+    },
+    {
+        "Path":  "app/telegram/__init__.py",
+        "SHA256":  "50ADF0E6C0BF837E964E9476453CF0C860995EF8D5E622C134953309E1BAA9B4"
+    },
+    {
+        "Path":  "app/whatsapp/__init__.py",
+        "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+        "Path":  ".env",
+        "SHA256":  "63585DA3B8E45688A3783EB0F03C939EAC5E61FB1EA7E73D0A45DB5F12CE0D94"
+    }
+]

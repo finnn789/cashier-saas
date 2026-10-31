@@ -1,0 +1,44 @@
+{
+  "status": "SOURCE_REVIEWED_READY_FOR_TESTING",
+  "syntax_files": 27,
+  "static_test_methods_not_executed": 78,
+  "missing_annotations": [],
+  "safe_imports": [
+    "entities",
+    "repositories",
+    "service"
+  ],
+  "tables": {
+    "tenants": 2,
+    "channel_accounts": 5,
+    "channel_users": 6,
+    "conversations": 8,
+    "messages": 6,
+    "tenant_memberships": 4
+  },
+  "columns": 31,
+  "changed_from_minimal_baseline": [
+    "README.md",
+    "app/application.py",
+    "app/channels/telegram/bot.py",
+    "app/channels/telegram/handlers.py",
+    "app/chat/entities.py",
+    "app/chat/repositories.py",
+    "migrations/versions/0001_channels.py",
+    "tests/unit/test_channel.py",
+    "tests/unit/test_config.py",
+    "tests/unit/test_conversation.py",
+    "tests/unit/test_database.py",
+    "tests/unit/test_repository.py",
+    "tests/unit/test_telegram_intake.py"
+  ],
+  "deleted_from_minimal_baseline": [
+    "app/chat/worker.py"
+  ],
+  "new_application_file": "app/chat/service.py",
+  "protected_hashes_unchanged": true,
+  "http_lifespan_behavior_unchanged": true,
+  "tests": "NOT RUN BY POLICY",
+  "database_migration_api_startup": "NOT RUN",
+  "actual_dotenv": "NOT ACCESSED"
+}

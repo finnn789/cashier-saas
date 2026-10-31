@@ -1,0 +1,14 @@
+.venv
+.uv-cache
+.ruff_cache
+.vscode
+.git
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+reports
+tasks
+tests
+docs

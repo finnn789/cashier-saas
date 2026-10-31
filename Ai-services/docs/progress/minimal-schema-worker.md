@@ -1,0 +1,7 @@
+# Minimal schema worker checkpoint
+
+Baseline: canonical version 32 plus the human-approved MINIMAL amendment of 13 October 2026. The older eight-table, 91-column contract is superseded. Reserved paths: `app/chat/entities.py`, `migrations/versions/0001_channels.py`, and this report only.
+
+This submission proposes complete replacement contents for the two source files and this report. It makes no filesystem edits. The proposed initial `0001_channels` snapshot has exactly six tables and 31 columns: tenants 2, channel_accounts 5, channel_users 6, conversations 8, messages 6, and tenant_memberships 4. Mappings and migration contain the same keys, checks, foreign keys, indexes, nullability, and defaults. Platform identity remains separate for Telegram and WhatsApp. Empty conversations have NULL `last_message_at`; membership verification has no automatic timestamp. Inbox, outbox, and delivery or processing fields are absent.
+
+Acceptance progress: schema and initial migration proposal complete for orchestrator review. No runtime, test, configuration, provider, database, or environment changes are proposed. No tests or commands were run, as instructed. Remaining work: orchestrator applies and reviews the source proposal; separately reserved workers implement repository/service and Telegram wiring, adapt applicable tests, and report review evidence. The initial migration replacement assumes the authorized empty database; no forward data migration or database operation is included.

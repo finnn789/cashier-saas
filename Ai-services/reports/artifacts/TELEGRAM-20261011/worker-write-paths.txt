@@ -1,0 +1,12 @@
+E:\Java\cashier-saas\Ai-services\app\telegram\client.py
+E:\Java\cashier-saas\Ai-services\app\telegram\polling.py
+E:\Java\cashier-saas\Ai-services\app\main.py
+E:\Java\cashier-saas\Ai-services\app\telegram\faq.py
+E:\Java\cashier-saas\Ai-services\app\config.py
+E:\Java\cashier-saas\Ai-services\app\telegram\service.py
+E:\Java\cashier-saas\Ai-services\.env.example
+E:\Java\cashier-saas\Ai-services\README.md
+E:\Java\cashier-saas\Ai-services\reports\TASK-040.md
+E:\Java\cashier-saas\Ai-services\app\ai\state.py
+E:\Java\cashier-saas\Ai-services\app\telegram\__init__.py
+E:\Java\cashier-saas\Ai-services\PLAN.md

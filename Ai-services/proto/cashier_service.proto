@@ -1,0 +1,43 @@
+syntax = "proto3";
+package cashier.v1;
+option go_package = "cashier/v1";
+option java_package = "com.cashier.grpc.v1";
+option java_multiple_files = true;
+
+service CashierService {
+  rpc GetCatalogItem (GetCatalogItemRequest) returns (GetCatalogItemResponse);
+  rpc GetOrderStatus (GetOrderStatusRequest) returns (GetOrderStatusResponse);
+}
+
+message GetCatalogItemRequest {
+  string tenant_id = 1;
+  string query = 2;
+  int32 limit = 3;
+}
+
+message CatalogItem {
+  string id = 1;
+  string name = 2;
+  int64 price = 3;
+  bool is_available = 4;
+  string category = 5;
+}
+
+message GetCatalogItemResponse {
+  string tenant_id = 1;
+  repeated CatalogItem items = 2;
+}
+
+message GetOrderStatusRequest {
+  string tenant_id = 1;
+  string order_number = 2;
+}
+
+message GetOrderStatusResponse {
+  string tenant_id = 1;
+  string order_number = 2;
+  string status = 3;
+  string payment_status = 4;
+  int64 total_amount = 5;
+  string created_at = 6;
+}

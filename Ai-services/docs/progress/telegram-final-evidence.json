@@ -1,0 +1,103 @@
+{
+  "status": "SOURCE REVIEWED / READY FOR TESTING",
+  "python_files_parsed": 18,
+  "missing_hints": 0,
+  "application_imported": false,
+  "tests": "NOT RUN BY POLICY",
+  "database_migrations_applied": false,
+  "telegram_provider_calls": false,
+  "files": [
+    {
+      "path": "app\\application.py",
+      "sha256": "cbd36106cae856acb10beab44b4446a35ea2ea746bbe201905f254660d3ced8b"
+    },
+    {
+      "path": "app\\config.py",
+      "sha256": "e9c470f08a59719272c229acdc871f7db0840f4d6189b12df85389af6461185e"
+    },
+    {
+      "path": "app\\__init__.py",
+      "sha256": "8fc70753fa3347d6877108518ea676313809f0b8c86aac1b8283cea2c2d41084"
+    },
+    {
+      "path": "app\\ai\\config.py",
+      "sha256": "d687f0bb35d507f923bb32d0aab9deb9fe7215f7419a6cf3ceb8172fea7f0c48"
+    },
+    {
+      "path": "app\\ai\\openrouter.py",
+      "sha256": "86405a0bc3f99c65f46a227f3da852599d1f26bd191bc0eec7c84d154fd2d5e3"
+    },
+    {
+      "path": "app\\ai\\prompts.py",
+      "sha256": "7851e359e22de1649f988ab045bf9401df855f38a3ab64056c0681bc358c4552"
+    },
+    {
+      "path": "app\\ai\\__init__.py",
+      "sha256": "65027296cf51ef619c694494aac1c6e9fe80eba518c42cb40d7caf60051cd3e2"
+    },
+    {
+      "path": "app\\chat\\repositories.py",
+      "sha256": "867515cfdacccb51fac410de717c443c857d281c79d9847c9ae7ba48133fd300"
+    },
+    {
+      "path": "app\\chat\\worker.py",
+      "sha256": "efaccc05d0c6a75963da02cc885fbdf6547abcf5de0593bafe106ade0fbd41e0"
+    },
+    {
+      "path": "app\\chat\\__init__.py",
+      "sha256": "988c59d6b1f262a2c247dce7dc51d162fa8f59d05be21f9b1143043778b5c6bc"
+    },
+    {
+      "path": "app\\core\\database.py",
+      "sha256": "c3673472aa9026bae8dc3533d43cca015c34d11533b40eb7327284da189a8c9e"
+    },
+    {
+      "path": "app\\core\\__init__.py",
+      "sha256": "bc6fc5c3664b72c20376ce5d38052e9514c383f22790c5a58ba4008288faf749"
+    },
+    {
+      "path": "app\\channels\\telegram\\bot.py",
+      "sha256": "3eeefb6cff2a0c61cd2e66e2ada41026603f40109352ad7c5d0b814d048edde2"
+    },
+    {
+      "path": "app\\channels\\telegram\\config.py",
+      "sha256": "11363e838e7f454c62ced1094e791ef0ebe1c5187f978afb01356732d628e9cf"
+    },
+    {
+      "path": "app\\channels\\telegram\\handlers.py",
+      "sha256": "1a9608870a5949ad79966ee371d858a71337baff4871b61b2ab37a6714928955"
+    },
+    {
+      "path": "app\\channels\\telegram\\sender.py",
+      "sha256": "740f8e0d13d3033f4c1dfc6c4f8b3b1fa925529ba6a4f6f30d12a9cf7225bf68"
+    },
+    {
+      "path": "migrations\\env.py",
+      "sha256": "f086896f5de7f2837f95297aafaf8d808339fd848e632192c09b7b1c50558a84"
+    },
+    {
+      "path": "migrations\\versions\\0001_telegram.py",
+      "sha256": "a45ef0183cc66145bdd023b997f94101b32f34079c877cf2d934e2383c8ea46e"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "9c0dcae66f387ff03b0ea8884870f2f57d82c4a04fef0b13984129a8ce7ed836"
+    },
+    {
+      "path": "uv.lock",
+      "sha256": "d736c4352d4e7b5154ce7459de190ac41e66515c31a365049b843e618a167d78"
+    },
+    {
+      "path": "README.md",
+      "sha256": "bc6298f11b6d5016b2a113f161f867f1a7463a5f1c28ee95d0f8889b818cec4f"
+    },
+    {
+      "path": ".env.example",
+      "sha256": "ae1e0abf10a893eee8a21e0863c0e17282652b43d0a595067f2b196beed76f6d"
+    },
+    {
+      "path": "alembic.ini",
+      "sha256": "024bf3fe092ea4f8e6bb6309cba89e67b53bada366dee6859339297f090fdda1"
+    }
+  ]
+}

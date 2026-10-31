@@ -1,0 +1,913 @@
+You are the code-writing executor for a user-authorized repository refactor. Main session owns review/canonical state. Read only the supplied content; do not call any tool. Author exact phase1 proposed files.\n\n# SQLAlchemy chat persistence refactor — 13 October 2026
+Canonical baseline: parent memory29. User requested chat repository SQLAlchemy queries and table entities. Actual path app/chat/repositories.py. Existing migrations define five tables without Python mapped entities. Source-only refactor; no new product behavior or schema revision. Existing no-TASK/report-task decision honored; this contract plus unique worker/orchestrator reports track reservation.
+
+Executor: author proposed files from supplied non-secret source bundle; DO NOT use tools, shell, filesystem, nested workers, or network. Return exact complete contents through JSON schema. Do not execute imports, tests, startup, migrations or database operations. Never read .env/secrets. Orchestrator reviews and applies authored proposal only after baseline comparison.
+
+Phase1 reserved paths ONLY: app/chat/entities.py (new), app/chat/repositories.py, app/chat/worker.py, migrations/env.py, docs/progress/sqlalchemy-worker-progress.md (new). No removals. No dependency changes. Leave database advisory-lock implementation unchanged. Phase2 may separately reserve existing test_repository.py and test_conversation.py for interface adaptations, without execution. Keep other tests untouched.
+
+Implement five named public SQLAlchemy2 DeclarativeBase mapped classes: TelegramIdentity, ConversationSession, TelegramInbox, ConversationMessage, TelegramOutbox in entities.py. Mapped annotations and correct UUID, BIGINT Telegram IDs, timezone timestamps, nullable flags, received_order Identity(always=True), server defaults, every existing check/unique/composite foreign key and partial/history/queue index must accurately mirror immutable migration0001. Base metadata connects to Alembic env both online/offline. Do not change migration revision, run create_all, add automatic migration, or trigger DB at import. No ORM relationship machinery unless required; table entity classes serve schema and query references.
+
+Use SQLAlchemy expression queries (select/update/insert, PG insert ON CONFLICT, RETURNING, aliases/exists for recovery/history) over entity.__table__ and typed columns; no hand-written SQL text in repository or worker. SQL check/default metadata permitted. Stay with AsyncConnection and caller-owned transactions: replacing with AsyncSession would risk losing dedicated advisory lock ownership. Return row mappings (existing Row dict) to worker; DTO/entity boundary remains explicit. No raw-string compatibility APIs.
+
+Move all persistence statements from worker into cohesive named Repository methods: intake/session/message/outbox existing APIs; recover sending/tail suppression and processing inbox read, next queued inbox, identity, existing user message, completed history, marking inbox PROCESSING/RETRY/READY/DONE/DELIVERY_FAILED, selecting pending/failed outbox, marking SENDING/result and failing later chunks. Choose explicit domain operations rather than generic string helpers; focused private typed query executor permissible. Remove obsolete parameters/one/execute APIs if no callers; update worker accordingly. All query roots scoped to self.scope/self.bot_id, with identity/chat/session/inbox ownership where original used it. IDs trusted from persisted inbox; don't introduce cross-scope leakage. Prevent override of scope/bot in helpers. Preserve existing transaction count/boundaries, one USER per inbox, server sequence increment, no provider/send I/O inside transactions, ordering, delay/cancellation, AI errors, recovery conservative behavior, status semantics and commands exactly. History must use full scoped self-join USER->ASSISTANT and completed inbox, exclude current inbox, DESC sequence LIMIT32 then reverse for prompt chronological order. Recovery tail correlated EXISTS must correlate outer outbox and scope/bot/inbox/response_kind and compare earlier chunk_number; statuses UNKNOWN/FAILED. ON CONFLICT keys unchanged. UUID generation stays uuid4.
+
+Write clear typed readable Python; no dynamic reflection/closures/lambdas/catch-all utils. Type-safe SQLAlchemy expression construction. Do not invent app DTO records or enforce irrelevant Java requirements. No source tests run; status NOT RUN BY POLICY. Report baseline29, changed files, preservation evidence, checks not executed, recommended later tests, remaining risks. This is CODE AUTHORSHIP, not a claimed filesystem edit.
+
+Return phase1 only now. Orchestrator handles docs/canonical state and review.
+
+SOURCE PATH: app/chat/repositories.py
+"""Scoped SQLAlchemy Core queries over the migrated PostgreSQL schema."""
+
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+Row = dict[str, Any]
+
+
+class Repository:
+    def __init__(self, scope: str, bot_id: int) -> None:
+        self.scope = scope
+        self.bot_id = bot_id
+
+    def parameters(self, **values: Any) -> dict[str, Any]:
+        return {"scope": self.scope, "bot": self.bot_id, **values}
+
+    async def one(self, connection: AsyncConnection, sql: str, **values: Any) -> Row | None:
+        result = await connection.execute(text(sql), self.parameters(**values))
+        row = result.mappings().first()
+        if row is None:
+            return None
+        return dict(row)
+
+    async def execute(self, connection: AsyncConnection, sql: str, **values: Any) -> None:
+        await connection.execute(text(sql), self.parameters(**values))
+
+    async def intake(
+        self, connection: AsyncConnection, user_id: int, username: str | None,
+        first_name: str, last_name: str | None, display_name: str,
+        update_id: int, chat_id: int, message_id: int, kind: str, content: str,
+    ) -> None:
+        identity = await self.one(connection, """
+            INSERT INTO telegram_identities
+              (id, scope, bot_id, telegram_user_id, username, first_name, last_name, display_name)
+            VALUES (:id, :scope, :bot, :user, :username, :first, :last, :display)
+            ON CONFLICT (scope, bot_id, telegram_user_id) DO UPDATE SET
+              username=EXCLUDED.username, first_name=EXCLUDED.first_name,
+              last_name=EXCLUDED.last_name, display_name=EXCLUDED.display_name,
+              updated_at=now(), last_seen_at=now()
+            RETURNING id
+        """, id=uuid4(), user=user_id, username=username, first=first_name,
+            last=last_name, display=display_name)
+        if identity is None:
+            raise RuntimeError("IDENTITY_NOT_RETURNED")
+        await self.execute(connection, """
+            INSERT INTO telegram_inbox
+              (id, scope, bot_id, update_id, identity_id, chat_id, message_id, kind, content)
+            VALUES (:id, :scope, :bot, :update, :identity, :chat, :message, :kind, :content)
+            ON CONFLICT (scope, bot_id, update_id) DO NOTHING
+        """, id=uuid4(), update=update_id, identity=identity["id"], chat=chat_id,
+            message=message_id, kind=kind, content=content)
+
+    async def session(self, connection: AsyncConnection, inbox: Row, reset: bool = False) -> Row:
+        if reset:
+            await self.execute(connection, """
+                UPDATE conversation_sessions SET status='CLOSED', closed_at=now()
+                WHERE scope=:scope AND bot_id=:bot AND identity_id=:identity
+                  AND chat_id=:chat AND status='ACTIVE'
+            """, identity=inbox["identity_id"], chat=inbox["chat_id"])
+        session = await self.one(connection, """
+            SELECT * FROM conversation_sessions WHERE scope=:scope AND bot_id=:bot
+              AND identity_id=:identity AND chat_id=:chat AND status='ACTIVE'
+        """, identity=inbox["identity_id"], chat=inbox["chat_id"])
+        if session is None:
+            session = await self.one(connection, """
+                INSERT INTO conversation_sessions (id, scope, bot_id, identity_id, chat_id)
+                VALUES (:id, :scope, :bot, :identity, :chat) RETURNING *
+            """, id=uuid4(), identity=inbox["identity_id"], chat=inbox["chat_id"])
+        if session is None:
+            raise RuntimeError("SESSION_NOT_RETURNED")
+        return session
+
+    async def message(
+        self, connection: AsyncConnection, inbox: Row, session_id: UUID,
+        role: str, content: str, reply_to: UUID | None = None,
+        model: str | None = None, response_id: str | None = None,
+    ) -> UUID:
+        sequence = await connection.scalar(text("""
+            UPDATE conversation_sessions SET last_sequence=last_sequence+1, last_activity_at=now()
+            WHERE scope=:scope AND bot_id=:bot AND id=:session AND identity_id=:identity
+              AND chat_id=:chat RETURNING last_sequence
+        """), self.parameters(session=session_id, identity=inbox["identity_id"], chat=inbox["chat_id"]))
+        if sequence is None:
+            raise RuntimeError("SESSION_SCOPE_MISMATCH")
+        message_id = uuid4()
+        await self.execute(connection, """
+            INSERT INTO conversation_messages
+              (id, scope, bot_id, identity_id, chat_id, session_id, sequence, role,
+               content, inbox_id, inbound_update_id, reply_to_id, model, provider_response_id)
+            VALUES (:id, :scope, :bot, :identity, :chat, :session, :sequence, :role,
+                    :content, :inbox, :update, :reply, :model, :response)
+        """, id=message_id, identity=inbox["identity_id"], chat=inbox["chat_id"],
+            session=session_id, sequence=sequence, role=role, content=content,
+            inbox=inbox["id"], update=inbox["update_id"], reply=reply_to, model=model, response=response_id)
+        return message_id
+
+    async def outbox(
+        self, connection: AsyncConnection, inbox: Row, session_id: UUID,
+        kind: str, chunks: list[str], assistant_id: UUID | None = None,
+    ) -> None:
+        for number, chunk in enumerate(chunks):
+            await self.execute(connection, """
+                INSERT INTO telegram_outbox
+                  (id, scope, bot_id, identity_id, chat_id, session_id, inbox_id,
+                   assistant_message_id, response_kind, chunk_number, content)
+                VALUES (:id, :scope, :bot, :identity, :chat, :session, :inbox,
+                        :assistant, :kind, :number, :content)
+                ON CONFLICT (scope, bot_id, inbox_id, response_kind, chunk_number) DO NOTHING
+            """, id=uuid4(), identity=inbox["identity_id"], chat=inbox["chat_id"],
+                session=session_id, inbox=inbox["id"], assistant=assistant_id,
+                kind=kind, number=number, content=chunk)
+
+
+SOURCE PATH: app/chat/worker.py
+"""One serial durable worker. No transactions span provider/send I/O."""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.ai.openrouter import AIError, OpenRouterClient
+from app.ai.prompts import build_prompt
+from app.channels.telegram.sender import Sender, split_chunks
+from app.chat.repositories import Repository, Row
+from app.core.database import Database
+
+
+class Worker:
+    def __init__(
+        self,
+        database: Database,
+        repository: Repository,
+        ai: OpenRouterClient,
+        sender: Sender,
+    ) -> None:
+        self.database = database
+        self.repository = repository
+        self.ai = ai
+        self.sender = sender
+        self.stopping = asyncio.Event()
+        self.healthy = False
+
+    async def recover(self) -> None:
+        async with self.database.transaction() as connection:
+            await self.repository.execute(
+                connection,
+                """
+                UPDATE telegram_outbox
+                SET status='UNKNOWN', error_code='CRASH_DURING_SEND', updated_at=now()
+                WHERE scope=:scope AND bot_id=:bot AND status='SENDING'
+                """,
+            )
+            await self.repository.execute(
+                connection,
+                """
+                UPDATE telegram_outbox o
+                SET status='FAILED', error_code='PREVIOUS_CHUNK_UNKNOWN', updated_at=now()
+                WHERE o.scope=:scope AND o.bot_id=:bot AND o.status='PENDING'
+                  AND EXISTS (SELECT 1 FROM telegram_outbox p WHERE p.scope=o.scope
+                    AND p.bot_id=o.bot_id AND p.inbox_id=o.inbox_id
+                    AND p.response_kind=o.response_kind AND p.chunk_number<o.chunk_number
+                    AND p.status IN ('UNKNOWN','FAILED'))
+                """,
+            )
+            # PROCESSING may represent an accepted provider request. Preserve USER
+            # and create a safe error response without automatic regeneration.
+            result = await connection.execute(
+                text("""
+                    SELECT * FROM telegram_inbox WHERE scope=:scope AND bot_id=:bot
+                      AND status='PROCESSING' ORDER BY received_order
+                """),
+                self.repository.parameters(),
+            )
+            for mapping in result.mappings():
+                inbox = dict(mapping)
+                session_id = inbox["session_id"]
+                if session_id is None:
+                    raise RuntimeError("PROCESSING_SESSION_MISSING")
+                await self.repository.outbox(
+                    connection,
+                    inbox,
+                    session_id,
+                    "ERROR",
+                    [
+                        "Permintaan AI sebelumnya terputus. "
+                        "Kirim pertanyaan baru untuk mencoba lagi."
+                    ],
+                )
+                await self.repository.execute(
+                    connection,
+                    """
+                    UPDATE telegram_inbox
+                    SET status='READY', error_code='AI_CRASH_UNKNOWN', updated_at=now()
+                    WHERE scope=:scope AND bot_id=:bot AND id=:id
+                    """,
+                    id=inbox["id"],
+                )
+        self.healthy = True
+
+    async def run(self) -> None:
+        try:
+            while not self.stopping.is_set():
+                inbox = await self.next_inbox()
+                if inbox is None:
+                    await asyncio.sleep(0.5)
+                    continue
+                next_attempt = inbox["next_attempt_at"]
+                now = datetime.now(timezone.utc)
+                if next_attempt is not None and next_attempt > now:
+                    await asyncio.sleep(min(1.0, (next_attempt - now).total_seconds()))
+                    continue
+                if inbox["status"] == "READY":
+                    await self.deliver(inbox)
+                else:
+                    await self.process(inbox)
+        finally:
+            self.healthy = False
+
+    async def next_inbox(self) -> Row | None:
+        async with self.database.transaction() as connection:
+            return await self.repository.one(
+                connection,
+                """
+                SELECT * FROM telegram_inbox WHERE scope=:scope AND bot_id=:bot
+                  AND status IN ('PENDING','RETRY','READY') ORDER BY received_order LIMIT 1
+                """,
+            )
+
+    async def process(self, inbox: Row) -> None:
+        prompt: list[dict[str, str]] = []
+        async with self.database.transaction() as connection:
+            identity = await self.repository.one(
+                connection,
+                """
+                SELECT * FROM telegram_identities
+                WHERE scope=:scope AND bot_id=:bot AND id=:identity
+                """,
+                identity=inbox["identity_id"],
+            )
+            if identity is None:
+                raise RuntimeError("IDENTITY_MISSING")
+            if inbox["session_id"] is None:
+                session = await self.repository.session(
+                    connection, inbox, reset=inbox["kind"] == "NEW"
+                )
+                session_id = session["id"]
+            else:
+                session_id = inbox["session_id"]
+            if inbox["kind"] != "TEXT":
+                await self.command(connection, inbox, session_id, identity["display_name"])
+                return
+            user = await self.repository.one(
+                connection,
+                """
+                SELECT id FROM conversation_messages WHERE scope=:scope AND bot_id=:bot
+                  AND identity_id=:identity AND chat_id=:chat AND session_id=:session
+                  AND inbox_id=:inbox AND role='USER'
+                """,
+                identity=inbox["identity_id"],
+                chat=inbox["chat_id"],
+                session=session_id,
+                inbox=inbox["id"],
+            )
+            if user is None:
+                user_id = await self.repository.message(
+                    connection, inbox, session_id, "USER", inbox["content"]
+                )
+            else:
+                user_id = user["id"]
+            # Successful completed pairs only; exclude failed and current turns.
+            result = await connection.execute(
+                text("""
+                    SELECT u.content AS user_content, a.content AS answer
+                    FROM conversation_messages u
+                    JOIN conversation_messages a ON a.scope=u.scope AND a.bot_id=u.bot_id
+                      AND a.identity_id=u.identity_id AND a.chat_id=u.chat_id
+                      AND a.session_id=u.session_id AND a.reply_to_id=u.id
+                      AND a.role='ASSISTANT'
+                    JOIN telegram_inbox i ON i.scope=u.scope AND i.bot_id=u.bot_id
+                      AND i.identity_id=u.identity_id AND i.chat_id=u.chat_id AND i.id=u.inbox_id
+                    WHERE u.scope=:scope AND u.bot_id=:bot AND u.identity_id=:identity
+                      AND u.chat_id=:chat AND u.session_id=:session AND u.role='USER'
+                      AND i.status='DONE' AND u.inbox_id<>:inbox
+                    ORDER BY u.sequence DESC LIMIT 32
+                """),
+                self.repository.parameters(
+                    identity=inbox["identity_id"],
+                    chat=inbox["chat_id"],
+                    session=session_id,
+                    inbox=inbox["id"],
+                ),
+            )
+            pairs: list[tuple[str, str]] = []
+            for row in reversed(result.mappings().all()):
+                pairs.append((row["user_content"], row["answer"]))
+            prompt = build_prompt(
+                identity["display_name"], identity["username"], pairs, inbox["content"]
+            )
+            await self.repository.execute(
+                connection,
+                """
+                UPDATE telegram_inbox SET status='PROCESSING', attempts=attempts+1,
+                  session_id=:session, next_attempt_at=NULL, updated_at=now()
+                WHERE scope=:scope AND bot_id=:bot AND id=:id
+                  AND identity_id=:identity AND chat_id=:chat
+                """,
+                session=session_id,
+                id=inbox["id"],
+                identity=inbox["identity_id"],
+                chat=inbox["chat_id"],
+            )
+        attempts = inbox["attempts"] + 1
+        try:
+            completion = await self.ai.reply(prompt)
+        except AIError as error:
+            async with self.database.transaction() as connection:
+                if error.retryable and attempts < 3:
+                    next_attempt = datetime.now(timezone.utc) + timedelta(
+                        seconds=max(error.delay, attempts * 5)
+                    )
+                    await self.repository.execute(
+                        connection,
+                        """
+                        UPDATE telegram_inbox SET status='RETRY', error_code=:code,
+                          next_attempt_at=:next, updated_at=now()
+                        WHERE scope=:scope AND bot_id=:bot AND id=:id
+                        """,
+                        id=inbox["id"],
+                        code=error.code,
+                        next=next_attempt,
+                    )
+                    return
+                await self.repository.outbox(
+                    connection, inbox, session_id, "ERROR", [self.error_message(error.code)]
+                )
+                await self.repository.execute(
+                    connection,
+                    """
+                    UPDATE telegram_inbox SET status='READY', error_code=:code, updated_at=now()
+                    WHERE scope=:scope AND bot_id=:bot AND id=:id
+                    """,
+                    id=inbox["id"],
+                    code=error.code,
+                )
+            return
+        async with self.database.transaction() as connection:
+            assistant_id = await self.repository.message(
+                connection,
+                inbox,
+                session_id,
+                "ASSISTANT",
+                completion.content,
+                reply_to=user_id,
+                model=completion.model,
+                response_id=completion.response_id,
+            )
+            await self.repository.outbox(
+                connection,
+                inbox,
+                session_id,
+                "AI",
+                split_chunks(completion.content),
+                assistant_id,
+            )
+            await self.repository.execute(
+                connection,
+                """
+                UPDATE telegram_inbox SET status='READY', error_code=NULL, updated_at=now()
+                WHERE scope=:scope AND bot_id=:bot AND id=:id
+                """,
+                id=inbox["id"],
+            )
+
+    async def command(
+        self,
+        connection: AsyncConnection,
+        inbox: Row,
+        session_id: UUID,
+        name: str,
+    ) -> None:
+        if inbox["kind"] == "START":
+            answer = f"Halo, {name}! Silakan kirim pertanyaan. Sesi: {session_id}"
+        elif inbox["kind"] == "NEW":
+            answer = f"Sesi baru dibuat, {name}. Sesi: {session_id}"
+        elif inbox["kind"] == "SESSION":
+            answer = f"{name}, sesi aktif Anda: {session_id}"
+        elif inbox["kind"] == "INVALID":
+            answer = "Kirim pesan teks berisi 1 sampai 4000 karakter."
+        else:
+            answer = "Perintah tersedia: /start, /new, /session."
+        await self.repository.outbox(
+            connection, inbox, session_id, "COMMAND", split_chunks(answer)
+        )
+        await self.repository.execute(
+            connection,
+            """
+            UPDATE telegram_inbox SET status='READY', session_id=:session, updated_at=now()
+            WHERE scope=:scope AND bot_id=:bot AND id=:id
+            """,
+            session=session_id,
+            id=inbox["id"],
+        )
+
+    def error_message(self, code: str) -> str:
+        if code == "AI_NOT_CONFIGURED":
+            return "AI belum dikonfigurasi. Operator perlu mengisi OPENROUTER_API_KEY dan AI_MODEL."
+        if code in ("AI_HTTP_401", "AI_HTTP_403"):
+            return "Akses AI ditolak. Hubungi operator untuk memeriksa konfigurasi."
+        if code == "AI_HTTP_402":
+            return "Saldo layanan AI tidak mencukupi. Hubungi operator."
+        if code == "AI_TRANSPORT_UNKNOWN":
+            return (
+                "Koneksi AI terputus; hasil permintaan tidak diketahui. "
+                "Kirim pertanyaan baru bila perlu."
+            )
+        return "Layanan AI belum dapat menjawab. Silakan kirim pertanyaan baru nanti."
+
+    async def deliver(self, inbox: Row) -> None:
+        retry_due: datetime | None = None
+        async with self.database.transaction() as connection:
+            chunk = await self.repository.one(
+                connection,
+                """
+                SELECT * FROM telegram_outbox WHERE scope=:scope AND bot_id=:bot
+                  AND identity_id=:identity AND chat_id=:chat AND inbox_id=:inbox
+                  AND status='PENDING' ORDER BY chunk_number LIMIT 1
+                """,
+                identity=inbox["identity_id"],
+                chat=inbox["chat_id"],
+                inbox=inbox["id"],
+            )
+            if chunk is None:
+                failed = await self.repository.one(
+                    connection,
+                    """
+                    SELECT id FROM telegram_outbox WHERE scope=:scope AND bot_id=:bot
+                      AND inbox_id=:inbox AND status IN ('FAILED','UNKNOWN') LIMIT 1
+                    """,
+                    inbox=inbox["id"],
+                )
+                status = "DONE"
+                if failed is not None:
+                    status = "DELIVERY_FAILED"
+                await self.repository.execute(
+                    connection,
+                    """
+                    UPDATE telegram_inbox SET status=:status, updated_at=now()
+                    WHERE scope=:scope AND bot_id=:bot AND id=:id
+                    """,
+                    status=status,
+                    id=inbox["id"],
+                )
+                return
+            now = datetime.now(timezone.utc)
+            if chunk["next_attempt_at"] is not None and chunk["next_attempt_at"] > now:
+                retry_due = chunk["next_attempt_at"]
+            else:
+                await self.repository.execute(
+                    connection,
+                    """
+                    UPDATE telegram_outbox SET status='SENDING', attempts=attempts+1, updated_at=now()
+                    WHERE scope=:scope AND bot_id=:bot AND id=:id
+                    """,
+                    id=chunk["id"],
+                )
+        if retry_due is not None:
+            # Wait outside the transaction, then reread queue state in run().
+            while not self.stopping.is_set():
+                remaining = (retry_due - datetime.now(timezone.utc)).total_seconds()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(1.0, remaining))
+            return
+        delivery = await self.sender.send(
+            inbox["chat_id"], chunk["content"], chunk["attempts"] + 1
+        )
+        next_attempt = None
+        if delivery.status == "PENDING":
+            next_attempt = datetime.now(timezone.utc) + timedelta(seconds=delivery.retry_after)
+        async with self.database.transaction() as connection:
+            await self.repository.execute(
+                connection,
+                """
+                UPDATE telegram_outbox SET status=:status, error_code=:code,
+                  telegram_message_id=:message, next_attempt_at=:next,
+                  retry_after_seconds=:retry, updated_at=now()
+                WHERE scope=:scope AND bot_id=:bot AND id=:id
+                """,
+                status=delivery.status,
+                code=delivery.code,
+                message=delivery.message_id,
+                next=next_attempt,
+                retry=delivery.retry_after,
+                id=chunk["id"],
+            )
+            if delivery.status in ("UNKNOWN", "FAILED"):
+                await self.repository.execute(
+                    connection,
+                    """
+                    UPDATE telegram_outbox
+                    SET status='FAILED', error_code='PREVIOUS_CHUNK_FAILED', updated_at=now()
+                    WHERE scope=:scope AND bot_id=:bot AND inbox_id=:inbox
+                      AND response_kind=:kind AND chunk_number>:number AND status='PENDING'
+                    """,
+                    inbox=inbox["id"],
+                    kind=chunk["response_kind"],
+                    number=chunk["chunk_number"],
+                )
+        if delivery.status == "PENDING":
+            await asyncio.sleep(min(delivery.retry_after, 1))
+
+
+SOURCE PATH: app/chat/__init__.py
+"""Durable isolated conversations and their serial queue."""
+
+
+SOURCE PATH: app/core/database.py
+"""Async PostgreSQL connections and exclusive bot ownership.
+
+Queue transactions use the dedicated advisory-lock connection. Ownership loss
+is fatal; that connection is never transparently reconnected.
+"""
+
+import asyncio
+import hashlib
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
+
+CONNECT_TIMEOUT_SECONDS = 10
+COMMAND_TIMEOUT_SECONDS = 15
+
+
+@dataclass(frozen=True)
+class DatabaseSettings:
+    url: str = field(repr=False)
+
+
+def load_database_settings() -> DatabaseSettings:
+    raw = os.getenv("DATABASE_URL", "").strip()
+    try:
+        url = make_url(raw)
+        if url.drivername not in ("postgresql", "postgresql+asyncpg") or not url.database:
+            raise ValueError
+        # Force validation even when URL parsing defers port conversion.
+        _ = url.port
+        url = url.set(drivername="postgresql+asyncpg")
+        rendered = url.render_as_string(hide_password=False)
+    except (ArgumentError, ValueError):
+        raise RuntimeError("DATABASE_URL harus berupa URL PostgreSQL AI yang valid.") from None
+    return DatabaseSettings(rendered)
+
+
+class OwnershipLost(RuntimeError):
+    """The process must stop rather than reconnect its owner connection."""
+
+
+class Database:
+    def __init__(self, settings: DatabaseSettings, scope: str) -> None:
+        self.engine: AsyncEngine = create_async_engine(
+            settings.url,
+            poolclass=NullPool,
+            echo=False,
+            connect_args={
+                "timeout": CONNECT_TIMEOUT_SECONDS,
+                "command_timeout": COMMAND_TIMEOUT_SECONDS,
+            },
+        )
+        self.scope = scope
+        self.bot_id = 0
+        self.connection: AsyncConnection | None = None
+        self.lock = asyncio.Lock()
+        self.owned = False
+
+    async def acquire(self, bot_id: int) -> None:
+        self.bot_id = bot_id
+        # Lock the bot globally within this database, across service scopes.
+        digest = hashlib.sha256(f"telegram-poller:{bot_id}".encode()).digest()
+        key = int.from_bytes(digest[:8], "big", signed=True)
+        connection = await self.engine.connect()
+        self.connection = connection
+        acquired = await connection.scalar(
+            text("SELECT pg_try_advisory_lock(:key)"),
+            {"key": key},
+        )
+        await connection.commit()
+        if not acquired:
+            raise RuntimeError("Bot sudah dimiliki proses lain pada database ini.")
+        self.owned = True
+        async with self.transaction() as transaction:
+            version = await transaction.scalar(
+                text("SELECT version_num FROM alembic_version")
+            )
+            if version != "0001_telegram":
+                raise RuntimeError("Migrasi AI belum sesuai. Operator harus menjalankan Alembic.")
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[AsyncConnection]:
+        async with self.lock:
+            connection = self.connection
+            if (
+                not self.owned
+                or connection is None
+                or connection.closed
+                or connection.invalidated
+            ):
+                self.owned = False
+                raise OwnershipLost("DB_OWNER_LOST")
+            try:
+                async with connection.begin():
+                    yield connection
+            finally:
+                if connection.closed or connection.invalidated:
+                    self.owned = False
+
+    async def ping(self) -> bool:
+        async with self.transaction() as connection:
+            await connection.execute(text("SELECT 1"))
+        return True
+
+    async def close(self) -> None:
+        self.owned = False
+        try:
+            if self.connection is not None:
+                try:
+                    # Bound graceful close; command_timeout does not bound it.
+                    async with asyncio.timeout(COMMAND_TIMEOUT_SECONDS):
+                        await self.connection.close()
+                except (Exception, asyncio.CancelledError) as error:
+                    try:
+                        # Public invalidation terminates the NullPool session.
+                        await self.connection.invalidate()
+                    except Exception:
+                        raise RuntimeError("DB_OWNER_CLEANUP_FAILED") from None
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    raise RuntimeError("DB_OWNER_CLOSE_FAILED") from None
+        finally:
+            try:
+                await self.engine.dispose()
+            except Exception:
+                raise RuntimeError("DB_ENGINE_DISPOSE_FAILED") from None
+
+
+SOURCE PATH: migrations/env.py
+"""Operator-run async PostgreSQL migrations; no startup schema creation."""
+
+import asyncio
+from pathlib import Path
+
+from alembic import context
+from dotenv import load_dotenv
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
+
+from app.core.database import (
+    COMMAND_TIMEOUT_SECONDS,
+    CONNECT_TIMEOUT_SECONDS,
+    load_database_settings,
+)
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+
+
+def migrate(connection: Connection) -> None:
+    context.configure(connection=connection, target_metadata=None)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_online() -> None:
+    settings = load_database_settings()
+    engine = create_async_engine(
+        settings.url,
+        poolclass=NullPool,
+        connect_args={
+            "timeout": CONNECT_TIMEOUT_SECONDS,
+            "command_timeout": COMMAND_TIMEOUT_SECONDS,
+        },
+    )
+    try:
+        async with engine.connect() as connection:
+            await connection.run_sync(migrate)
+    finally:
+        await engine.dispose()
+
+
+if context.is_offline_mode():
+    settings = load_database_settings()
+    context.configure(
+        url=settings.url,
+        target_metadata=None,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+else:
+    asyncio.run(run_online())
+
+
+SOURCE PATH: migrations/versions/0001_telegram.py
+"""Five scoped durable Telegram tables.
+
+Revision ID: 0001_telegram
+Revises: none
+"""
+
+from alembic import op
+
+revision = "0001_telegram"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.execute("""
+        CREATE TABLE telegram_identities (
+            id UUID PRIMARY KEY,
+            scope VARCHAR(128) NOT NULL,
+            bot_id BIGINT NOT NULL CHECK (bot_id > 0),
+            telegram_user_id BIGINT NOT NULL CHECK (telegram_user_id > 0),
+            username TEXT,
+            first_name TEXT NOT NULL,
+            last_name TEXT,
+            display_name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (scope, bot_id, telegram_user_id),
+            UNIQUE (scope, bot_id, id)
+        )
+    """)
+    op.execute("""
+        CREATE TABLE conversation_sessions (
+            id UUID PRIMARY KEY,
+            scope VARCHAR(128) NOT NULL,
+            bot_id BIGINT NOT NULL,
+            identity_id UUID NOT NULL,
+            chat_id BIGINT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CLOSED')),
+            last_sequence BIGINT NOT NULL DEFAULT 0 CHECK (last_sequence >= 0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            closed_at TIMESTAMPTZ,
+            FOREIGN KEY (scope, bot_id, identity_id) REFERENCES telegram_identities(scope, bot_id, id),
+            UNIQUE (scope, bot_id, identity_id, chat_id, id),
+            CHECK ((status='ACTIVE' AND closed_at IS NULL) OR (status='CLOSED' AND closed_at IS NOT NULL))
+        )
+    """)
+    op.execute("""
+        CREATE UNIQUE INDEX one_active_session ON conversation_sessions(scope, bot_id, identity_id, chat_id)
+        WHERE status='ACTIVE'
+    """)
+    op.execute("""
+        CREATE TABLE telegram_inbox (
+            id UUID PRIMARY KEY,
+            scope VARCHAR(128) NOT NULL,
+            bot_id BIGINT NOT NULL,
+            update_id BIGINT NOT NULL,
+            identity_id UUID NOT NULL,
+            chat_id BIGINT NOT NULL,
+            message_id BIGINT NOT NULL,
+            received_order BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
+            kind VARCHAR(16) NOT NULL CHECK (kind IN ('TEXT','START','NEW','SESSION','INVALID','UNSUPPORTED')),
+            content TEXT NOT NULL,
+            status VARCHAR(24) NOT NULL DEFAULT 'PENDING'
+              CHECK (status IN ('PENDING','PROCESSING','RETRY','READY','DONE','DELIVERY_FAILED')),
+            session_id UUID,
+            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+            next_attempt_at TIMESTAMPTZ,
+            error_code VARCHAR(64),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (scope, bot_id, update_id),
+            UNIQUE (scope, bot_id, identity_id, chat_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id) REFERENCES telegram_identities(scope, bot_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, session_id)
+              REFERENCES conversation_sessions(scope, bot_id, identity_id, chat_id, id)
+        )
+    """)
+    op.execute("CREATE INDEX inbox_pending ON telegram_inbox(scope, bot_id, status, next_attempt_at, received_order)")
+    op.execute("""
+        CREATE TABLE conversation_messages (
+            id UUID PRIMARY KEY,
+            scope VARCHAR(128) NOT NULL,
+            bot_id BIGINT NOT NULL,
+            identity_id UUID NOT NULL,
+            chat_id BIGINT NOT NULL,
+            session_id UUID NOT NULL,
+            sequence BIGINT NOT NULL CHECK (sequence > 0),
+            role VARCHAR(16) NOT NULL CHECK (role IN ('USER','ASSISTANT')),
+            content TEXT NOT NULL,
+            inbox_id UUID NOT NULL,
+            inbound_update_id BIGINT NOT NULL,
+            reply_to_id UUID,
+            model VARCHAR(256),
+            provider_response_id VARCHAR(256),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (scope, bot_id, session_id, sequence),
+            UNIQUE (scope, bot_id, identity_id, chat_id, session_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, session_id)
+              REFERENCES conversation_sessions(scope, bot_id, identity_id, chat_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, inbox_id)
+              REFERENCES telegram_inbox(scope, bot_id, identity_id, chat_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, session_id, reply_to_id)
+              REFERENCES conversation_messages(scope, bot_id, identity_id, chat_id, session_id, id),
+            CHECK ((role='USER' AND reply_to_id IS NULL AND model IS NULL AND provider_response_id IS NULL)
+              OR (role='ASSISTANT' AND reply_to_id IS NOT NULL AND model IS NOT NULL))
+        )
+    """)
+    op.execute("CREATE UNIQUE INDEX one_user_per_inbox ON conversation_messages(scope, bot_id, inbox_id) WHERE role='USER'")
+    op.execute("CREATE UNIQUE INDEX one_assistant_per_user ON conversation_messages(scope, bot_id, reply_to_id) WHERE role='ASSISTANT'")
+    op.execute("CREATE INDEX message_history ON conversation_messages(scope, bot_id, session_id, sequence)")
+    op.execute("""
+        CREATE TABLE telegram_outbox (
+            id UUID PRIMARY KEY,
+            scope VARCHAR(128) NOT NULL,
+            bot_id BIGINT NOT NULL,
+            identity_id UUID NOT NULL,
+            chat_id BIGINT NOT NULL,
+            session_id UUID NOT NULL,
+            inbox_id UUID NOT NULL,
+            assistant_message_id UUID,
+            response_kind VARCHAR(16) NOT NULL CHECK (response_kind IN ('AI','COMMAND','ERROR')),
+            chunk_number INTEGER NOT NULL CHECK (chunk_number >= 0),
+            content TEXT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+              CHECK (status IN ('PENDING','SENDING','SENT','FAILED','UNKNOWN')),
+            telegram_message_id BIGINT,
+            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+            next_attempt_at TIMESTAMPTZ,
+            retry_after_seconds INTEGER NOT NULL DEFAULT 0 CHECK (retry_after_seconds >= 0),
+            error_code VARCHAR(64),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (scope, bot_id, inbox_id, response_kind, chunk_number),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, session_id)
+              REFERENCES conversation_sessions(scope, bot_id, identity_id, chat_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, inbox_id)
+              REFERENCES telegram_inbox(scope, bot_id, identity_id, chat_id, id),
+            FOREIGN KEY (scope, bot_id, identity_id, chat_id, session_id, assistant_message_id)
+              REFERENCES conversation_messages(scope, bot_id, identity_id, chat_id, session_id, id),
+            CHECK ((response_kind='AI' AND assistant_message_id IS NOT NULL)
+              OR (response_kind IN ('COMMAND','ERROR') AND assistant_message_id IS NULL)),
+            CHECK (status<>'SENT' OR telegram_message_id IS NOT NULL)
+        )
+    """)
+    op.execute("CREATE INDEX outbox_pending ON telegram_outbox(scope, bot_id, status, next_attempt_at)")
+
+
+def downgrade() -> None:
+    op.execute("DROP TABLE telegram_outbox")
+    op.execute("DROP TABLE conversation_messages")
+    op.execute("DROP TABLE telegram_inbox")
+    op.execute("DROP TABLE conversation_sessions")
+    op.execute("DROP TABLE telegram_identities")
+
+
+SOURCE PATH: pyproject.toml
+[project]
+name = "ai-customer-service"
+version = "0.1.0"
+description = "FastAPI AI Service served by Uvicorn"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.9.0,<4",
+    "aiogram==3.31.0",
+    "fastapi>=0.143.0",
+    "python-dotenv>=1.2.4",
+    "uvicorn>=0.54.0",
+    "SQLAlchemy>=2.0.36,<2.1",
+    "asyncpg>=0.30,<1",
+    "alembic>=1.14,<2",
+]
+
+[tool.uv]
+package = false
+

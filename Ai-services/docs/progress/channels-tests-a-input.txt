@@ -1,0 +1,884 @@
+Schema checkpoint source-reviewed:8 tables,91 columns,14 FKs,7 indexes, zero differences between mapped and frozen migration declarations, PostgreSQL offline compilation successful without running migration/DB. Now independently author ONLY test interface adaptations for tests/unit/test_config.py, test_database.py, test_telegram_intake.py, test_channel.py plus new docs/progress/channels-tests-worker-a.md. Production wiring is being authored by worker B to frozen contract. NO production/schema/dependency changes or removals, no tools/tests/DB/.env. Return full proposed test files + report via files schema. Preserve all meaningful existing test cases and cancellation/mock boundaries, do not weaken behavior assertions.
+Known exact interfaces: TelegramSettings(token:str,allowed_user_ids:frozenset[int],tenant_id:UUID), required environment AI_TENANT_ID replaces TELEGRAM_SERVICE_SCOPE; malformed/missing UUID errors name AI_TENANT_ID and do not echo raw input. Use fixed dummy UUID fixture; invalid allowlist checked first as before. Root Settings composition/load_dotenv precedence/repr remain. Database(settings) removes second scope argument; version now0001_channels; lock/close/ping/transaction APIs unchanged. Intake Repository.intake signature order unchanged but user/update/chat/message IDs passed as strings; profile/content/kind order same; all private-human/allowlist/failure/commit assertions retained. Telegram startup settings.tenant_id field replaces service_scope, get_me result profile used for username later, acquires bot.id unchanged; webhook rejection and cancelled get_me tests still reach failure before registry provision. Existing channel supervision/stop behavior unchanged. Worker itself newly checks repository.platform TELEGRAM; these four modules do not construct real Worker unless startup gets past these early failure paths. Source supplied below is current original test content. No test execution. Return code not a plan, complete parseable files.
+
+SOURCE PATH: tests/unit/test_config.py
+"""Offline configuration tests; dotenv is always mocked."""
+import os
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import app.config as config
+from app.ai.config import load_ai_settings
+from app.channels.telegram.config import load_telegram_settings
+from app.core.database import load_database_settings
+
+
+class ConfigurationTests(unittest.TestCase):
+    def environment(self) -> dict[str, str]:
+        return {
+            "TELEGRAM_BOT_TOKEN": " dummy-token ",
+            "TELEGRAM_ALLOWED_USER_IDS": "7, 8,7",
+            "TELEGRAM_SERVICE_SCOPE": " unit-scope ",
+            "OPENROUTER_API_KEY": " dummy-key ",
+            "AI_MODEL": " dummy-model ",
+            "DATABASE_URL": "postgresql://unit:dummy-password@localhost/unit",
+        }
+
+    def test_process_environment_and_dotenv_loaded_once(self) -> None:
+        with patch.dict(os.environ, self.environment(), clear=True), patch.object(
+            config, "_dotenv_loaded", False
+        ), patch.object(config, "load_dotenv") as loader:
+            first = config.load_settings()
+            os.environ["AI_MODEL"] = "changed-model"
+            second = config.load_settings()
+        loader.assert_called_once_with(
+            Path(config.__file__).resolve().parents[1] / ".env", override=False
+        )
+        self.assertEqual(first.ai.ai_model, "dummy-model")
+        self.assertEqual(second.ai.ai_model, "changed-model")
+        self.assertEqual(first.telegram.allowed_user_ids, frozenset({7, 8}))
+        self.assertEqual(first.telegram.service_scope, "unit-scope")
+        self.assertEqual(first.telegram.token, "dummy-token")
+        self.assertEqual(first.ai.openrouter_key, "dummy-key")
+        self.assertTrue(first.database.url.startswith("postgresql+asyncpg://"))
+
+    def test_invalid_scopes_have_safe_errors(self) -> None:
+        for scope in ("", "   ", "x" * 129):
+            with self.subTest(scope_length=len(scope)), patch.dict(
+                os.environ, {"TELEGRAM_SERVICE_SCOPE": scope}, clear=True
+            ):
+                with self.assertRaises(RuntimeError) as caught:
+                    load_telegram_settings()
+                self.assertEqual(str(caught.exception),
+                    "Isi TELEGRAM_SERVICE_SCOPE dengan scope server sepanjang 1–128 karakter.")
+
+    def test_invalid_allowlists_do_not_echo_input(self) -> None:
+        for allowed in ("0", "-7", "7,dummy-secret", "1.5"):
+            with self.subTest(allowed=allowed), patch.dict(os.environ, {
+                "TELEGRAM_SERVICE_SCOPE": "unit", "TELEGRAM_ALLOWED_USER_IDS": allowed
+            }, clear=True):
+                with self.assertRaises(RuntimeError) as caught:
+                    load_telegram_settings()
+                self.assertEqual(str(caught.exception),
+                    "TELEGRAM_ALLOWED_USER_IDS harus berisi ID positif dipisahkan koma.")
+
+    def test_empty_allowlist_and_missing_ai_credentials(self) -> None:
+        with patch.dict(os.environ, {"TELEGRAM_SERVICE_SCOPE": "unit",
+                                    "TELEGRAM_ALLOWED_USER_IDS": " , "}, clear=True):
+            self.assertEqual(load_telegram_settings().allowed_user_ids, frozenset())
+            self.assertEqual(load_ai_settings().openrouter_key, "")
+            self.assertEqual(load_ai_settings().ai_model, "")
+
+    def test_settings_repr_and_invalid_database_errors_hide_secrets(self) -> None:
+        with patch.dict(os.environ, self.environment(), clear=True), patch.object(
+            config, "load_dotenv"
+        ), patch.object(config, "_dotenv_loaded", False):
+            rendered = repr(config.load_settings())
+        for secret in ("dummy-token", "dummy-key", "dummy-password"):
+            self.assertNotIn(secret, rendered)
+        for url in ("dummy-secret", "sqlite:///dummy-secret", "postgresql://u:dummy-secret@host:bad/db"):
+            with self.subTest(url=url), patch.dict(os.environ, {"DATABASE_URL": url}, clear=True):
+                with self.assertRaises(RuntimeError) as caught:
+                    load_database_settings()
+                self.assertEqual(str(caught.exception),
+                    "DATABASE_URL harus berupa URL PostgreSQL AI yang valid.")
+
+
+SOURCE PATH: tests/unit/test_database.py
+"""Database ownership and cleanup with construction of the engine mocked."""
+import asyncio
+import unittest
+from contextlib import suppress
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+import app.core.database as database_module
+from app.core.database import Database, DatabaseSettings, OwnershipLost
+
+
+class BeginBoundary:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    async def __aenter__(self) -> None:
+        self.events.append("begin")
+
+    async def __aexit__(self, error_type: object, error: object, traceback: object) -> None:
+        self.events.append("rollback" if error_type is not None else "commit")
+
+
+class DatabaseTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.engine = Mock(spec=AsyncEngine)
+        self.connection = Mock(spec=AsyncConnection)
+        self.connection.closed = False
+        self.connection.invalidated = False
+        self.connection.scalar = AsyncMock(side_effect=[True, "0001_telegram"])
+        self.connection.commit = AsyncMock()
+        self.connection.execute = AsyncMock()
+        self.connection.close = AsyncMock()
+        self.connection.invalidate = AsyncMock()
+        self.begin = BeginBoundary()
+        self.connection.begin = Mock(return_value=self.begin)
+        self.engine.connect = AsyncMock(return_value=self.connection)
+        self.engine.dispose = AsyncMock()
+        with patch.object(database_module, "create_async_engine", return_value=self.engine) as factory:
+            self.database = Database(DatabaseSettings("postgresql+asyncpg://unit:dummy@localhost/unit"), "scope")
+        factory.assert_called_once()
+        self.assertFalse(factory.call_args.kwargs["echo"])
+
+    async def test_advisory_lock_denial_never_becomes_owned(self) -> None:
+        self.connection.scalar.side_effect = [False]
+        with self.assertRaisesRegex(RuntimeError, "Bot sudah dimiliki"):
+            await self.database.acquire(71)
+        self.assertFalse(self.database.owned)
+        self.connection.commit.assert_awaited_once()
+        self.connection.begin.assert_not_called()
+        statement, parameters = self.connection.scalar.await_args.args
+        self.assertIn("pg_try_advisory_lock(:key)", str(statement))
+        self.assertIsInstance(parameters["key"], int)
+        await self.database.close()
+        self.engine.dispose.assert_awaited_once()
+
+    async def test_migration_version_missing_rolls_back_and_closes(self) -> None:
+        self.connection.scalar.side_effect = [True, None]
+        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
+            await self.database.acquire(71)
+        self.assertEqual(self.begin.events, ["begin", "rollback"])
+        await self.database.close()
+        self.assertFalse(self.database.owned)
+        self.connection.close.assert_awaited_once()
+        self.engine.dispose.assert_awaited_once()
+
+    async def test_transaction_commit_rollback_and_ping(self) -> None:
+        await self.database.acquire(71)
+        async with self.database.transaction() as connection:
+            self.assertIs(connection, self.connection)
+            self.assertTrue(self.database.lock.locked())
+        with self.assertRaisesRegex(RuntimeError, "unit-abort"):
+            async with self.database.transaction():
+                raise RuntimeError("unit-abort")
+        self.assertTrue(await self.database.ping())
+        self.assertEqual(self.begin.events, ["begin", "commit", "begin", "commit",
+                                            "begin", "rollback", "begin", "commit"])
+        self.assertFalse(self.database.lock.locked())
+        self.assertEqual(str(self.connection.execute.await_args.args[0]), "SELECT 1")
+        await self.database.close()
+
+    async def test_invalidated_owner_never_reconnects(self) -> None:
+        await self.database.acquire(71)
+        self.connection.invalidated = True
+        for attempt in range(2):
+            with self.subTest(attempt=attempt), self.assertRaisesRegex(OwnershipLost, "^DB_OWNER_LOST$"):
+                await self.database.ping()
+        self.assertFalse(self.database.owned)
+        self.engine.connect.assert_awaited_once()
+        self.connection.execute.assert_not_awaited()
+        await self.database.close()
+
+    async def test_invalidation_during_transaction_removes_ownership(self) -> None:
+        await self.database.acquire(71)
+        async with self.database.transaction():
+            self.connection.invalidated = True
+        self.assertFalse(self.database.owned)
+        with self.assertRaises(OwnershipLost):
+            async with self.database.transaction():
+                self.fail("Invalid owner yielded a connection")
+        self.engine.connect.assert_awaited_once()
+        await self.database.close()
+
+    async def test_successful_close_disposes_and_releases_ownership(self) -> None:
+        await self.database.acquire(71)
+        await self.database.close()
+        self.assertFalse(self.database.owned)
+        self.connection.close.assert_awaited_once()
+        self.connection.invalidate.assert_not_awaited()
+        self.engine.dispose.assert_awaited_once()
+
+    async def test_close_failure_timeout_and_invalidate_failure_are_safe(self) -> None:
+        for mode, expected in (("failure", "DB_OWNER_CLOSE_FAILED"),
+                               ("timeout", "DB_OWNER_CLOSE_FAILED"),
+                               ("invalidate", "DB_OWNER_CLEANUP_FAILED")):
+            with self.subTest(mode=mode):
+                self.database.connection = self.connection
+                self.database.owned = True
+                self.connection.close.reset_mock()
+                self.connection.invalidate.reset_mock()
+                self.engine.dispose.reset_mock()
+                self.connection.invalidate.side_effect = None
+                if mode == "timeout":
+                    started = asyncio.Event()
+
+                    async def blocked_close() -> None:
+                        started.set()
+                        await asyncio.Event().wait()
+
+                    self.connection.close.side_effect = blocked_close
+                else:
+                    self.connection.close.side_effect = RuntimeError("dummy-secret")
+                if mode == "invalidate":
+                    self.connection.invalidate.side_effect = RuntimeError("dummy-secret")
+                with patch.object(database_module, "COMMAND_TIMEOUT_SECONDS", 0.02):
+                    with self.assertRaises(RuntimeError) as caught:
+                        await asyncio.wait_for(self.database.close(), 1)
+                self.assertEqual(str(caught.exception), expected)
+                self.assertFalse(self.database.owned)
+                self.connection.invalidate.assert_awaited_once()
+                self.engine.dispose.assert_awaited_once()
+
+    async def test_cancelled_close_invalidates_then_disposes_before_propagating(self) -> None:
+        self.database.connection = self.connection
+        entered = asyncio.Event()
+
+        async def blocked_close() -> None:
+            entered.set()
+            await asyncio.Event().wait()
+
+        self.connection.close.side_effect = blocked_close
+        task = asyncio.create_task(self.database.close())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+            self.connection.invalidate.assert_awaited_once()
+            self.engine.dispose.assert_awaited_once()
+        finally:
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    async def test_dispose_error_is_safe_even_after_close_failure(self) -> None:
+        self.database.connection = self.connection
+        self.connection.close.side_effect = RuntimeError("dummy-close-secret")
+        self.engine.dispose.side_effect = RuntimeError("dummy-dispose-secret")
+        with self.assertRaises(RuntimeError) as caught:
+            await self.database.close()
+        self.assertEqual(str(caught.exception), "DB_ENGINE_DISPOSE_FAILED")
+        self.connection.invalidate.assert_awaited_once()
+        self.engine.dispose.assert_awaited_once()
+
+
+SOURCE PATH: tests/unit/test_telegram_intake.py
+"""Real intake logic over transaction-boundary mocks, with no database engine."""
+import asyncio
+import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from aiogram.types import Message, Update
+from sqlalchemy.exc import OperationalError
+import app.channels.telegram.handlers as handlers
+from app.channels.telegram.config import TelegramSettings
+from app.chat.repositories import Repository
+from app.core.database import Database, OwnershipLost
+
+
+class TransactionBoundary:
+    def __init__(self) -> None:
+        self.connection = object()
+        self.events: list[str] = []
+        self.active = False
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[object]:
+        self.events.append("begin")
+        self.active = True
+        try:
+            yield self.connection
+        except BaseException:
+            self.events.append("rollback")
+            raise
+        else:
+            self.events.append("commit")
+        finally:
+            self.active = False
+
+
+class CommitExitBoundary(TransactionBoundary):
+    def __init__(self, errors: list[Exception]) -> None:
+        super().__init__()
+        self.errors = list(errors)
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[object]:
+        self.events.append("begin")
+        self.active = True
+        try:
+            yield self.connection
+            if self.errors:
+                raise self.errors.pop(0)
+        except BaseException:
+            self.events.append("rollback")
+            raise
+        else:
+            self.events.append("commit")
+        finally:
+            self.active = False
+
+
+class DatabaseAbort(Exception):
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__("dummy-secret")
+        self.sqlstate = sqlstate
+
+
+def message_fixture(text: str | None = "hello", user_id: int = 7,
+                    chat_type: str = "private", is_bot: bool = False,
+                    first_name: str = "First", last_name: str | None = "Last",
+                    username: str | None = "handle", has_user: bool = True) -> Message:
+    user = None
+    if has_user:
+        user = {"id": user_id, "is_bot": is_bot, "first_name": first_name,
+                "last_name": last_name, "username": username}
+    return Message.model_validate({"message_id": 21, "date": datetime(2026, 10, 13, tzinfo=timezone.utc),
+        "chat": {"id": 7, "type": chat_type}, "from": user, "text": text})
+
+
+class IntakeTests(unittest.IsolatedAsyncioTestCase):
+    def intake(self, allowed: frozenset[int] = frozenset({7})) -> tuple[handlers.Intake, Mock, Mock, TransactionBoundary]:
+        boundary = TransactionBoundary()
+        database = Mock(spec=Database)
+        database.owned = True
+        database.transaction = Mock(side_effect=boundary.transaction)
+        repository = Mock(spec=Repository)
+        repository.intake = AsyncMock()
+        intake = handlers.Intake(TelegramSettings("dummy-token", allowed, "unit"), database, repository)
+        return intake, database, repository, boundary
+
+    async def test_access_checks_cover_every_command(self) -> None:
+        for text in ("hello", "/start payload", "/new", "/session", "/unknown"):
+            cases = [{"user_id": 8}, {"chat_type": "group"}, {"is_bot": True}, {"has_user": False}]
+            for fields in cases:
+                with self.subTest(text=text, fields=fields):
+                    intake, database, repository, boundary = self.intake()
+                    await intake.handle(message_fixture(text, **fields), Update(update_id=301))
+                    repository.intake.assert_not_awaited()
+                    database.transaction.assert_not_called()
+                    self.assertTrue(intake.healthy)
+
+    async def test_empty_allowlist_accepts_private_human(self) -> None:
+        intake, database, repository, boundary = self.intake(frozenset())
+        await intake.handle(message_fixture(user_id=88), Update(update_id=301))
+        self.assertEqual(repository.intake.await_args.args[1], 88)
+        self.assertEqual(boundary.events, ["begin", "commit"])
+
+    async def test_command_normalization_and_deep_link(self) -> None:
+        for text, kind, content in ((" /START@UnitBot deep-link ", "START", "/start"),
+            ("/NEW", "NEW", "/new"), ("/session@UnitBot", "SESSION", "/session"),
+            ("/unknown argument", "UNSUPPORTED", "/unknown")):
+            with self.subTest(text=text):
+                intake, database, repository, boundary = self.intake()
+                await intake.handle(message_fixture(text), Update(update_id=301))
+                self.assertEqual(repository.intake.await_args.args[-2:], (kind, content))
+                self.assertEqual(boundary.events, ["begin", "commit"])
+
+    async def test_mutable_profile_and_fallback_names(self) -> None:
+        intake, database, repository, boundary = self.intake()
+        for first, last, username, display in (("First", "Last", "old", "First Last"),
+            ("Changed", None, "new", "Changed"), ("", None, "fallback", "fallback"),
+            ("", None, None, "User 7")):
+            with self.subTest(display=display):
+                await intake.handle(message_fixture(first_name=first, last_name=last, username=username),
+                                    Update(update_id=301))
+                self.assertEqual(repository.intake.await_args.args[1:6], (7, username, first, last, display))
+        self.assertEqual(repository.intake.await_count, 4)
+
+    async def test_input_cap_and_empty_inputs(self) -> None:
+        for text, expected in ((None, None), ("  ", None), ("x" * 4000, ("TEXT", "x" * 4000)),
+                               ("x" * 4001, ("INVALID", ""))):
+            with self.subTest(length=0 if text is None else len(text)):
+                intake, database, repository, boundary = self.intake()
+                await intake.handle(message_fixture(text), Update(update_id=301))
+                if expected is None:
+                    repository.intake.assert_not_awaited()
+                    database.transaction.assert_not_called()
+                else:
+                    self.assertEqual(repository.intake.await_args.args[-2:], expected)
+
+    async def test_injected_update_id_and_commit_before_handler_return(self) -> None:
+        intake, database, repository, boundary = self.intake()
+        observed: list[bool] = []
+
+        async def capture(*args: object) -> None:
+            observed.append(boundary.active)
+            self.assertIs(args[0], boundary.connection)
+            self.assertEqual(args[6:9], (98765, 7, 21))
+
+        repository.intake.side_effect = capture
+        await intake.handle(message_fixture(" hello "), Update(update_id=98765))
+        self.assertEqual(observed, [True])
+        self.assertFalse(boundary.active)
+        self.assertEqual(boundary.events, ["begin", "commit"])
+        self.assertEqual(repository.intake.await_args.args[-2:], ("TEXT", "hello"))
+
+    async def test_transient_abort_retries_inside_handler(self) -> None:
+        for sqlstate in ("40001", "40P01", "53300", "55P03", "57014"):
+            with self.subTest(sqlstate=sqlstate):
+                intake, database, repository, boundary = self.intake()
+                repository.intake.side_effect = [OperationalError("unit", {}, DatabaseAbort(sqlstate)), None]
+                sleeps: list[int] = []
+
+                async def retry_sleep(delay: int) -> None:
+                    sleeps.append(delay)
+                    self.assertFalse(boundary.active)
+                    self.assertFalse(intake.healthy)
+
+                proxy = SimpleNamespace(Event=asyncio.Event, CancelledError=asyncio.CancelledError,
+                                        Future=asyncio.Future, sleep=retry_sleep)
+                with patch.object(handlers, "asyncio", proxy), self.assertLogs(handlers.logger, level="WARNING") as logs:
+                    await asyncio.wait_for(intake.handle(message_fixture(), Update(update_id=301)), 1)
+                self.assertEqual(sleeps, [1])
+                self.assertEqual(repository.intake.await_count, 2)
+                self.assertEqual(boundary.events, ["begin", "rollback", "begin", "commit"])
+                self.assertTrue(intake.healthy)
+                self.assertFalse(intake.failed.is_set())
+                self.assertNotIn("dummy-secret", " ".join(logs.output))
+
+    async def test_transient_commit_exit_retries_same_update_and_message(self) -> None:
+        intake, database, repository, original_boundary = self.intake()
+        boundary = CommitExitBoundary([OperationalError("unit", {}, DatabaseAbort("40001"))])
+        database.transaction.side_effect = boundary.transaction
+        sleeps: list[int] = []
+
+        async def retry_sleep(delay: int) -> None:
+            self.assertFalse(boundary.active)
+            self.assertEqual(repository.intake.await_count, 1)
+            sleeps.append(delay)
+
+        proxy = SimpleNamespace(Event=asyncio.Event, CancelledError=asyncio.CancelledError,
+                                Future=asyncio.Future, sleep=retry_sleep)
+        with patch.object(handlers, "asyncio", proxy):
+            await asyncio.wait_for(intake.handle(message_fixture(), Update(update_id=98765)), 1)
+        self.assertEqual(sleeps, [1])
+        self.assertEqual(repository.intake.await_count, 2)
+        for call in repository.intake.await_args_list:
+            self.assertIs(call.args[0], boundary.connection)
+            self.assertEqual(call.args[6:9], (98765, 7, 21))
+        self.assertEqual(boundary.events, ["begin", "rollback", "begin", "commit"])
+        self.assertTrue(intake.healthy)
+        self.assertFalse(intake.failed.is_set())
+
+    async def test_unknown_commit_failure_and_owner_loss_suspend_safely(self) -> None:
+        for error in (RuntimeError("dummy-secret"), OwnershipLost("dummy-secret")):
+            with self.subTest(error_type=type(error).__name__):
+                intake, database, repository, original_boundary = self.intake()
+                boundary = CommitExitBoundary([error])
+                database.transaction.side_effect = boundary.transaction
+                task: asyncio.Task[None] | None = None
+                with self.assertLogs(handlers.logger, level="ERROR") as logs:
+                    try:
+                        task = asyncio.create_task(intake.handle(message_fixture(), Update(update_id=98765)))
+                        await asyncio.wait_for(intake.failed.wait(), 1)
+                        self.assertFalse(task.done())
+                        self.assertFalse(intake.healthy)
+                        repository.intake.assert_awaited_once()
+                        self.assertEqual(repository.intake.await_args.args[6:9], (98765, 7, 21))
+                        self.assertEqual(boundary.events, ["begin", "rollback"])
+                        task.cancel()
+                        with self.assertRaises(asyncio.CancelledError):
+                            await asyncio.wait_for(task, 1)
+                    finally:
+                        if task is not None:
+                            if not task.done():
+                                task.cancel()
+                            with suppress(asyncio.CancelledError):
+                                await task
+                self.assertEqual(logs.output, [
+                    "ERROR:app.channels.telegram.handlers:Telegram intake stopped: persistence invariant failed."])
+                self.assertNotIn("dummy-secret", " ".join(logs.output))
+
+    async def test_six_supported_aborts_have_bounded_backoff_outside_transactions(self) -> None:
+        intake, database, repository, boundary = self.intake()
+        errors: list[object] = []
+        for sqlstate in ("40001", "40P01", "53300", "55P03", "57014", "40001"):
+            errors.append(OperationalError("unit", {}, DatabaseAbort(sqlstate)))
+        errors.append(None)
+        repository.intake.side_effect = errors
+        sleeps: list[int] = []
+
+        async def retry_sleep(delay: int) -> None:
+            self.assertFalse(boundary.active)
+            self.assertFalse(intake.healthy)
+            self.assertFalse(intake.failed.is_set())
+            sleeps.append(delay)
+
+        proxy = SimpleNamespace(Event=asyncio.Event, CancelledError=asyncio.CancelledError,
+                                Future=asyncio.Future, sleep=retry_sleep)
+        with patch.object(handlers, "asyncio", proxy):
+            await asyncio.wait_for(intake.handle(message_fixture(), Update(update_id=98765)), 1)
+        self.assertEqual(sleeps, [1, 2, 4, 8, 15, 15])
+        self.assertEqual(repository.intake.await_count, 7)
+        self.assertEqual(boundary.events.count("rollback"), 6)
+        self.assertEqual(boundary.events[-1], "commit")
+        for call in repository.intake.await_args_list:
+            self.assertEqual(call.args[6:9], (98765, 7, 21))
+        self.assertTrue(intake.healthy)
+        self.assertFalse(intake.failed.is_set())
+
+    async def test_cancellation_during_retry_sleep_has_no_fatal_signal_or_next_attempt(self) -> None:
+        intake, database, repository, boundary = self.intake()
+        repository.intake.side_effect = OperationalError("unit", {}, DatabaseAbort("40001"))
+        sleeping = asyncio.Event()
+        sleep_finished = asyncio.Event()
+
+        async def blocked_sleep(delay: int) -> None:
+            self.assertEqual(delay, 1)
+            self.assertFalse(boundary.active)
+            sleeping.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                sleep_finished.set()
+
+        proxy = SimpleNamespace(Event=asyncio.Event, CancelledError=asyncio.CancelledError,
+                                Future=asyncio.Future, sleep=blocked_sleep)
+        task: asyncio.Task[None] | None = None
+        with patch.object(handlers, "asyncio", proxy), self.assertLogs(handlers.logger, level="WARNING") as logs:
+            try:
+                task = asyncio.create_task(intake.handle(message_fixture(), Update(update_id=98765)))
+                await asyncio.wait_for(sleeping.wait(), 1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 1)
+                self.assertTrue(sleep_finished.is_set())
+                self.assertFalse(intake.failed.is_set())
+                repository.intake.assert_awaited_once()
+                database.transaction.assert_called_once()
+                self.assertEqual(boundary.events, ["begin", "rollback"])
+            finally:
+                if task is not None:
+                    if not task.done():
+                        task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+        self.assertEqual(logs.output, [
+            "WARNING:app.channels.telegram.handlers:Telegram intake waiting for database availability."])
+        self.assertNotIn("dummy-secret", " ".join(logs.output))
+
+    async def test_ownership_loss_is_fatal_without_retry(self) -> None:
+        for mode in ("explicit", "unowned", "invalidated"):
+            with self.subTest(mode=mode):
+                intake, database, repository, boundary = self.intake()
+                if mode == "explicit":
+                    error = OwnershipLost("dummy-secret")
+                else:
+                    error = OperationalError("unit", {}, DatabaseAbort("40001"),
+                                             connection_invalidated=mode == "invalidated")
+                    database.owned = mode != "unowned"
+                repository.intake.side_effect = error
+                with self.assertRaises(OwnershipLost):
+                    await intake.persist(message_fixture(), Update(update_id=301))
+                repository.intake.assert_awaited_once()
+                self.assertEqual(boundary.events, ["begin", "rollback"])
+
+    async def test_fatal_handler_suspends_until_cancelled_and_logs_safe_message(self) -> None:
+        errors = (RuntimeError("dummy-secret"), OwnershipLost("dummy-secret"),
+                  OperationalError("unit", {}, DatabaseAbort("23505")))
+        for error in errors:
+            with self.subTest(error_type=type(error).__name__):
+                intake, database, repository, boundary = self.intake()
+                repository.intake.side_effect = error
+                task: asyncio.Task[None] | None = None
+                with self.assertLogs(handlers.logger, level="ERROR") as logs:
+                    try:
+                        task = asyncio.create_task(intake.handle(message_fixture(), Update(update_id=301)))
+                        await asyncio.wait_for(intake.failed.wait(), 1)
+                        self.assertFalse(task.done())
+                        self.assertFalse(intake.healthy)
+                        repository.intake.assert_awaited_once()
+                        self.assertEqual(boundary.events, ["begin", "rollback"])
+                        task.cancel()
+                        with self.assertRaises(asyncio.CancelledError):
+                            await asyncio.wait_for(task, 1)
+                    finally:
+                        if task is not None:
+                            if not task.done():
+                                task.cancel()
+                            with suppress(asyncio.CancelledError):
+                                await task
+                self.assertEqual(logs.output, [
+                    "ERROR:app.channels.telegram.handlers:Telegram intake stopped: persistence invariant failed."])
+                self.assertNotIn("dummy-secret", " ".join(logs.output))
+
+
+SOURCE PATH: tests/unit/test_channel.py
+"""Owned lifecycle tests, including native aiogram polling child teardown."""
+import asyncio
+import logging
+import unittest
+from contextlib import suppress
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramNetworkError
+from aiogram.methods import GetMe
+import app.channels.telegram.bot as channel_module
+from app.channels.telegram.bot import TelegramChannel, await_owned, start_telegram_channel
+from app.channels.telegram.handlers import Intake
+from app.chat.worker import Worker
+from app.core.database import Database
+
+
+class ChannelTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        aiogram_logger = logging.getLogger("aiogram")
+        engine_logger = logging.getLogger("sqlalchemy.engine")
+        self.addCleanup(aiogram_logger.setLevel, aiogram_logger.level)
+        self.addCleanup(setattr, engine_logger, "disabled", engine_logger.disabled)
+        self.bot = Mock(spec=Bot)
+        self.bot.id = 71
+        self.bot.session = SimpleNamespace(close=AsyncMock())
+        self.bot.get_me = AsyncMock()
+        self.bot.get_webhook_info = AsyncMock(return_value=SimpleNamespace(url=""))
+        self.database = Mock(spec=Database)
+        self.database.owned = True
+        self.database.ping = AsyncMock(return_value=True)
+        self.database.close = AsyncMock()
+        self.database.acquire = AsyncMock()
+        self.intake = Mock(spec=Intake)
+        self.intake.failed = asyncio.Event()
+        self.intake.healthy = True
+        self.worker = Mock(spec=Worker)
+        self.worker.healthy = True
+        self.worker.stopping = asyncio.Event()
+        self.worker.run = AsyncMock()
+        self.dispatcher = Dispatcher(disable_fsm=True)
+        self.channel = TelegramChannel(self.bot, self.dispatcher, self.database, self.intake, self.worker)
+
+    async def finish_task(self, task: asyncio.Task[None]) -> None:
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    async def test_await_owned_cancellation_waits_for_cleanup(self) -> None:
+        entered, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def cleanup() -> None:
+            entered.set()
+            await release.wait()
+            finished.set()
+
+        owned = asyncio.create_task(cleanup())
+        caller = asyncio.create_task(await_owned(owned))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            caller.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(caller.done())
+            self.assertFalse(owned.cancelled())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(caller, 1)
+            self.assertTrue(finished.is_set())
+        finally:
+            release.set()
+            await self.finish_task(caller)
+            await self.finish_task(owned)
+
+    async def test_native_dispatcher_stop_awaits_polling_child_finally(self) -> None:
+        entered, child_closed = asyncio.Event(), asyncio.Event()
+
+        async def polling_child(**kwargs: object) -> None:
+            self.assertIs(kwargs["bot"], self.bot)
+            self.assertFalse(kwargs["handle_as_tasks"])
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                child_closed.set()
+
+        # Only the SDK network polling child is replaced. Real start_polling,
+        # stop_polling, startup observers, running lock and task teardown run.
+        with patch.object(self.dispatcher, "_polling", side_effect=polling_child):
+            runner = asyncio.create_task(self.channel.run_poller())
+            self.channel.polling_task = runner
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                self.assertTrue(self.channel.polling_started.is_set())
+                await asyncio.wait_for(self.channel.stop_poller(), 1)
+                self.assertTrue(child_closed.is_set())
+                self.assertTrue(runner.done())
+                self.assertTrue(self.channel.polling_finished.is_set())
+                self.bot.session.close.assert_not_awaited()
+            finally:
+                await self.finish_task(runner)
+                if self.channel.poller_stop_task is not None:
+                    await self.finish_task(self.channel.poller_stop_task)
+
+    async def test_stop_before_startup_waits_for_observation(self) -> None:
+        release, entered = asyncio.Event(), asyncio.Event()
+        dispatcher = Mock(spec=Dispatcher)
+        dispatcher.startup = SimpleNamespace(register=Mock())
+        dispatcher.stop_polling = AsyncMock(side_effect=release.set)
+        channel = TelegramChannel(self.bot, dispatcher, self.database, self.intake, self.worker)
+
+        async def runner_body() -> None:
+            entered.set()
+            await release.wait()
+            channel.polling_finished.set()
+
+        runner = asyncio.create_task(runner_body())
+        channel.polling_task = runner
+        stop = asyncio.create_task(channel.stop_poller())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            await asyncio.sleep(0)
+            dispatcher.stop_polling.assert_not_awaited()
+            self.assertFalse(runner.cancelled())
+            await channel.observe_startup(self.bot)
+            await asyncio.wait_for(stop, 1)
+            dispatcher.stop_polling.assert_awaited_once()
+        finally:
+            release.set()
+            await self.finish_task(stop)
+            await self.finish_task(runner)
+            if channel.poller_stop_task is not None:
+                await self.finish_task(channel.poller_stop_task)
+
+    async def test_finished_and_failed_runner_stop_without_sdk_stop(self) -> None:
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                async def finished_runner() -> None:
+                    if failed:
+                        raise RuntimeError("unit-failure")
+
+                runner = asyncio.create_task(finished_runner())
+                await asyncio.wait({runner}, timeout=1)
+                channel = TelegramChannel(self.bot, self.dispatcher, self.database, self.intake, self.worker)
+                channel.polling_task = runner
+                with patch.object(self.dispatcher, "stop_polling", new=AsyncMock()) as sdk_stop:
+                    await asyncio.wait_for(channel.stop_poller(), 1)
+                    sdk_stop.assert_not_awaited()
+                self.assertTrue(runner.done())
+                if channel.poller_stop_task is not None:
+                    await channel.poller_stop_task
+
+    async def test_repeated_stop_shares_cleanup_and_cancelled_worker_still_closes(self) -> None:
+        async def waiting_worker() -> None:
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(waiting_worker())
+        self.channel.worker_task = task
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        try:
+            await asyncio.wait_for(asyncio.gather(self.channel.stop(), self.channel.stop()), 1)
+            cleanup = self.channel.cleanup_task
+            await self.channel.stop()
+            self.assertIs(self.channel.cleanup_task, cleanup)
+            self.assertTrue(self.worker.stopping.is_set())
+            self.bot.session.close.assert_awaited_once()
+            self.database.close.assert_awaited_once()
+        finally:
+            await self.finish_task(task)
+            if self.channel.cleanup_task is not None:
+                await self.finish_task(self.channel.cleanup_task)
+            if self.channel.poller_stop_task is not None:
+                await self.finish_task(self.channel.poller_stop_task)
+
+    async def test_readiness_requires_live_healthy_owned_tasks(self) -> None:
+        async def waiting() -> None:
+            await asyncio.Event().wait()
+
+        tasks = [asyncio.create_task(waiting()) for _ in range(3)]
+        self.channel.polling_task, self.channel.worker_task, self.channel.supervisor_task = tasks
+        self.channel.polling_started.set()
+        try:
+            self.assertTrue(await self.channel.ready())
+            for target, attribute in ((self.channel, "closing"), (self.channel, "failed"),
+                                      (self.database, "owned"), (self.intake, "healthy"), (self.worker, "healthy")):
+                original = getattr(target, attribute)
+                setattr(target, attribute, not original)
+                self.assertFalse(await self.channel.ready())
+                setattr(target, attribute, original)
+            self.database.ping.side_effect = asyncio.TimeoutError()
+            self.assertFalse(await self.channel.ready())
+            self.database.ping.side_effect = None
+            await self.finish_task(tasks[0])
+            self.assertFalse(await self.channel.ready())
+        finally:
+            for task in tasks:
+                await self.finish_task(task)
+
+    async def test_supervised_worker_failure_stops_poller(self) -> None:
+        polling_release = asyncio.Event()
+
+        async def polling() -> None:
+            await polling_release.wait()
+
+        async def failed_worker() -> None:
+            raise RuntimeError("dummy-secret")
+
+        async def stop_poller() -> None:
+            polling_release.set()
+
+        polling_task = asyncio.create_task(polling())
+        worker_task = asyncio.create_task(failed_worker())
+        self.channel.polling_task = polling_task
+        self.channel.worker_task = worker_task
+        try:
+            with patch.object(self.channel, "stop_poller", new=AsyncMock(side_effect=stop_poller)) as stop:
+                with self.assertLogs(channel_module.logger, level="ERROR") as logs:
+                    await asyncio.wait_for(self.channel.supervise(), 1)
+                self.assertTrue(self.channel.failed)
+                stop.assert_awaited_once()
+                self.assertNotIn("dummy-secret", " ".join(logs.output))
+        finally:
+            polling_release.set()
+            await self.finish_task(polling_task)
+            with suppress(RuntimeError):
+                await self.finish_task(worker_task)
+
+    async def test_startup_webhook_rejection_and_sdk_failure_close_fake_resources(self) -> None:
+        settings = SimpleNamespace(telegram=SimpleNamespace(token="dummy-token", service_scope="unit"),
+                                   database=SimpleNamespace(url="dummy-url"))
+        for mode in ("webhook", "network"):
+            with self.subTest(mode=mode):
+                self.bot.session.close.reset_mock()
+                self.database.close.reset_mock()
+                self.bot.get_me.side_effect = None
+                self.bot.get_webhook_info.return_value = SimpleNamespace(url="https://invalid.example/hook")
+                if mode == "network":
+                    self.bot.get_me.side_effect = TelegramNetworkError(GetMe(), "dummy-secret")
+                with patch.object(channel_module, "Bot", return_value=self.bot), patch.object(
+                    channel_module, "Database", return_value=self.database):
+                    with self.assertRaises(RuntimeError) as caught:
+                        await asyncio.wait_for(start_telegram_channel(settings, Mock()), 1)
+                self.assertNotIn("dummy-secret", str(caught.exception))
+                self.database.acquire.assert_not_awaited()
+                self.bot.session.close.assert_awaited_once()
+                self.database.close.assert_awaited_once()
+
+    async def test_startup_cancellation_closes_fake_resources_before_propagation(self) -> None:
+        entered = asyncio.Event()
+        settings = SimpleNamespace(telegram=SimpleNamespace(token="dummy-token", service_scope="unit"),
+                                   database=SimpleNamespace(url="dummy-url"))
+
+        async def blocked_get_me() -> None:
+            entered.set()
+            await asyncio.Event().wait()
+
+        self.bot.get_me.side_effect = blocked_get_me
+        with patch.object(channel_module, "Bot", return_value=self.bot), patch.object(
+            channel_module, "Database", return_value=self.database):
+            task = asyncio.create_task(start_telegram_channel(settings, Mock()))
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 1)
+                self.bot.session.close.assert_awaited_once()
+                self.database.close.assert_awaited_once()
+            finally:
+                await self.finish_task(task)
+

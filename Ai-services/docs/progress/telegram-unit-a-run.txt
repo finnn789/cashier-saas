@@ -1,0 +1,36 @@
+test_history_order_and_current_user_once (test_ai.PromptTests.test_history_order_and_current_user_once) ... ok
+test_profile_is_bounded_json_data (test_ai.PromptTests.test_profile_is_bounded_json_data) ... ok
+test_trimming_keeps_newest_complete_pairs (test_ai.PromptTests.test_trimming_keeps_newest_complete_pairs) ... ok
+test_ambiguous_transport_is_never_retried (test_ai.ProviderTests.test_ambiguous_transport_is_never_retried) ... ok
+test_http_failure_classifications_without_reading_body (test_ai.ProviderTests.test_http_failure_classifications_without_reading_body) ... ok
+test_invalid_response_shapes_are_safe (test_ai.ProviderTests.test_invalid_response_shapes_are_safe) ... ok
+test_long_answer_is_truncated_and_metadata_defaults (test_ai.ProviderTests.test_long_answer_is_truncated_and_metadata_defaults) ... ok
+test_missing_configuration_never_posts (test_ai.ProviderTests.test_missing_configuration_never_posts) ... ok
+test_oversized_stream_stops_reading (test_ai.ProviderTests.test_oversized_stream_stops_reading) ... ok
+test_rate_limit_delay_is_bounded (test_ai.ProviderTests.test_rate_limit_delay_is_bounded) ... ok
+test_success_fixed_endpoint_and_bounded_payload (test_ai.ProviderTests.test_success_fixed_endpoint_and_bounded_payload) ... ok
+test_empty_allowlist_and_missing_ai_credentials (test_config.ConfigurationTests.test_empty_allowlist_and_missing_ai_credentials) ... ok
+test_invalid_allowlists_do_not_echo_input (test_config.ConfigurationTests.test_invalid_allowlists_do_not_echo_input) ... ok
+test_invalid_scopes_have_safe_errors (test_config.ConfigurationTests.test_invalid_scopes_have_safe_errors) ... ok
+test_process_environment_and_dotenv_loaded_once (test_config.ConfigurationTests.test_process_environment_and_dotenv_loaded_once) ... ok
+test_settings_repr_and_invalid_database_errors_hide_secrets (test_config.ConfigurationTests.test_settings_repr_and_invalid_database_errors_hide_secrets) ... ok
+test_access_checks_cover_every_command (test_telegram_intake.IntakeTests.test_access_checks_cover_every_command) ... ok
+test_command_normalization_and_deep_link (test_telegram_intake.IntakeTests.test_command_normalization_and_deep_link) ... ok
+test_empty_allowlist_accepts_private_human (test_telegram_intake.IntakeTests.test_empty_allowlist_accepts_private_human) ... ok
+test_fatal_handler_suspends_until_cancelled_and_logs_safe_message (test_telegram_intake.IntakeTests.test_fatal_handler_suspends_until_cancelled_and_logs_safe_message) ... ok
+test_injected_update_id_and_commit_before_handler_return (test_telegram_intake.IntakeTests.test_injected_update_id_and_commit_before_handler_return) ... ok
+test_input_cap_and_empty_inputs (test_telegram_intake.IntakeTests.test_input_cap_and_empty_inputs) ... ok
+test_mutable_profile_and_fallback_names (test_telegram_intake.IntakeTests.test_mutable_profile_and_fallback_names) ... ok
+test_ownership_loss_is_fatal_without_retry (test_telegram_intake.IntakeTests.test_ownership_loss_is_fatal_without_retry) ... ok
+test_transient_abort_retries_inside_handler (test_telegram_intake.IntakeTests.test_transient_abort_retries_inside_handler) ... ok
+test_fatal_api_errors_are_safe_and_terminal (test_telegram_sender.SenderTests.test_fatal_api_errors_are_safe_and_terminal) ... ok
+test_network_and_timeout_are_unknown_without_retry (test_telegram_sender.SenderTests.test_network_and_timeout_are_unknown_without_retry) ... ok
+test_rate_limit_pending_and_retry_exhaustion (test_telegram_sender.SenderTests.test_rate_limit_pending_and_retry_exhaustion) ... ok
+test_server_failure_has_bounded_attempts (test_telegram_sender.SenderTests.test_server_failure_has_bounded_attempts) ... ok
+test_success_returns_persistable_message_id_without_parse_mode (test_telegram_sender.SenderTests.test_success_returns_persistable_message_id_without_parse_mode) ... ok
+test_utf16_chunks_preserve_content_and_boundaries (test_telegram_sender.SenderTests.test_utf16_chunks_preserve_content_and_boundaries) ... ok
+
+----------------------------------------------------------------------
+Ran 31 tests in 0.920s
+
+OK
