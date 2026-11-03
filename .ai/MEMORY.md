@@ -1,9 +1,13 @@
 # Project memory
 
-Memory version: 43
-Updated: 2026-10-31 (Asia/Jakarta)
+Memory version: 44
+Updated: 2026-11-02 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- TASK-057 — IMPLEMENTED / PARTIALLY VERIFIED (user-authorized 2026-11-02): gRPC service-key auth + server-side tenant allowlist (`app.grpc.*`, env `CASHIER_GRPC_SERVICE_KEY` required, `CASHIER_GRPC_ALLOWED_TENANT_IDS`), limit clamp 1–50, LIKE escape, rate limit, reflection off, Python client fail-closed with header `x-internal-service-key`, compose no longer publishes 9090. Seven workers (W1 java server, W2 python client, W3 compose/docs haiku, W4 java unit, W5 java integration, W6/W7 haiku runners). Orchestrator verified: Java unit 286/286, Python gRPC 41/41, W1 source reviewed. Integration tests (GrpcSecurityIntegrationTest 22 cases + existing three) NOT RUN — Docker down; context-start with new mandatory key unverified until `mvnw verify`. Correction: `spring.jpa.open-in-view` is already `false` (earlier note was stale). tenant_id still comes from the request but is restricted by allowlist; token-bound tenant is follow-up with TASK-053. Canonical 43 -> 44. Evidence: tasks/TASK-057.md, reports/TASK-057-W*.md.
+
+- TASK-058 — PENDING / NOT STARTED: 8 pre-existing Python unit test failures in Ai-services (confirmed on clean HEAD export, not caused by TASK-057); investigation + fix to be delegated when authorized. Packet: tasks/TASK-058.md.
 
 - TASK-057 — PENDING / NOT STARTED (user asked to record only): gRPC security hardening. Source-verified gaps: no caller auth on gRPC server, `tenant_id` trusted from request payload (violates AGENTS.md tenant invariant), plaintext Python client, compose publishes 9090, unbounded `limit=0` + unescaped LIKE (pool-exhaustion → POS outage for all tenants), sequential order_number enumeration, reflection likely on. Planned layers: internal-only network, mTLS or service JWT interceptor, tenant derived from tenant-bound token issued at HTTP sync (TASK-053), input clamps/rate limit/reflection off, customer-level authz via public order token + OTP-verified owner phone, gRPC audit log. Evidence packet: tasks/TASK-057.md. Canonical 42 -> 43.
 

@@ -1,7 +1,7 @@
 """gRPC client configuration."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -10,6 +10,9 @@ class GrpcSettings:
     port: int = 9090
     timeout_seconds: float = 5.0
     use_tls: bool = False
+    # Shared secret sent as the `x-internal-service-key` metadata header.
+    # Excluded from repr so it never leaks through logs or tracebacks.
+    service_key: str = field(default="", repr=False)
 
 
 def load_grpc_settings() -> GrpcSettings:
@@ -30,10 +33,13 @@ def load_grpc_settings() -> GrpcSettings:
     tls_raw = os.getenv("CASHIER_GRPC_USE_TLS") or os.getenv("GRPC_USE_TLS") or ""
     use_tls = tls_raw.strip().lower() in {"true", "1", "yes"}
 
+    service_key = (os.getenv("CASHIER_GRPC_SERVICE_KEY") or "").strip()
+
     return GrpcSettings(
         host=host.strip(),
         port=port,
         timeout_seconds=timeout_seconds,
         use_tls=use_tls,
+        service_key=service_key,
     )
 

@@ -1,9 +1,11 @@
 # Tasks
 
-Updated: 2026-10-31 (Asia/Jakarta)
-Memory version: 43
+Updated: 2026-11-02 (Asia/Jakarta)
+Memory version: 44
 
-- TASK-057 — PENDING / NOT STARTED: gRPC security hardening (service auth via mTLS or service JWT interceptor, tenant derived from tenant-bound token instead of request payload, remove 9090 host publish, clamp limit 1–50 + escape LIKE + rate limit + reflection off; follow-ups: public-order-token lookup, OTP-verified owner phone, gRPC audit log). Not reserved yet; awaits user authorization. Evidence packet: tasks/TASK-057.md.
+- TASK-058 — PENDING / NOT STARTED: fix 8 pre-existing failing Python unit tests in Ai-services (test_channel x2, test_conversation x3, test_ai, test_database, test_telegram_sender); confirmed failing on clean HEAD e5c64a5, unrelated to TASK-057. Root causes not investigated yet. Awaits user authorization. Packet: tasks/TASK-058.md.
+
+- TASK-057 — IMPLEMENTED / PARTIALLY VERIFIED (integration NOT RUN): gRPC hardening items 1–4 per user decision (service key + server-side tenant allowlist; tenant_id stays in proto). Java: GrpcSecurityProperties, GrpcServiceKeyInterceptor (constant-time key check, UNAUTHENTICATED/RESOURCE_EXHAUSTED), GrpcRateLimiter, GrpcTenantAccessPolicy (allowlist, limit clamp 1–50, LIKE escape), both handlers updated, reflection off. Python client sends `x-internal-service-key`, fail-closed, clamps limit. Compose no longer publishes 9090, key required; unused BACKEND_GRPC_PORT removed. Verified: Java unit 286/286 pass (5 new gRPC classes), Python gRPC modules 41/41 pass (orchestrator re-ran). NOT verified: 22-case GrpcSecurityIntegrationTest and the 3 older integration tests (context start with new required `CASHIER_GRPC_SERVICE_KEY`) — Docker Desktop was down; `mvnw verify` must be re-run. Not done (follow-up): token-bound tenant (TASK-053), public order token lookup, OTP phone, gRPC audit log, rate-limit integration case. Evidence: tasks/TASK-057.md, reports/TASK-057-W1.md…W7.md, Ai-services/reports/TASK-057-W2.md.
 
 - TASK-054/055/056 — COMPLETE / VERIFIED: portfolio readiness. `mvnw verify` green (200 unit + 10 Testcontainers integration), FnbSalesReportRepository 500 bug fixed; Dockerfile + docker-compose (postgres:17) + idempotent demo seed verified end to end via curl; README.md, docs/architecture.md, docs/demo.md. Evidence: reports/TASK-054.md, TASK-055.md, TASK-056.md, tasks/TASK-054-056-PORTFOLIO.md.
 

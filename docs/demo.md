@@ -6,6 +6,7 @@
 cp .env.example .env                 # PowerShell: Copy-Item .env.example .env
 openssl rand -base64 32              # paste the output into CASHIER_JWT_SECRET_B64 in .env
                                      # PowerShell: [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+openssl rand -base64 32              # paste another value into CASHIER_GRPC_SERVICE_KEY in .env (required; shared by backend and ai-services)
 docker compose up -d --build         # postgres + backend (profile "demo": Flyway migrations + demo seed)
 docker compose ps                    # wait until backend is "healthy" (~1 min)
 docker compose --profile ai up -d --build   # optional: also the Python AI service (needs Telegram/OpenRouter keys in .env)
@@ -17,7 +18,7 @@ docker compose down -v               # stop and delete data
 | Backend HTTP | http://localhost:8080 (override with `BACKEND_HTTP_PORT`) |
 | Swagger UI | http://localhost:8080/swagger-ui.html (redirects to `/swagger-ui/index.html`) |
 | OpenAPI JSON | http://localhost:8080/v3/api-docs |
-| gRPC | localhost:9090 |
+| gRPC | not published to the host; internal compose network only (`backend:9090`), requires `x-internal-service-key` = `CASHIER_GRPC_SERVICE_KEY` |
 | PostgreSQL | localhost:5432, user `cashier`, password `POSTGRES_PASSWORD` (default `cashier_demo`), DBs `cashier_saas` and `cashier_ai` |
 | AI service (profile `ai`) | http://localhost:8001 |
 

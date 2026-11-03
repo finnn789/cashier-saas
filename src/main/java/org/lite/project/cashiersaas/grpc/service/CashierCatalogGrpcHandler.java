@@ -6,6 +6,7 @@ import com.cashier.grpc.v1.CashierServiceGrpc;
 import com.cashier.grpc.v1.GetCatalogItemRequest;
 import com.cashier.grpc.v1.GetCatalogItemResponse;
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.grpc.mapper.GrpcCatalogMapper;
+import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -26,6 +28,7 @@ public class CashierCatalogGrpcHandler extends CashierServiceGrpc.CashierService
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
     private final GrpcCatalogMapper catalogMapper;
+    private final GrpcTenantAccessPolicy tenantAccessPolicy;
 
     @Override
     @Transactional(readOnly = true)
@@ -40,30 +43,8 @@ public class CashierCatalogGrpcHandler extends CashierServiceGrpc.CashierService
                 return;
             }
 
-            String tenantIdStr = request.getTenantId();
-            if (tenantIdStr == null || tenantIdStr.isBlank()) {
-                responseObserver.onError(Status.INVALID_ARGUMENT
-                        .withDescription("tenant_id must not be blank")
-                        .asRuntimeException());
-                return;
-            }
-
-            UUID tenantId;
-            try {
-                tenantId = UUID.fromString(tenantIdStr.trim());
-            } catch (IllegalArgumentException ex) {
-                responseObserver.onError(Status.INVALID_ARGUMENT
-                        .withDescription("Invalid tenant_id format: " + tenantIdStr)
-                        .asRuntimeException());
-                return;
-            }
-
-            if (request.getLimit() < 0) {
-                responseObserver.onError(Status.INVALID_ARGUMENT
-                        .withDescription("limit must not be negative")
-                        .asRuntimeException());
-                return;
-            }
+            UUID tenantId = tenantAccessPolicy.requireAllowedTenant(request.getTenantId());
+            int limit = tenantAccessPolicy.clampLimit(request.getLimit());
 
             CriteriaBuilder<ProductEntity> queryBuilder = criteriaBuilderFactory.create(entityManager, ProductEntity.class, "p")
                     .fetch("p.category")
@@ -73,29 +54,31 @@ public class CashierCatalogGrpcHandler extends CashierServiceGrpc.CashierService
 
             String query = request.getQuery();
             if (query != null && !query.trim().isEmpty()) {
-                String pattern = "%" + query.trim().toLowerCase() + "%";
+                String pattern = "%" + GrpcTenantAccessPolicy.escapeLikePattern(query.trim().toLowerCase()) + "%";
                 queryBuilder.whereOr()
-                        .where("LOWER(p.name)").like().value(pattern).noEscape()
-                        .where("LOWER(p.category.name)").like().value(pattern).noEscape()
+                        .where("LOWER(p.name)").like().value(pattern).escape('\\')
+                        .where("LOWER(p.category.name)").like().value(pattern).escape('\\')
                         .endOr();
             }
 
-            if (request.getLimit() > 0) {
-                queryBuilder.setMaxResults(request.getLimit());
-            }
-
+            queryBuilder.setMaxResults(limit);
             queryBuilder.orderByAsc("p.displayOrder").orderByAsc("p.name");
 
             List<ProductEntity> products = queryBuilder.getResultList();
 
+            String tenantRef = tenantId.toString();
             GetCatalogItemResponse response = catalogMapper != null
-                    ? catalogMapper.toResponse(tenantIdStr.trim(), products)
-                    : GrpcCatalogMapper.toGetCatalogItemResponse(tenantIdStr.trim(), products);
+                    ? catalogMapper.toResponse(tenantRef, products)
+                    : GrpcCatalogMapper.toGetCatalogItemResponse(tenantRef, products);
 
             responseObserver.onNext(response);
             responseObserver.onCompleted();
+        } catch (StatusRuntimeException ex) {
+            responseObserver.onError(ex);
         } catch (Exception ex) {
-            log.error("Failed to retrieve catalog items for request: {}", request, ex);
+            log.error("Failed to retrieve catalog items for tenant={} cause={}",
+                    request != null ? GrpcTenantAccessPolicy.shortTenantRef(request.getTenantId()) : "none",
+                    ex.getClass().getSimpleName());
             responseObserver.onError(Status.INTERNAL
                     .withDescription("Internal error retrieving catalog items")
                     .asRuntimeException());

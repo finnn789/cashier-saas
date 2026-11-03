@@ -13,6 +13,21 @@ from app.integrations.grpc.generated.cashier_service_pb2_grpc import CashierServ
 
 logger = logging.getLogger(__name__)
 
+SERVICE_KEY_HEADER = "x-internal-service-key"
+DEFAULT_CATALOG_LIMIT = 10
+MAX_CATALOG_LIMIT = 50
+
+
+def _clamp_catalog_limit(limit: int) -> int:
+    """Clamp the catalog limit to 1..50 (non-positive or invalid -> default)."""
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        return DEFAULT_CATALOG_LIMIT
+    if value <= 0:
+        return DEFAULT_CATALOG_LIMIT
+    return min(value, MAX_CATALOG_LIMIT)
+
 
 class CashierGrpcClient:
     """Asynchronous client wrapper for CashierService gRPC stubs."""
@@ -46,14 +61,37 @@ class CashierGrpcClient:
                     self._channel = None
                     self._stub = None
 
+    def _call_metadata(self) -> tuple[tuple[str, str], ...]:
+        """Per-call metadata carrying the internal service key."""
+        return ((SERVICE_KEY_HEADER, self._settings.service_key),)
+
+    def _has_service_key(self, rpc_name: str) -> bool:
+        """Fail closed: report a missing key without ever logging its value."""
+        if self._settings.service_key:
+            return True
+        logger.warning(
+            "gRPC %s skipped: CASHIER_GRPC_SERVICE_KEY is not configured",
+            rpc_name,
+        )
+        return False
+
+    @staticmethod
+    def _log_rpc_error(rpc_name: str, err: grpc.aio.AioRpcError) -> None:
+        """Log only the status code; never details, metadata or the key."""
+        code = err.code()
+        code_name = getattr(code, "name", str(code))
+        logger.warning("gRPC %s failed for tenant: code=%s", rpc_name, code_name)
+
     async def get_catalog_items(
         self,
         *,
         tenant_id: str,
         query: str = "",
-        limit: int = 10,
+        limit: int = DEFAULT_CATALOG_LIMIT,
     ) -> list[dict[str, Any]]:
         """Fetch catalog items matching query for tenant via gRPC."""
+        if not self._has_service_key("GetCatalogItem"):
+            return []
         try:
             await self.get_channel()
             if self._stub is None:
@@ -61,11 +99,12 @@ class CashierGrpcClient:
             request = cashier_service_pb2.GetCatalogItemRequest(
                 tenant_id=tenant_id,
                 query=query,
-                limit=limit,
+                limit=_clamp_catalog_limit(limit),
             )
             response = await self._stub.GetCatalogItem(
                 request,
                 timeout=self._settings.timeout_seconds,
+                metadata=self._call_metadata(),
             )
             return [
                 {
@@ -78,10 +117,7 @@ class CashierGrpcClient:
                 for item in response.items
             ]
         except grpc.aio.AioRpcError as err:
-            logger.warning(
-                "gRPC GetCatalogItem failed for tenant: code=%s",
-                err.code(),
-            )
+            self._log_rpc_error("GetCatalogItem", err)
             return []
         except Exception as err:
             logger.warning(
@@ -97,6 +133,8 @@ class CashierGrpcClient:
         order_number: str,
     ) -> dict[str, Any] | None:
         """Fetch status of an order for tenant via gRPC."""
+        if not self._has_service_key("GetOrderStatus"):
+            return None
         try:
             await self.get_channel()
             if self._stub is None:
@@ -108,6 +146,7 @@ class CashierGrpcClient:
             response = await self._stub.GetOrderStatus(
                 request,
                 timeout=self._settings.timeout_seconds,
+                metadata=self._call_metadata(),
             )
             if not response.order_number:
                 return None
@@ -122,10 +161,7 @@ class CashierGrpcClient:
         except grpc.aio.AioRpcError as err:
             if err.code() == grpc.StatusCode.NOT_FOUND:
                 return None
-            logger.warning(
-                "gRPC GetOrderStatus failed for tenant: code=%s",
-                err.code(),
-            )
+            self._log_rpc_error("GetOrderStatus", err)
             return None
         except Exception as err:
             logger.warning(

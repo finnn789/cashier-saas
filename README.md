@@ -97,7 +97,7 @@ Prerequisite: Docker with Compose. The first build downloads Maven dependencies 
 
 ```bash
 cp .env.example .env                 # PowerShell: Copy-Item .env.example .env
-# set CASHIER_JWT_SECRET_B64 in .env (compose refuses to start without it):
+# set CASHIER_JWT_SECRET_B64 and CASHIER_GRPC_SERVICE_KEY in .env (compose refuses to start without them):
 openssl rand -base64 32              # PowerShell: [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 
 docker compose up -d --build                 # postgres + backend (demo profile, seeded)
@@ -110,7 +110,7 @@ docker compose down -v                       # stop and delete data
 | REST API | http://localhost:8080 (override: `BACKEND_HTTP_PORT`) |
 | Swagger UI | http://localhost:8080/swagger-ui.html (redirects to `/swagger-ui/index.html`) |
 | OpenAPI JSON | http://localhost:8080/v3/api-docs |
-| gRPC | localhost:9090 (override: `BACKEND_GRPC_PORT`) |
+| gRPC | not published to the host; internal compose network only (`backend:9090`), callers must send `CASHIER_GRPC_SERVICE_KEY` |
 | PostgreSQL 17 | localhost:5432 (override: `POSTGRES_HOST_PORT`), user `cashier` / `cashier_demo`, dbs `cashier_saas` and `cashier_ai` |
 | AI service (profile `ai`) | http://localhost:8001 (override: `AI_HTTP_PORT`) |
 
@@ -147,6 +147,8 @@ Requires JDK 17 and a local **PostgreSQL 17 or newer** (the V1 migration uses `S
 | `CASHIER_JWT_ISSUER` / `CASHIER_JWT_AUDIENCE` | token issuer / audience | `cashier-saas` / `cashier-saas-api` |
 | `CASHIER_REFRESH_COOKIE_SECURE` | set `false` for plain-HTTP local use | `true` |
 | `CASHIER_GRPC_PORT` | gRPC port | `9090` |
+| `CASHIER_GRPC_SERVICE_KEY` | **required**, shared secret for gRPC callers (`x-internal-service-key` metadata), at least 16 characters | none |
+| `CASHIER_GRPC_ALLOWED_TENANT_IDS` | comma-separated tenant UUIDs that gRPC may serve; empty denies all | empty |
 | `CASHIER_DB_POOL_MAX_SIZE` | Hikari pool size | `10` |
 
 A `.env` file in the working directory is also imported (`spring.config.import`). Then:
@@ -184,7 +186,7 @@ cashier-saas/
 - **Payments use a mock gateway.** No real payment provider is integrated.
 - **Realtime is single-JVM.** No message broker, replay or cross-node fan-out; clients must resync via REST.
 - **Tenant lock is a bottleneck** for a very busy single tenant (see trade-offs).
-- **gRPC has no authentication layer in this repository** (no interceptor found) and `tenant_id` is a request field, so port 9090 should only be reachable on a private network. The demo compose file currently publishes 9090 to the host; do not expose it beyond a trusted machine. This is a hardening item.
+- **gRPC is protected by a shared service key and a tenant allowlist** (`CASHIER_GRPC_SERVICE_KEY`, `CASHIER_GRPC_ALLOWED_TENANT_IDS`), but `tenant_id` is still a request field. The demo compose file does not publish 9090 to the host; it is reachable only on the internal compose network. Token-bound tenant identity is a follow-up item.
 - **AI service container is built but not runtime-verified** (needs real Telegram/OpenRouter credentials).
 - **Test gaps:** CASHIER-role paths and MOCK_GATEWAY payments have no integration tests yet.
 - **Frontend lives in a separate repository** (`cashier-saas-ui`); this repo is backend only.

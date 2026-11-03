@@ -24,6 +24,7 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
             port=9090,
             timeout_seconds=2.0,
             use_tls=False,
+            service_key="test-service-key-0123456789",
         )
         self.client = CashierGrpcClient(self.settings)
         # Mock channel and stub to avoid opening real network sockets in unit tests
@@ -87,6 +88,10 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_obj.query, query)
         self.assertEqual(request_obj.limit, limit)
         self.assertEqual(kwargs.get("timeout"), self.settings.timeout_seconds)
+        self.assertEqual(
+            kwargs.get("metadata"),
+            (("x-internal-service-key", "test-service-key-0123456789"),),
+        )
 
         # Assert transformed output
         expected = [
@@ -143,6 +148,10 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_obj.tenant_id, tenant_id)
         self.assertEqual(request_obj.order_number, order_number)
         self.assertEqual(kwargs.get("timeout"), self.settings.timeout_seconds)
+        self.assertEqual(
+            kwargs.get("metadata"),
+            (("x-internal-service-key", "test-service-key-0123456789"),),
+        )
 
         # Assert transformed output
         expected = {
