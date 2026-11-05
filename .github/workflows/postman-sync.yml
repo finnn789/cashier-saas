@@ -2,6 +2,7 @@ name: Postman sync
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:
 
 concurrency:
   group: postman-sync-${{ github.ref }}
