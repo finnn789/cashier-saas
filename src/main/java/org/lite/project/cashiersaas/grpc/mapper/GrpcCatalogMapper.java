@@ -13,10 +13,12 @@ import java.util.List;
 public class GrpcCatalogMapper {
 
     public CatalogItem toItem(ProductEntity entity) {
+
         return toCatalogItem(entity);
     }
 
     public List<CatalogItem> toItems(List<ProductEntity> entities) {
+
         return toCatalogItems(entities);
     }
 
