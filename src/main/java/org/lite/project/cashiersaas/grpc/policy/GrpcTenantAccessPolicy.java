@@ -1,28 +1,28 @@
 package org.lite.project.cashiersaas.grpc.policy;
 
 import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
+import org.lite.project.cashiersaas.repository.TenantRepository;
 import org.springframework.stereotype.Component;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 /**
- * Server-side tenant allowlist and input limits for gRPC calls. An empty allowlist denies every
- * tenant (fail closed).
+ * Server-side tenant authorization and input limits for gRPC calls. A tenant is allowed only when it exists
+ * in the database, is active and has F&B enabled; a missing tenant and an inactive tenant are rejected with the
+ * identical status and message so the caller cannot learn which tenants exist (fail closed).
  */
 @Component
 public class GrpcTenantAccessPolicy {
 
-    private final Set<UUID> allowedTenants;
+    static final String TENANT_NOT_PERMITTED_MESSAGE = "Tenant is not permitted for this service";
+
+    private final TenantRepository tenantRepository;
     private final int defaultLimit;
     private final int maxLimit;
 
-    public GrpcTenantAccessPolicy(GrpcSecurityProperties properties) {
-        this.allowedTenants = parseAllowedTenants(properties.getAllowedTenantIds());
+    public GrpcTenantAccessPolicy(TenantRepository tenantRepository, GrpcSecurityProperties properties) {
+        this.tenantRepository = tenantRepository;
         this.defaultLimit = properties.getDefaultCatalogLimit();
         this.maxLimit = properties.getMaxCatalogLimit();
     }
@@ -37,9 +37,8 @@ public class GrpcTenantAccessPolicy {
         } catch (IllegalArgumentException ex) {
             throw Status.INVALID_ARGUMENT.withDescription("tenant_id must be a valid UUID").asRuntimeException();
         }
-        if (!allowedTenants.contains(tenantId)) {
-            throw Status.PERMISSION_DENIED.withDescription("Tenant is not permitted for this service")
-                    .asRuntimeException();
+        if (!tenantRepository.existsActiveFnbTenant(tenantId)) {
+            throw Status.PERMISSION_DENIED.withDescription(TENANT_NOT_PERMITTED_MESSAGE).asRuntimeException();
         }
         return tenantId;
     }
@@ -73,23 +72,5 @@ public class GrpcTenantAccessPolicy {
         }
         String trimmed = raw.trim();
         return trimmed.length() <= 8 ? trimmed : trimmed.substring(0, 8);
-    }
-
-    private static Set<UUID> parseAllowedTenants(List<String> configured) {
-        Set<UUID> parsed = new HashSet<>();
-        if (configured == null) {
-            return Set.copyOf(parsed);
-        }
-        for (String entry : configured) {
-            if (entry == null || entry.isBlank()) {
-                continue;
-            }
-            try {
-                parsed.add(UUID.fromString(entry.trim()));
-            } catch (IllegalArgumentException ex) {
-                throw new IllegalStateException("app.grpc.allowed-tenant-ids contains an invalid UUID.", ex);
-            }
-        }
-        return Set.copyOf(parsed);
     }
 }

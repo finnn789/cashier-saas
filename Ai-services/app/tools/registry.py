@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Any
 
 from app.tools.base import BaseTool
@@ -20,6 +21,10 @@ class ToolRegistry:
         if tool.name in self._tools:
             raise ValueError(f"Tool with name '{tool.name}' is already registered.")
         self._tools[tool.name] = tool
+        logger.info(
+            "Tool registered",
+            extra={"event": "tool_registered", "tool_name": tool.name},
+        )
 
     def get_tool(self, name: str) -> BaseTool | None:
         """Retrieve a registered tool by name."""
@@ -39,6 +44,10 @@ class ToolRegistry:
         """Parse arguments and securely execute the designated tool."""
         tool = self.get_tool(tool_name)
         if not tool:
+            logger.warning(
+                "Tool not found",
+                extra={"event": "tool_not_found", "tool_name": tool_name},
+            )
             return {"error": f"Tool '{tool_name}' not found."}
 
         try:
@@ -48,9 +57,32 @@ class ToolRegistry:
         except json.JSONDecodeError:
             return {"error": "Malformed JSON arguments."}
 
+        started = time.perf_counter()
+        logger.info(
+            "Tool dispatch started",
+            extra={"event": "tool_dispatch_started", "tool_name": tool_name},
+        )
         try:
             result = await tool.execute(tenant_id=tenant_id, **kwargs)
+            logger.info(
+                "Tool dispatch finished",
+                extra={
+                    "event": "tool_dispatch_finished",
+                    "tool_name": tool_name,
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
             return {"success": True, "data": result}
         except Exception as e:
-            logger.error("Failed to execute tool %s: %s", tool_name, str(e))
+            logger.error(
+                "Failed to execute tool %s: %s",
+                tool_name,
+                str(e),
+                extra={
+                    "event": "tool_dispatch_failed",
+                    "tool_name": tool_name,
+                    "error_type": type(e).__name__,
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
             return {"error": "Tool execution failed."}

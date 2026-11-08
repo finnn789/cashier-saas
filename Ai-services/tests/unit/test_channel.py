@@ -230,10 +230,18 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
             self.database.ping.side_effect = OwnershipLost('dummy-secret')
             with patch.object(self.channel, 'stop_poller', new=AsyncMock(side_effect=release.set)) as stop:
                 with self.assertLogs(channel_module.logger, level='ERROR') as logs:
-                    await asyncio.wait_for(self.channel.supervise(), 1)
+                    await asyncio.wait_for(self.channel.supervise(), 3)
                 self.assertTrue(self.channel.failed)
                 stop.assert_awaited_once()
                 self.assertNotIn('dummy-secret', ' '.join(logs.output))
+                # Structured fields (e.g. `reason`) live in `extra`, not in `logs.output`.
+                for record in logs.records:
+                    self.assertNotIn('dummy-secret', record.getMessage())
+                    self.assertNotIn('dummy-secret', ' '.join(str(v) for v in record.__dict__.values()))
+                self.assertTrue(
+                    any(getattr(record, 'reason', '').startswith('database check failed')
+                        for record in logs.records)
+                )
         finally:
             release.set()
             await self.finish_task(polling_task)
@@ -288,12 +296,12 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await self.finish_task(task)
 
-    async def test_startup_binds_registered_channel_to_chat_service(self) -> None:
-        tenant_id = uuid4()
+    async def start_with(self, fallback_tenant_id: UUID | None) -> tuple[object, UUID, Mock, AsyncMock, AsyncMock]:
         channel_id = uuid4()
         settings = SimpleNamespace(
-            telegram=SimpleNamespace(token='dummy-token', tenant_id=tenant_id),
+            telegram=SimpleNamespace(token='dummy-token', fallback_tenant_id=fallback_tenant_id),
             database=SimpleNamespace(url='dummy-url'),
+            ai=SimpleNamespace(openrouter_key='', ai_model=''),
         )
         connection = object()
 
@@ -305,23 +313,45 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
         self.bot.get_me.side_effect = None
         self.bot.get_webhook_info.return_value = SimpleNamespace(url='')
         registration = AsyncMock(return_value=channel_id)
+        tenant_upsert = AsyncMock()
         with patch.object(channel_module, 'Bot', return_value=self.bot), patch.object(
             channel_module, 'Database', return_value=self.database
         ), patch.object(
             channel_module, 'register_telegram_channel', registration
+        ), patch.object(
+            channel_module, 'upsert_tenant', tenant_upsert
         ), patch.object(TelegramChannel, 'start') as start:
             channel = await start_telegram_channel(settings, Mock())
-            try:
-                self.database.acquire.assert_awaited_once_with(71)
-                registration.assert_awaited_once_with(connection, tenant_id, 71, 'unitbot')
-                repository = channel.intake.chat.repository
-                self.assertEqual(repository.tenant_id, tenant_id)
-                self.assertEqual(repository.channel_id, channel_id)
-                self.assertEqual(repository.platform, 'TELEGRAM')
-                self.assertIs(channel.intake.chat.database, self.database)
-                self.assertIs(channel.intake.sender.bot, self.bot)
-                start.assert_called_once_with()
-            finally:
-                await channel.stop()
+        start.assert_called_once_with()
+        return channel, channel_id, connection, registration, tenant_upsert
+
+    async def test_startup_binds_registered_channel_to_chat_service(self) -> None:
+        channel, channel_id, connection, registration, tenant_upsert = await self.start_with(None)
+        try:
+            self.database.acquire.assert_awaited_once_with(71)
+            # The shared bot is registered without any tenant.
+            registration.assert_awaited_once_with(connection, 71, 'unitbot')
+            tenant_upsert.assert_not_awaited()
+            repository = channel.intake.chat.channel_repository
+            self.assertFalse(hasattr(repository, 'tenant_id'))
+            self.assertEqual(repository.channel_id, channel_id)
+            self.assertEqual(repository.platform, 'TELEGRAM')
+            self.assertIsNone(channel.intake.chat.fallback_tenant_id)
+            self.assertIs(channel.intake.chat.database, self.database)
+            self.assertIs(channel.intake.sender.bot, self.bot)
+        finally:
+            await channel.stop()
         self.bot.session.close.assert_awaited_once()
         self.database.close.assert_awaited_once()
+
+    async def test_startup_with_development_fallback_provisions_tenant_row(self) -> None:
+        fallback = uuid4()
+        with self.assertLogs(channel_module.logger, level='WARNING') as logs:
+            channel, _, connection, registration, tenant_upsert = await self.start_with(fallback)
+        try:
+            registration.assert_awaited_once_with(connection, 71, 'unitbot')
+            tenant_upsert.assert_awaited_once_with(connection, fallback, None)
+            self.assertEqual(channel.intake.chat.fallback_tenant_id, fallback)
+            self.assertNotIn(str(fallback), ' '.join(logs.output))
+        finally:
+            await channel.stop()

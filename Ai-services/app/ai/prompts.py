@@ -19,7 +19,7 @@ SYSTEM = (
     "- Hyperlink: Gunakan [Teks Tautan](URL) untuk menyertakan tautan web aktif."
 )
 MAX_INPUT_CHARS = 4000
-MAX_PROMPT_BYTES = 20000
+MAX_PROMPT_BYTES = 21000
 
 
 def build_prompt(

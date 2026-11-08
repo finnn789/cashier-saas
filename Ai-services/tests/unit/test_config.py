@@ -38,13 +38,23 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(first.ai.ai_model, "dummy-model")
         self.assertEqual(second.ai.ai_model, "changed-model")
         self.assertEqual(first.telegram.allowed_user_ids, frozenset({7, 8}))
-        self.assertEqual(first.telegram.tenant_id, DUMMY_TENANT_ID)
+        self.assertEqual(first.telegram.fallback_tenant_id, DUMMY_TENANT_ID)
         self.assertEqual(first.telegram.token, "dummy-token")
         self.assertEqual(first.ai.openrouter_key, "dummy-key")
         self.assertTrue(first.database.url.startswith("postgresql+asyncpg://"))
 
-    def test_missing_and_malformed_tenant_id_have_safe_errors(self) -> None:
-        for tenant_id in (None, "", "   ", "dummy-secret", "12345678-1234-4234-8234-invalid-secret"):
+    def test_missing_tenant_id_means_no_development_fallback(self) -> None:
+        # TASK-059: AI_TENANT_ID is an OPTIONAL development fallback, no longer required.
+        for tenant_id in (None, "", "   "):
+            with self.subTest(tenant_id=tenant_id), patch.dict(
+                os.environ,
+                {} if tenant_id is None else {"AI_TENANT_ID": tenant_id},
+                clear=True,
+            ):
+                self.assertIsNone(load_telegram_settings().fallback_tenant_id)
+
+    def test_malformed_tenant_id_has_safe_errors(self) -> None:
+        for tenant_id in ("dummy-secret", "12345678-1234-4234-8234-invalid-secret"):
             with self.subTest(tenant_id=tenant_id), patch.dict(
                 os.environ,
                 {} if tenant_id is None else {"AI_TENANT_ID": tenant_id},
@@ -70,7 +80,7 @@ class ConfigurationTests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_TENANT_ID": str(DUMMY_TENANT_ID),
                                     "TELEGRAM_ALLOWED_USER_IDS": " , "}, clear=True):
             self.assertEqual(load_telegram_settings().allowed_user_ids, frozenset())
-            self.assertEqual(load_telegram_settings().tenant_id, DUMMY_TENANT_ID)
+            self.assertEqual(load_telegram_settings().fallback_tenant_id, DUMMY_TENANT_ID)
             self.assertEqual(load_ai_settings().openrouter_key, "")
             self.assertEqual(load_ai_settings().ai_model, "")
 

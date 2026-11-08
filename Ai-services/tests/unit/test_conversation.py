@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 import app.chat.service as service_module
 from app.ai.openrouter import AIError, Completion, OpenRouterClient
 from app.ai.prompts import MAX_INPUT_CHARS
-from app.chat.repositories import Repository
+from app.chat.repositories import ChannelRepository, Repository
 from app.chat.service import ChatService
 from app.core.database import Database
 
@@ -51,6 +51,10 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.database = Mock(spec=Database)
         self.database.transaction = Mock(side_effect=self.boundary.transaction)
         self.repository = Mock(spec=Repository)
+        # The tenant is per request: ChatService asks the channel for this tenant view.
+        self.tenant_id = uuid4()
+        self.channels = Mock(spec=ChannelRepository)
+        self.channels.for_tenant = Mock(return_value=self.repository)
         self.user_id = uuid4()
         self.conversation_id = uuid4()
         self.repository.upsert_user = AsyncMock(side_effect=self.upsert_user)
@@ -60,10 +64,11 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.repository.completed_history = AsyncMock(side_effect=self.completed_history)
         self.ai = Mock(spec=OpenRouterClient)
         self.ai.reply = AsyncMock(side_effect=self.reply)
-        self.service = ChatService(self.database, self.repository, self.ai)
+        self.service = ChatService(self.database, self.channels, self.ai)
         self.events: list[tuple[str, int]] = []
         self.prompt: list[dict[str, str]] | None = None
         self.input: dict[str, Any] = {
+            "tenant_id": self.tenant_id,
             "external_user_id": "71",
             "external_chat_id": "private-chat",
             "external_message_id": "provider-1",
@@ -119,7 +124,11 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         )
         return [("old", "answer-old"), ("new", "answer-new")]
 
-    async def reply(self, prompt: list[dict[str, str]]) -> Completion:
+    async def reply(
+        self,
+        prompt: list[dict[str, str]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Completion:
         self.assertFalse(self.boundary.active)
         self.assertEqual(self.boundary.events[-1], ("commit", 1))
         self.prompt = prompt
@@ -216,7 +225,10 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         ]
         waits: list[float] = []
 
-        async def retry_reply(prompt: list[dict[str, str]]) -> Completion:
+        async def retry_reply(
+            prompt: list[dict[str, str]],
+            tools: list[dict[str, Any]] | None = None,
+        ) -> Completion:
             self.assertFalse(self.boundary.active)
             outcome = replies.pop(0)
             if isinstance(outcome, AIError):

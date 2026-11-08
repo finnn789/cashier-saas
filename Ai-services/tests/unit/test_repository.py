@@ -87,26 +87,37 @@ class RepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.connection.execute.assert_not_awaited()
 
     async def test_registration_cannot_retarget_existing_bot(self) -> None:
+        # TASK-059: the shared bot is registered WITHOUT a tenant (tenancy is per conversation).
         self.connection.scalar.return_value = self.channel_id
-        result = await register_telegram_channel(self.connection, self.tenant_id, 71, "bot")
+        result = await register_telegram_channel(self.connection, 71, "bot")
         self.assertEqual(result, self.channel_id)
-        self.assertEqual(self.connection.execute.await_count, 3)
-        tenant_sql, _ = captured(self.connection.execute, 0)
-        account_sql, account_params = captured(self.connection.execute, 1)
+        self.assertEqual(self.connection.execute.await_count, 2)
+        account_sql, account_params = captured(self.connection.execute, 0)
         lookup_sql, lookup_params = captured(self.connection.scalar)
-        update_sql, update_params = captured(self.connection.execute, 2)
-        self.assertIn("ON CONFLICT (id) DO NOTHING", tenant_sql)
+        update_sql, update_params = captured(self.connection.execute, 1)
+        self.assertIn("INSERT INTO channel_accounts", account_sql)
         self.assertIn("ON CONFLICT (platform, external_account_id) DO NOTHING", account_sql)
+        self.assertIsNone(account_params["tenant_id"])
         self.assertIn("TELEGRAM", account_params.values())
         self.assertIn("71", account_params.values())
-        for sql, params in ((lookup_sql, lookup_params), (update_sql, update_params)):
-            for value in (self.tenant_id, self.channel_id if sql == update_sql else "71", "TELEGRAM"):
-                self.assertIn(value, params.values())
+        self.assertNotIn(self.tenant_id, account_params.values())
+        for value in ("71", "TELEGRAM"):
+            self.assertIn(value, lookup_params.values())
+        for value in (self.channel_id, "71", "TELEGRAM"):
+            self.assertIn(value, update_params.values())
         self.assertIn("UPDATE channel_accounts", update_sql)
         self.assertIn("username", update_sql)
         set_clause = update_sql.split(" SET ", 1)[1].split(" WHERE ", 1)[0]
-        self.assertNotIn("tenant_id =", set_clause)
+        self.assertNotIn("tenant_id", set_clause)
         self.assertNotIn("external_account_id =", set_clause)
+        self.assertNotIn("tenants", account_sql + lookup_sql + update_sql)
+
+    async def test_registration_rejects_invalid_bot_ids(self) -> None:
+        for bot_id in (0, -1, True, "71"):
+            with self.subTest(bot_id=bot_id):
+                with self.assertRaisesRegex(ValueError, "TELEGRAM_CHANNEL_INVALID"):
+                    await register_telegram_channel(self.connection, bot_id, "bot")  # type: ignore[arg-type]
+        self.connection.execute.assert_not_awaited()
 
     async def test_duplicate_lookup_crosses_sessions_but_stays_with_owner_and_chat(self) -> None:
         self.connection.scalar.return_value = 9
@@ -237,16 +248,17 @@ class RepositoryTests(unittest.IsolatedAsyncioTestCase):
         tables = Base.metadata.tables
         self.assertEqual(set(tables), {
             "tenants", "channel_accounts", "channel_users", "conversations",
-            "messages", "tenant_memberships",
+            "messages", "tenant_memberships", "tenant_members", "tenant_selections",
         })
-        self.assertEqual(sum(len(table.columns) for table in tables.values()), 31)
+        self.assertEqual(sum(len(table.columns) for table in tables.values()), 45)
         self.assertEqual(sum(
             isinstance(item, ForeignKeyConstraint)
             for table in tables.values() for item in table.constraints
-        ), 6)
+        ), 11)
         indexes = {index.name for table in tables.values() for index in table.indexes}
         self.assertEqual(indexes, {
-            "one_active_conversation", "conversation_external_message", "message_history"
+            "one_active_conversation", "conversation_external_message", "message_history",
+            "tenant_member_active_phone", "tenant_membership_user",
         })
         self.assertTrue(any(
             isinstance(item, UniqueConstraint) and

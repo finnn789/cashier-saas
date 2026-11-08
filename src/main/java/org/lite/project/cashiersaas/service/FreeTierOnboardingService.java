@@ -39,6 +39,8 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.zone.ZoneRulesException;
 import java.util.HexFormat;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -52,12 +54,13 @@ public class FreeTierOnboardingService {
     private final OutletRepository outletRepository;
     private final MembershipOutletAccessRepository accessRepository;
     private final AuthSessionService authSessionService;
+    private final MemberSyncPublisher memberSyncPublisher;
 
     @Transactional
     public FreeTierStartResponse startFreeTier(AccountPrincipal principal, String idempotencyKey,
                                                String businessTypeCode) {
         String key = validatedKey(idempotencyKey);
-        String typeCode = businessTypeCode == null ? "" : businessTypeCode.trim().toUpperCase(java.util.Locale.ROOT);
+        String typeCode = businessTypeCode == null ? "" : businessTypeCode.trim().toUpperCase(Locale.ROOT);
         if (!"FNB".equals(typeCode)) {
             throw new InvalidOperationException("Tipe usaha belum tersedia untuk Freetier.");
         }
@@ -109,6 +112,8 @@ public class FreeTierOnboardingService {
         if (businessName.isEmpty() || outletName.isEmpty()) {
             throw new InvalidOperationException("Nama bisnis dan outlet wajib diisi.");
         }
+        String address = trimmedOrNull(request.getAddress());
+        String phoneNumber = trimmedOrNull(request.getPhoneNumber());
         if (!subscription.isActiveAt(Instant.now())) {
             throw new OperationConflictException("Langganan tidak aktif.");
         }
@@ -116,16 +121,12 @@ public class FreeTierOnboardingService {
             OutletEntity existingOutlet = accessRepository.findFirstActiveForMembership(tenantId,
                     ownerMembership.getId()).map(MembershipOutletAccessEntity::getOutlet)
                     .orElseThrow(ResourceNotFoundException::new);
-            if (!tenant.getName().equals(businessName)
-                    || !java.util.Objects.equals(tenant.getAddress(), request.getAddress().trim())
-                    || !java.util.Objects.equals(tenant.getPhoneNumber(), trimmedOrNull(request.getPhoneNumber()))
-                    || !existingOutlet.getName().equals(outletName)
-                    || !existingOutlet.getTimeZone().equals(timeZone)
-                    || !java.util.Objects.equals(existingOutlet.getAddress(), request.getAddress().trim())
-                    || !java.util.Objects.equals(existingOutlet.getPhoneNumber(),
-                            trimmedOrNull(request.getPhoneNumber()))) {
+            if (!matchesCompletedProfile(tenant, existingOutlet, businessName, outletName, timeZone,
+                    address, phoneNumber)) {
                 throw new OperationConflictException("Profil usaha telah diselesaikan dengan data berbeda.");
             }
+            // Idempotent re-complete: re-publish so an earlier failed Ai-services sync is healed.
+            memberSyncPublisher.memberChanged(tenant, ownerMembership.getUser(), Role.OWNERMERCHANT);
             AuthSessionService.IssuedTokens tokens = authSessionService.selectMerchant(principal,
                     ownerMembership, existingOutlet, subscription);
             return FreeTierMapper.toOwnerResponse(tokens.getAccessToken(), tokens.getExpiresAt(),
@@ -134,10 +135,8 @@ public class FreeTierOnboardingService {
         if (!StatusConstants.PENDING_PROFILE.equals(tenant.getStatus())) {
             throw new OperationConflictException("Merchant tidak dapat menyelesaikan profil pada status ini.");
         }
-        OutletEntity outlet = OutletEntity.open(tenant, outletName, timeZone,
-                trimmedOrNull(request.getAddress()), trimmedOrNull(request.getPhoneNumber()));
-        tenant.completeFreeTierProfile(businessName, trimmedOrNull(request.getAddress()),
-                trimmedOrNull(request.getPhoneNumber()));
+        OutletEntity outlet = OutletEntity.open(tenant, outletName, timeZone, address, phoneNumber);
+        tenant.completeFreeTierProfile(businessName, address, phoneNumber);
         outletRepository.persist(outlet);
         accessRepository.persist(MembershipOutletAccessEntity.grant(ownerMembership, outlet));
         StaffUserEntity owner = ownerMembership.getUser();
@@ -147,9 +146,22 @@ public class FreeTierOnboardingService {
         if (owner.isPendingProfile()) {
             owner.completeBusinessProfile();
         }
+        memberSyncPublisher.memberChanged(tenant, owner, Role.OWNERMERCHANT);
         AuthSessionService.IssuedTokens tokens = authSessionService.selectMerchant(principal, ownerMembership, outlet,
                 subscription);
         return FreeTierMapper.toOwnerResponse(tokens.getAccessToken(), tokens.getExpiresAt(), ownerMembership, outlet);
+    }
+
+    private boolean matchesCompletedProfile(TenantEntity tenant, OutletEntity outlet, String businessName,
+                                            String outletName, String timeZone, String address,
+                                            String phoneNumber) {
+        return tenant.getName().equals(businessName)
+                && Objects.equals(tenant.getAddress(), address)
+                && Objects.equals(tenant.getPhoneNumber(), phoneNumber)
+                && outlet.getName().equals(outletName)
+                && outlet.getTimeZone().equals(timeZone)
+                && Objects.equals(outlet.getAddress(), address)
+                && Objects.equals(outlet.getPhoneNumber(), phoneNumber);
     }
 
     private String validatedKey(String key) {

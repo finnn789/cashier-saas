@@ -7,6 +7,7 @@ cp .env.example .env                 # PowerShell: Copy-Item .env.example .env
 openssl rand -base64 32              # paste the output into CASHIER_JWT_SECRET_B64 in .env
                                      # PowerShell: [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 openssl rand -base64 32              # paste another value into CASHIER_GRPC_SERVICE_KEY in .env (required; shared by backend and ai-services)
+openssl rand -base64 32              # paste a third, different value into AI_INTERNAL_API_KEY in .env (required by backend and ai-services)
 docker compose up -d --build         # postgres + backend (profile "demo": Flyway migrations + demo seed)
 docker compose ps                    # wait until backend is "healthy" (~1 min)
 docker compose --profile ai up -d --build   # optional: also the Python AI service (needs Telegram/OpenRouter keys in .env)
@@ -18,7 +19,7 @@ docker compose down -v               # stop and delete data
 | Backend HTTP | http://localhost:8080 (override with `BACKEND_HTTP_PORT`) |
 | Swagger UI | http://localhost:8080/swagger-ui.html (redirects to `/swagger-ui/index.html`) |
 | OpenAPI JSON | http://localhost:8080/v3/api-docs |
-| gRPC | not published to the host; internal compose network only (`backend:9090`), requires `x-internal-service-key` = `CASHIER_GRPC_SERVICE_KEY` |
+| gRPC | not published to the host; internal compose network only (`backend:9090`), requires `x-internal-service-key` = `CASHIER_GRPC_SERVICE_KEY`; the tenant must exist and be active (database check, no env allowlist) |
 | PostgreSQL | localhost:5432, user `cashier`, password `POSTGRES_PASSWORD` (default `cashier_demo`), DBs `cashier_saas` and `cashier_ai` |
 | AI service (profile `ai`) | http://localhost:8001 |
 
@@ -103,3 +104,5 @@ Owner-only endpoints (tables, categories, products CRUD, reports) are under `/ap
 - Only paid, non-cancelled orders appear in reports.
 - Refresh cookie `Secure` flag is off in the demo profile so it works over plain HTTP.
 - The root `.env` is also read by the backend outside Docker (`spring.config.import`); inside the container no `.env` is shipped.
+- Staff sync to the AI service is **in progress**: the backend pushes staff data (tenant, name, normalized phone, role) to Ai-services on owner profile completion and cashier invitation claim, authenticated by `AI_INTERNAL_API_KEY`. Compose points the backend at `http://ai-services:8001` unless `AI_SERVICE_BASE_URL` is set. Not yet verified end to end.
+- Telegram staff identification is **in progress**: users verify by sharing their own Telegram contact. `AI_TENANT_ID` is only a development fallback and never overrides a verified tenant.

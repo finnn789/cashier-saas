@@ -1,0 +1,141 @@
+{
+  "description": "Ready-to-send request messages for manual gRPC testing of cashier.v1.CashierService (grpcurl or Postman). Replace the <PLACEHOLDERS>. Schema: cashier-service.grpc.schema.json. Never commit a real service key.",
+  "server": "localhost:9090",
+  "tls": false,
+  "metadata": { "x-internal-service-key": "<CASHIER_GRPC_SERVICE_KEY>" },
+  "placeholders": {
+    "<TENANT_ID>": "UUID of an active tenant with F&B enabled and some products/orders",
+    "<OTHER_TENANT_ID>": "UUID of a different active tenant (isolation checks)",
+    "<ORDER_NUMBER>": "an existing order number of <TENANT_ID>",
+    "<OTHER_TENANT_ORDER_NUMBER>": "an existing order number that belongs to <OTHER_TENANT_ID>"
+  },
+  "GetCatalogItem": [
+    {
+      "name": "all items, default limit",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "expect": "OK, up to 10 items"
+    },
+    {
+      "name": "search by name or category",
+      "message": { "tenant_id": "<TENANT_ID>", "query": "kopi", "limit": 5 },
+      "expect": "OK, at most 5 items matching name or category"
+    },
+    {
+      "name": "search is case-insensitive and trimmed",
+      "message": { "tenant_id": "<TENANT_ID>", "query": "  KOPI  " },
+      "expect": "OK, same items as the lowercase query"
+    },
+    {
+      "name": "LIKE wildcards are escaped",
+      "message": { "tenant_id": "<TENANT_ID>", "query": "%" },
+      "expect": "OK, empty items (a literal percent sign, not match-all)"
+    },
+    {
+      "name": "no match",
+      "message": { "tenant_id": "<TENANT_ID>", "query": "zzzz-not-exist" },
+      "expect": "OK, items omitted or empty"
+    },
+    {
+      "name": "limit zero uses default",
+      "message": { "tenant_id": "<TENANT_ID>", "limit": 0 },
+      "expect": "OK, up to 10 items"
+    },
+    {
+      "name": "negative limit uses default",
+      "message": { "tenant_id": "<TENANT_ID>", "limit": -5 },
+      "expect": "OK, up to 10 items"
+    },
+    {
+      "name": "limit above maximum is clamped",
+      "message": { "tenant_id": "<TENANT_ID>", "limit": 999 },
+      "expect": "OK, at most 50 items"
+    },
+    {
+      "name": "blank tenant",
+      "message": { "tenant_id": "" },
+      "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
+    },
+    {
+      "name": "tenant is not a UUID",
+      "message": { "tenant_id": "not-a-uuid" },
+      "expect": "INVALID_ARGUMENT: tenant_id must be a valid UUID"
+    },
+    {
+      "name": "unknown tenant",
+      "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead" },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (same message as an inactive tenant)"
+    }
+  ],
+  "GetOrderStatus": [
+    {
+      "name": "existing order",
+      "message": { "tenant_id": "<TENANT_ID>", "order_number": "<ORDER_NUMBER>" },
+      "expect": "OK with status, paymentStatus, totalAmount (string), createdAt (UTC ISO-8601)"
+    },
+    {
+      "name": "order number is trimmed",
+      "message": { "tenant_id": "<TENANT_ID>", "order_number": "  <ORDER_NUMBER>  " },
+      "expect": "OK, same order"
+    },
+    {
+      "name": "order not found",
+      "message": { "tenant_id": "<TENANT_ID>", "order_number": "ORD-00000000-999" },
+      "expect": "NOT_FOUND: Order not found"
+    },
+    {
+      "name": "tenant isolation: order of another tenant",
+      "message": { "tenant_id": "<TENANT_ID>", "order_number": "<OTHER_TENANT_ORDER_NUMBER>" },
+      "expect": "NOT_FOUND (must never return the other tenant's order)"
+    },
+    {
+      "name": "blank order number",
+      "message": { "tenant_id": "<TENANT_ID>", "order_number": "   " },
+      "expect": "INVALID_ARGUMENT: order_number must not be blank"
+    },
+    {
+      "name": "missing order number",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "expect": "INVALID_ARGUMENT: order_number must not be blank"
+    },
+    {
+      "name": "blank tenant",
+      "message": { "tenant_id": "", "order_number": "<ORDER_NUMBER>" },
+      "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
+    },
+    {
+      "name": "unknown tenant",
+      "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead", "order_number": "<ORDER_NUMBER>" },
+      "expect": "PERMISSION_DENIED"
+    }
+  ],
+  "authAndLimits": [
+    {
+      "name": "no x-internal-service-key header",
+      "method": "GetCatalogItem",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "metadata": {},
+      "expect": "UNAUTHENTICATED: Invalid or missing service credentials"
+    },
+    {
+      "name": "wrong x-internal-service-key",
+      "method": "GetCatalogItem",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "metadata": { "x-internal-service-key": "wrong-key-0000000000" },
+      "expect": "UNAUTHENTICATED"
+    },
+    {
+      "name": "AI_INTERNAL_API_KEY used by mistake",
+      "method": "GetCatalogItem",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "metadata": { "x-internal-service-key": "<AI_INTERNAL_API_KEY>" },
+      "expect": "UNAUTHENTICATED (the two keys must differ)"
+    },
+    {
+      "name": "burst above 50 requests per second",
+      "method": "GetCatalogItem",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "note": "Send 100+ calls within one second",
+      "expect": "Some calls return RESOURCE_EXHAUSTED: Rate limit exceeded"
+    }
+  ]
+}

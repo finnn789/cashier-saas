@@ -5,6 +5,7 @@ import com.blazebit.persistence.CriteriaBuilderFactory;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.QTenantEntity;
+import org.lite.project.cashiersaas.shared.StatusConstants;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -37,6 +38,24 @@ public class TenantRepository {
                 .where(TENANT.createdByUser.id.toString()).eq(userId)
                 .where(TENANT.onboardingIdempotencyKey.toString()).eq(key)
                 .setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    /**
+     * True only when the tenant exists, is ACTIVE and has an active F&B business type. Callers must not
+     * distinguish "missing" from "inactive" in anything they expose.
+     */
+    public boolean existsActiveFnbTenant(UUID tenantId) {
+        return !criteriaBuilderFactory.create(entityManager, UUID.class)
+                .from(TenantEntity.class, "tenant")
+                .innerJoin("tenant.businessType", "businessType")
+                .select("tenant.id")
+                .where("tenant.id").eq(tenantId)
+                .where("tenant.status").eq(StatusConstants.ACTIVE)
+                .where("businessType.code").eq("FNB")
+                .where("businessType.active").eq(true)
+                .setMaxResults(1)
+                .getResultList()
+                .isEmpty();
     }
 
     public void persist(TenantEntity tenant) {

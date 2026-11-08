@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cashier-saas.local/contracts/cashier-service.grpc.schema.json",
+  "title": "CashierService gRPC JSON mapping (cashier.v1)",
+  "description": "JSON form of the messages in src/main/proto/cashier_service.proto, for testing with grpcurl or Postman. Metadata required on every call: x-internal-service-key = CASHIER_GRPC_SERVICE_KEY. proto3 JSON rules: int64 is a string in responses (a number is also accepted in requests); fields holding their default value (empty string, 0, false) may be omitted in responses; responses use lowerCamelCase names (tenantId) while requests accept both snake_case and lowerCamelCase.",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Tenant UUID. Must be an existing, active tenant with F&B enabled, otherwise PERMISSION_DENIED."
+    },
+    "int64": {
+      "description": "proto3 int64 in JSON. Money is an integer in minor units, never a float.",
+      "oneOf": [
+        { "type": "string", "pattern": "^-?[0-9]+$" },
+        { "type": "integer" }
+      ]
+    },
+    "GetCatalogItemRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id"],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/uuid" },
+        "query": {
+          "type": "string",
+          "description": "Optional. Case-insensitive match on product name or category name. Blank means no filter."
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Optional. 0 or negative uses the default (10); values above the maximum (50) are clamped."
+        }
+      }
+    },
+    "CatalogItem": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string" },
+        "price": { "$ref": "#/$defs/int64" },
+        "isAvailable": {
+          "type": "boolean",
+          "description": "Wire name is is_available. Always true in practice: unavailable and archived products are filtered out."
+        },
+        "category": { "type": "string" }
+      }
+    },
+    "GetCatalogItemResponse": {
+      "type": "object",
+      "properties": {
+        "tenantId": { "$ref": "#/$defs/uuid" },
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/CatalogItem" }
+        }
+      }
+    },
+    "GetOrderStatusRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "order_number"],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/uuid" },
+        "order_number": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Order number, trimmed by the server. Looked up only inside the given tenant; an order of another tenant returns NOT_FOUND."
+        }
+      }
+    },
+    "GetOrderStatusResponse": {
+      "type": "object",
+      "properties": {
+        "tenantId": { "$ref": "#/$defs/uuid" },
+        "orderNumber": { "type": "string" },
+        "status": {
+          "type": "string",
+          "description": "Order status enum name from the backend."
+        },
+        "paymentStatus": {
+          "type": "string",
+          "description": "Payment status enum name from the backend."
+        },
+        "totalAmount": { "$ref": "#/$defs/int64" },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 instant in UTC."
+        }
+      }
+    }
+  },
+  "x-service": "cashier.v1.CashierService",
+  "x-methods": {
+    "GetCatalogItem": {
+      "request": { "$ref": "#/$defs/GetCatalogItemRequest" },
+      "response": { "$ref": "#/$defs/GetCatalogItemResponse" },
+      "errors": ["UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "INVALID_ARGUMENT", "PERMISSION_DENIED", "INTERNAL"]
+    },
+    "GetOrderStatus": {
+      "request": { "$ref": "#/$defs/GetOrderStatusRequest" },
+      "response": { "$ref": "#/$defs/GetOrderStatusResponse" },
+      "errors": ["UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "INVALID_ARGUMENT", "PERMISSION_DENIED", "NOT_FOUND", "INTERNAL"]
+    }
+  },
+  "examples": [
+    {
+      "method": "GetCatalogItem",
+      "request": { "tenant_id": "00000000-0000-4000-8000-0000000000b1", "query": "kopi", "limit": 5 },
+      "response": {
+        "tenantId": "00000000-0000-4000-8000-0000000000b1",
+        "items": [
+          { "id": "5d1c3a52-7f0e-4f0b-9a52-0d9b4a0c1e11", "name": "Kopi Susu", "price": "18000", "isAvailable": true, "category": "Minuman" }
+        ]
+      }
+    },
+    {
+      "method": "GetOrderStatus",
+      "request": { "tenant_id": "00000000-0000-4000-8000-0000000000b1", "order_number": "ORD-20261022-001" },
+      "response": {
+        "tenantId": "00000000-0000-4000-8000-0000000000b1",
+        "orderNumber": "ORD-20261022-001",
+        "status": "COMPLETED",
+        "paymentStatus": "PAID",
+        "totalAmount": "36000",
+        "createdAt": "2026-10-22T03:15:00Z"
+      }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 """Workflow assembly and compilation for LangGraph customer service workflow."""
 
+import logging
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -10,6 +11,8 @@ from app.ai.graph.nodes import create_agent_node, create_tools_node
 from app.ai.graph.state import AgentState
 from app.tools import get_default_tool_registry
 from app.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def build_chat_graph(
@@ -54,4 +57,14 @@ def build_chat_graph(
     )
     workflow.add_edge("tools", "agent")
 
-    return workflow.compile(checkpointer=checkpointer)
+    compiled = workflow.compile(checkpointer=checkpointer)
+    logger.info(
+        "Chat graph built",
+        extra={
+            "event": "graph_built",
+            "ai_model": ai_model,
+            "tools_count": len(getattr(tool_registry, "_tools", {}) or {}),
+            "checkpointer": checkpointer is not None,
+        },
+    )
+    return compiled

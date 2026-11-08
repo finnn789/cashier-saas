@@ -94,4 +94,8 @@ class SenderTests(unittest.IsolatedAsyncioTestCase):
                 delivery = await sender.send(7, "hello", 1)
                 self.assertEqual((delivery.status, delivery.code), ("FAILED", "TELEGRAM_REJECTED"))
                 self.assertNotIn("dummy-secret", repr(delivery))
-                bot.send_message.assert_awaited_once()
+                if error_type is TelegramBadRequest:
+                    # Markdown parse errors are retried once as plain text.
+                    self.assertEqual(bot.send_message.await_count, 2)
+                else:
+                    bot.send_message.assert_awaited_once()

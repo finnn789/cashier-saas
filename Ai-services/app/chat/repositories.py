@@ -1,18 +1,23 @@
-'''Tenant- and channel-scoped SQLAlchemy operations for minimal chat storage.'''
+'''Channel- and tenant-scoped SQLAlchemy operations for minimal chat storage.
+
+One shared bot (channel account) serves many tenants. `ChannelRepository` covers
+what exists before a tenant is known (the channel user). `Repository` is the
+per-request tenant view (`ChannelRepository.for_tenant`) that owns every
+conversation and message query; each of those is bound to the tenant id.
+'''
 
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, exists, func, insert, select, update
+from sqlalchemy import and_, exists, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.chat.entities import ChannelAccount, ChannelUser, Conversation, Message, Tenant
+from app.chat.entities import ChannelAccount, ChannelUser, Conversation, Message
 
 Row = dict[str, Any]
-TENANTS = Tenant.__table__
 CHANNELS = ChannelAccount.__table__
 USERS = ChannelUser.__table__
 CONVERSATIONS = Conversation.__table__
@@ -22,23 +27,19 @@ PLATFORMS = frozenset(('TELEGRAM', 'WHATSAPP'))
 
 async def register_telegram_channel(
     connection: AsyncConnection,
-    tenant_id: UUID,
     external_bot_id: int,
     username: str | None,
 ) -> UUID:
-    '''Provision the local tenant and bot without changing existing ownership.'''
-    if not isinstance(tenant_id, UUID) or external_bot_id <= 0:
+    '''Provision the shared bot without a tenant and without changing its ownership.'''
+    if isinstance(external_bot_id, bool) or not isinstance(external_bot_id, int):
+        raise ValueError('TELEGRAM_CHANNEL_INVALID')
+    if external_bot_id <= 0:
         raise ValueError('TELEGRAM_CHANNEL_INVALID')
     external_account_id = str(external_bot_id)
     await connection.execute(
-        pg_insert(TENANTS).values(id=tenant_id).on_conflict_do_nothing(
-            index_elements=[TENANTS.c.id]
-        )
-    )
-    await connection.execute(
         pg_insert(CHANNELS).values(
             id=uuid4(),
-            tenant_id=tenant_id,
+            tenant_id=None,
             platform='TELEGRAM',
             external_account_id=external_account_id,
             username=username,
@@ -48,7 +49,6 @@ async def register_telegram_channel(
     )
     channel_id = await connection.scalar(
         select(CHANNELS.c.id).where(
-            CHANNELS.c.tenant_id == tenant_id,
             CHANNELS.c.platform == 'TELEGRAM',
             CHANNELS.c.external_account_id == external_account_id,
         )
@@ -58,7 +58,6 @@ async def register_telegram_channel(
     await connection.execute(
         update(CHANNELS).where(
             CHANNELS.c.id == channel_id,
-            CHANNELS.c.tenant_id == tenant_id,
             CHANNELS.c.platform == 'TELEGRAM',
             CHANNELS.c.external_account_id == external_account_id,
         ).values(username=username)
@@ -66,15 +65,20 @@ async def register_telegram_channel(
     return channel_id
 
 
-class Repository:
-    def __init__(self, tenant_id: UUID, channel_id: UUID, platform: str) -> None:
-        if not isinstance(tenant_id, UUID) or not isinstance(channel_id, UUID):
+class ChannelRepository:
+    '''Operations of one channel account that exist before a tenant is resolved.'''
+
+    def __init__(self, channel_id: UUID, platform: str) -> None:
+        if not isinstance(channel_id, UUID):
             raise ValueError('REPOSITORY_SCOPE_INVALID')
         if platform not in PLATFORMS:
             raise ValueError('REPOSITORY_PLATFORM_INVALID')
-        self.tenant_id = tenant_id
         self.channel_id = channel_id
         self.platform = platform
+
+    def for_tenant(self, tenant_id: UUID) -> 'Repository':
+        '''The tenant view for one request; the tenant must come from server state.'''
+        return Repository(tenant_id, self.channel_id, self.platform)
 
     async def _first(self, connection: AsyncConnection, statement: Executable) -> Row | None:
         result = await connection.execute(statement)
@@ -85,20 +89,8 @@ class Repository:
         return exists(
             select(CHANNELS.c.id).where(
                 CHANNELS.c.id == self.channel_id,
-                CHANNELS.c.tenant_id == self.tenant_id,
                 CHANNELS.c.platform == self.platform,
             )
-        )
-
-    def _owned_conversation(
-        self, user_id: UUID, external_chat_id: str
-    ) -> ColumnElement[bool]:
-        return and_(
-            self._channel_exists(),
-            CONVERSATIONS.c.channel_id == self.channel_id,
-            CONVERSATIONS.c.platform == self.platform,
-            CONVERSATIONS.c.user_id == user_id,
-            CONVERSATIONS.c.external_chat_id == external_chat_id,
         )
 
     async def upsert_user(
@@ -132,6 +124,41 @@ class Repository:
             raise RuntimeError('USER_NOT_RETURNED')
         return user_id
 
+
+class Repository(ChannelRepository):
+    '''Per-request tenant view; every conversation/message statement is tenant-bound.'''
+
+    def __init__(self, tenant_id: UUID, channel_id: UUID, platform: str) -> None:
+        if not isinstance(tenant_id, UUID):
+            raise ValueError('REPOSITORY_SCOPE_INVALID')
+        super().__init__(channel_id, platform)
+        self.tenant_id = tenant_id
+
+    def _channel_serves_tenant(self) -> ColumnElement[bool]:
+        # A shared channel (NULL tenant) serves every tenant; a dedicated one only its own.
+        return or_(CHANNELS.c.tenant_id.is_(None), CHANNELS.c.tenant_id == self.tenant_id)
+
+    def _channel_exists(self) -> ColumnElement[bool]:
+        return exists(
+            select(CHANNELS.c.id).where(
+                CHANNELS.c.id == self.channel_id,
+                self._channel_serves_tenant(),
+                CHANNELS.c.platform == self.platform,
+            )
+        )
+
+    def _owned_conversation(
+        self, user_id: UUID, external_chat_id: str
+    ) -> ColumnElement[bool]:
+        return and_(
+            self._channel_exists(),
+            CONVERSATIONS.c.tenant_id == self.tenant_id,
+            CONVERSATIONS.c.channel_id == self.channel_id,
+            CONVERSATIONS.c.platform == self.platform,
+            CONVERSATIONS.c.user_id == user_id,
+            CONVERSATIONS.c.external_chat_id == external_chat_id,
+        )
+
     async def find_duplicate_incoming(
         self,
         connection: AsyncConnection,
@@ -139,7 +166,7 @@ class Repository:
         external_chat_id: str,
         external_message_id: str,
     ) -> bool:
-        '''Find a USER provider ID across all sessions of this owner and chat.'''
+        '''Find a USER provider ID across all sessions of this owner, tenant and chat.'''
         if not external_message_id or len(external_message_id) > 512:
             raise ValueError('EXTERNAL_MESSAGE_ID_INVALID')
         found = await connection.scalar(
@@ -155,7 +182,8 @@ class Repository:
                     ),
                 )
             ).where(
-                CHANNELS.c.tenant_id == self.tenant_id,
+                self._channel_serves_tenant(),
+                CONVERSATIONS.c.tenant_id == self.tenant_id,
                 CHANNELS.c.id == self.channel_id,
                 CHANNELS.c.platform == self.platform,
                 CONVERSATIONS.c.user_id == user_id,
@@ -195,6 +223,7 @@ class Repository:
         conversation_id = await connection.scalar(
             insert(CONVERSATIONS).values(
                 id=uuid4(),
+                tenant_id=self.tenant_id,
                 channel_id=self.channel_id,
                 platform=self.platform,
                 user_id=user_id,
@@ -277,7 +306,8 @@ class Repository:
                     ),
                 )
             ).where(
-                CHANNELS.c.tenant_id == self.tenant_id,
+                self._channel_serves_tenant(),
+                CONVERSATIONS.c.tenant_id == self.tenant_id,
                 CHANNELS.c.id == self.channel_id,
                 CHANNELS.c.platform == self.platform,
                 CONVERSATIONS.c.id == conversation_id,

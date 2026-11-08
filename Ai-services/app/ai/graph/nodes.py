@@ -2,12 +2,14 @@
 
 import json
 import logging
+import time
 from typing import Any, Callable
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from pydantic import SecretStr
 from langchain_openai import ChatOpenAI
 
+from app.ai.graph.error_codes import classify_llm_error
 from app.ai.graph.state import AgentState
 from app.ai.graph.tools_adapter import (
     adapt_tool_registry,
@@ -70,10 +72,31 @@ def create_agent_node(
         else:
             messages_to_send = raw_messages
 
+        started = time.perf_counter()
+        logger.info(
+            "Agent node started",
+            extra={
+                "event": "agent_node_started",
+                "messages_count": len(messages_to_send),
+                "tools_bound": llm_with_tools is not llm,
+            },
+        )
         try:
             response: AIMessage = await llm_with_tools.ainvoke(messages_to_send)
 
             tool_calls = getattr(response, "tool_calls", None)
+            logger.info(
+                "Agent node finished",
+                extra={
+                    "event": "agent_node_finished",
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                    "tool_calls_count": len(tool_calls) if tool_calls else 0,
+                    "tool_names": [
+                        str(call.get("name", "")) for call in (tool_calls or [])
+                    ],
+                    "has_final_response": not tool_calls,
+                },
+            )
             if not tool_calls:
                 content_text = (
                     response.content
@@ -90,17 +113,18 @@ def create_agent_node(
                 "messages": [response],
             }
         except Exception as exc:
-            logger.error("LLM agent node invocation failed: %s", exc, exc_info=True)
-            fallback_text = (
-                "Mohon maaf, layanan asisten sedang mengalami kendala teknis. "
-                "Silakan coba beberapa saat lagi."
+            code = classify_llm_error(exc)
+            logger.error(
+                "LLM agent node invocation failed: %s",
+                exc,
+                exc_info=True,
+                extra={
+                    "event": "llm_invocation_failed",
+                    "error_code": code,
+                    "error_type": type(exc).__name__,
+                },
             )
-            fallback_msg = AIMessage(content=fallback_text)
-            return {
-                "messages": [fallback_msg],
-                "final_response": fallback_text,
-                "error_code": "llm_invocation_error",
-            }
+            return {"error_code": code}
 
     return agent_node_fn
 
@@ -139,8 +163,14 @@ def create_tools_node(
 
         tenant_id = (state.get("tenant_id") or "").strip()
         tool_messages: list[ToolMessage] = []
+        node_started = time.perf_counter()
+        logger.info(
+            "Tools node started",
+            extra={"event": "tools_node_started", "tool_calls_count": len(tool_calls)},
+        )
 
         for call in tool_calls:
+            call_started = time.perf_counter()
             tool_name = call.get("name", "")
             raw_args = call.get("args") or {}
             tool_call_id = call.get("id", "")
@@ -161,6 +191,15 @@ def create_tools_node(
 
             tool = tools_by_name.get(tool_name)
             if tool is None:
+                logger.warning(
+                    "Tool call finished",
+                    extra={
+                        "event": "tool_call_finished",
+                        "tool_name": tool_name,
+                        "elapsed_ms": int((time.perf_counter() - call_started) * 1000),
+                        "outcome": "not_found",
+                    },
+                )
                 err_payload = {"error": f"Tool '{tool_name}' not found."}
                 tool_messages.append(
                     ToolMessage(
@@ -190,12 +229,36 @@ def create_tools_node(
                         name=tool_name,
                     )
                 )
+                logger.info(
+                    "Tool call finished",
+                    extra={
+                        "event": "tool_call_finished",
+                        "tool_name": tool_name,
+                        "elapsed_ms": int((time.perf_counter() - call_started) * 1000),
+                        "outcome": "ok",
+                        "result_chars": len(content),
+                    },
+                )
             except Exception as exc:
                 logger.error(
                     "Tool execution error for tool '%s': %s",
                     tool_name,
                     str(exc),
                     exc_info=True,
+                    extra={
+                        "event": "tool_call_failed",
+                        "tool_name": tool_name,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                logger.warning(
+                    "Tool call finished",
+                    extra={
+                        "event": "tool_call_finished",
+                        "tool_name": tool_name,
+                        "elapsed_ms": int((time.perf_counter() - call_started) * 1000),
+                        "outcome": "error",
+                    },
                 )
                 err_payload = {
                     "error": f"Execution of tool '{tool_name}' encountered an error.",
@@ -209,6 +272,13 @@ def create_tools_node(
                     )
                 )
 
+        logger.info(
+            "Tools node finished",
+            extra={
+                "event": "tools_node_finished",
+                "elapsed_ms": int((time.perf_counter() - node_started) * 1000),
+            },
+        )
         return {"messages": tool_messages}
 
     return tools_node_fn

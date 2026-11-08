@@ -7,6 +7,7 @@ import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.exception.runtime.DataIntegrityViolationRuntimeException;
 import org.lite.project.cashiersaas.exception.runtime.EmailAlreadyRegisteredException;
 import org.lite.project.cashiersaas.repository.StaffUserRepository;
+import org.lite.project.cashiersaas.shared.PhoneNumberNormalizer;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class RegisterService {
     @Transactional
     public RegisterUserResponse register(RegisterUserRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase(Locale.ROOT);
+        String normalizedPhoneNumber = PhoneNumberNormalizer.normalize(request.getPhoneNumber());
         if (staffUserRepository.findByNormalizedEmail(normalizedEmail).isPresent()) {
             throw new EmailAlreadyRegisteredException();
         }
@@ -32,7 +34,8 @@ public class RegisterService {
         StaffUserEntity staffUser = StaffUserEntity.registerWithPassword(
                 normalizedEmail,
                 passwordEncoder.encode(request.getPassword()),
-                request.getFullName().trim());
+                request.getFullName().trim(),
+                normalizedPhoneNumber);
         persistStaffUserOrTranslateIntegrityViolation(staffUser);
 
         AuthSessionService.IssuedTokens tokens = authSessionService.start(staffUser);

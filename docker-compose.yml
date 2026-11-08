@@ -1,6 +1,6 @@
 # One-command demo:  docker compose up -d --build        (postgres + backend, demo seed)
 # With AI service:   docker compose --profile ai up -d --build
-# Copy .env.example to .env first; CASHIER_JWT_SECRET_B64 and CASHIER_GRPC_SERVICE_KEY are mandatory.
+# Copy .env.example to .env first; CASHIER_JWT_SECRET_B64, CASHIER_GRPC_SERVICE_KEY and AI_INTERNAL_API_KEY are mandatory.
 # gRPC (9090) is reachable only on the internal compose network (not published to the host).
 name: cashier-saas
 
@@ -41,7 +41,9 @@ services:
       CASHIER_REFRESH_COOKIE_SECURE: "false"
       CASHIER_GRPC_PORT: "9090"
       CASHIER_GRPC_SERVICE_KEY: ${CASHIER_GRPC_SERVICE_KEY:?set CASHIER_GRPC_SERVICE_KEY in .env (see .env.example)}
-      CASHIER_GRPC_ALLOWED_TENANT_IDS: ${AI_TENANT_ID:-00000000-0000-4000-8000-0000000000b1}
+      # Staff sync (in progress): blank AI_SERVICE_BASE_URL in .env falls back to the compose service below.
+      AI_SERVICE_BASE_URL: ${AI_SERVICE_BASE_URL:-http://ai-services:8001}
+      AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY:?set AI_INTERNAL_API_KEY in .env (see .env.example)}
     ports:
       - "${BACKEND_HTTP_PORT:-8081}:8080"
     expose:
@@ -66,7 +68,16 @@ services:
       CASHIER_GRPC_PORT: "9090"
       CASHIER_GRPC_USE_TLS: "false"
       CASHIER_GRPC_SERVICE_KEY: ${CASHIER_GRPC_SERVICE_KEY:?set CASHIER_GRPC_SERVICE_KEY in .env (see .env.example)}
+      AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY:?set AI_INTERNAL_API_KEY in .env (see .env.example)}
+      # Development fallback only (in progress); never overrides a verified staff tenant.
       AI_TENANT_ID: ${AI_TENANT_ID:-00000000-0000-4000-8000-0000000000b1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_FILE_ENABLED: ${LOG_FILE_ENABLED:-false}
+    # Uncomment together with LOG_FILE_ENABLED=true to keep rotating log files on the host
+    # (the container user is `app`; the host directory must be writable by it).
+    # volumes:
+    #   - ./Ai-services/logs:/app/logs
     ports:
       - "${AI_HTTP_PORT:-8001}:8001"
     restart: unless-stopped

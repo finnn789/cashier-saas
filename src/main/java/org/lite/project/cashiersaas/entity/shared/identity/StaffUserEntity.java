@@ -22,23 +22,30 @@ public class StaffUserEntity extends MutableBaseEntity {
     private String passwordHash;
     @Column(name = "full_name", nullable = false, length = 160)
     private String fullName;
+    @Column(name = "phone_number", length = 20)
+    private String phoneNumber;
     @Column(nullable = false, length = 16)
     private String status;
     @Enumerated(EnumType.STRING)
     @Column(name = "onboarding_intent", length = 20)
     private OnboardingIntent onboardingIntent;
 
-    public static StaffUserEntity registerWithPassword(String normalizedEmail, String passwordHash, String fullName) {
+    /** {@code normalizedPhoneNumber} must already be normalized with {@code PhoneNumberNormalizer}. */
+    public static StaffUserEntity registerWithPassword(String normalizedEmail, String passwordHash, String fullName,
+                                                       String normalizedPhoneNumber) {
         StaffUserEntity staffUser = new StaffUserEntity();
         staffUser.email = normalizedEmail;
         staffUser.passwordHash = passwordHash;
         staffUser.fullName = fullName;
+        staffUser.phoneNumber = normalizedPhoneNumber;
         staffUser.status = StatusConstants.PENDING_PROFILE;
         return staffUser;
     }
 
-    public static StaffUserEntity createCashier(String normalizedEmail, String passwordHash, String fullName) {
-        StaffUserEntity staffUser = registerWithPassword(normalizedEmail, passwordHash, fullName);
+    public static StaffUserEntity createCashier(String normalizedEmail, String passwordHash, String fullName,
+                                                String normalizedPhoneNumber) {
+        StaffUserEntity staffUser = registerWithPassword(normalizedEmail, passwordHash, fullName,
+                normalizedPhoneNumber);
         staffUser.status = StatusConstants.ACTIVE;
         return staffUser;
     }

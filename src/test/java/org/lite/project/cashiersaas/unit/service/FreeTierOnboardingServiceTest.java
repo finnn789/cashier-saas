@@ -59,7 +59,8 @@ class FreeTierOnboardingServiceTest {
 
     @Test
     void startCreatesFnbTenantOwnerMembershipAndActiveFreeSubscription() {
-        StaffUserEntity owner = StaffUserEntity.registerWithPassword("owner@example.com", "hash", "Owner");
+        StaffUserEntity owner = StaffUserEntity.registerWithPassword("owner@example.com", "hash", "Owner",
+                "6281234567890");
         owner.chooseOnboardingIntent(OnboardingIntent.OWNER);
         when(staffUserRepository.findById(userId)).thenReturn(Optional.of(owner));
         BusinessTypeEntity fnb = new BusinessTypeEntity();
@@ -89,7 +90,8 @@ class FreeTierOnboardingServiceTest {
 
     @Test
     void retryReturnsExistingOnboardingWithoutCreatingMoreRecords() {
-        StaffUserEntity owner = StaffUserEntity.registerWithPassword("owner@example.com", "hash", "Owner");
+        StaffUserEntity owner = StaffUserEntity.registerWithPassword("owner@example.com", "hash", "Owner",
+                "6281234567890");
         owner.chooseOnboardingIntent(OnboardingIntent.OWNER);
         when(staffUserRepository.findById(userId)).thenReturn(Optional.of(owner));
         BusinessTypeEntity fnb = new BusinessTypeEntity();

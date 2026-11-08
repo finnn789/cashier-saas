@@ -3,6 +3,7 @@
 import asyncio
 import concurrent.futures
 import logging
+import time
 from contextvars import ContextVar
 from typing import Any
 
@@ -93,7 +94,35 @@ def adapt_tool(
             )
         # Never pass tenant_id from kwargs, only from trusted context
         safe_kwargs = {k: v for k, v in kwargs.items() if k != "tenant_id"}
-        return await tool.execute(tenant_id=effective_tenant_id, **safe_kwargs)
+        started = time.perf_counter()
+        logger.info(
+            "Adapted tool execution started",
+            extra={"event": "adapted_tool_started", "tool_name": tool.name},
+        )
+        try:
+            result = await tool.execute(tenant_id=effective_tenant_id, **safe_kwargs)
+        except Exception as exc:
+            logger.warning(
+                "Adapted tool execution failed",
+                extra={
+                    "event": "adapted_tool_finished",
+                    "tool_name": tool.name,
+                    "outcome": "error",
+                    "error_type": type(exc).__name__,
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+            raise
+        logger.info(
+            "Adapted tool execution finished",
+            extra={
+                "event": "adapted_tool_finished",
+                "tool_name": tool.name,
+                "outcome": "ok",
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            },
+        )
+        return result
 
     def _sync_exec(**kwargs: Any) -> Any:
         try:
@@ -134,6 +163,14 @@ def adapt_tool_registry(
         if isinstance(tool, BaseTool):
             tools.append(adapt_tool(tool, tenant_id=tenant_id))
 
+    logger.info(
+        "Tools adapted",
+        extra={
+            "event": "tools_adapted",
+            "tools_count": len(tools),
+            "tool_names": [t.name for t in tools],
+        },
+    )
     return tools
 
 

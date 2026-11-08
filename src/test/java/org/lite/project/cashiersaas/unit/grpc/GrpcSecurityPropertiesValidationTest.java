@@ -56,7 +56,6 @@ class GrpcSecurityPropertiesValidationTest {
         assertEquals(50, properties.getMaxCatalogLimit());
         assertEquals(10, properties.getDefaultCatalogLimit());
         assertEquals(50, properties.getRequestsPerSecond());
-        assertTrue(properties.getAllowedTenantIds().isEmpty());
     }
 
     @Test

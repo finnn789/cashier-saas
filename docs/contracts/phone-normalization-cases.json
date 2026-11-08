@@ -1,0 +1,18 @@
+[
+  {"input": "081234567890", "expected": "6281234567890"},
+  {"input": "+62 812-3456-7890", "expected": "6281234567890"},
+  {"input": "6281234567890", "expected": "6281234567890"},
+  {"input": "(0812) 3456 7890", "expected": "6281234567890"},
+  {"input": "8123456789", "expected": "628123456789"},
+  {"input": "  0812.3456.7890  ", "expected": "6281234567890"},
+  {"input": "+1 415 555 2671", "expected": "14155552671"},
+  {"input": "14155552671", "expected": "14155552671"},
+  {"input": "0812", "expected": null},
+  {"input": "abc", "expected": null},
+  {"input": "", "expected": null},
+  {"input": "   ", "expected": null},
+  {"input": "0812-345-678a", "expected": null},
+  {"input": "62+81234567890", "expected": null},
+  {"input": "+62 812 3456 7890 1234 5678", "expected": null},
+  {"input": "++6281234567890", "expected": null}
+]

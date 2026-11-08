@@ -48,6 +48,7 @@ public class CashierInvitationService {
     private final MembershipOutletAccessRepository outletAccessRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final MerchantAccessGuard merchantAccessGuard;
+    private final MemberSyncPublisher memberSyncPublisher;
 
     @Transactional
     public CashierInvitationResponse issue(TenantPrincipal principal, UUID outletId, String email) {
@@ -80,6 +81,8 @@ public class CashierInvitationService {
             throw new ResourceNotFoundException("Undangan tidak ditemukan atau tidak dapat digunakan.");
         }
         if (invitation.isClaimedBy(user)) {
+            // Idempotent re-claim: re-publish so an earlier failed Ai-services sync is healed.
+            memberSyncPublisher.memberChanged(invitation.getTenant(), user, Role.CASHIER);
             return OnboardingMapper.toClaim(invitation);
         }
         if (invitation.getClaimedAt() != null || !invitation.getExpiresAt().isAfter(Instant.now())
@@ -107,6 +110,7 @@ public class CashierInvitationService {
         if (user.isPendingProfile()) {
             user.activateInvitedCashier();
         }
+        memberSyncPublisher.memberChanged(invitation.getTenant(), user, Role.CASHIER);
         return OnboardingMapper.toClaim(invitation);
     }
 

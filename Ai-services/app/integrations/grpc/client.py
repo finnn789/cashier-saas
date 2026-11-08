@@ -2,6 +2,9 @@
 
 import asyncio
 import logging
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import grpc
@@ -16,6 +19,16 @@ logger = logging.getLogger(__name__)
 SERVICE_KEY_HEADER = "x-internal-service-key"
 DEFAULT_CATALOG_LIMIT = 10
 MAX_CATALOG_LIMIT = 50
+
+
+class _RpcSpan:
+    """Mutable holder for the outcome fields of one RPC log span."""
+
+    __slots__ = ("status", "items_count")
+
+    def __init__(self) -> None:
+        self.status = "ERROR"
+        self.items_count: int | None = None
 
 
 def _clamp_catalog_limit(limit: int) -> int:
@@ -50,6 +63,14 @@ class CashierGrpcClient:
                     else:
                         self._channel = grpc.aio.insecure_channel(target)
                     self._stub = CashierServiceStub(self._channel)
+                    logger.info(
+                        "gRPC channel opened",
+                        extra={
+                            "event": "grpc_channel_opened",
+                            "target": target,
+                            "secure": bool(self._settings.use_tls),
+                        },
+                    )
         return self._channel
 
     async def close(self) -> None:
@@ -60,6 +81,7 @@ class CashierGrpcClient:
                     await self._channel.close()
                     self._channel = None
                     self._stub = None
+                    logger.info("gRPC channel closed", extra={"event": "grpc_channel_closed"})
 
     def _call_metadata(self) -> tuple[tuple[str, str], ...]:
         """Per-call metadata carrying the internal service key."""
@@ -72,15 +94,57 @@ class CashierGrpcClient:
         logger.warning(
             "gRPC %s skipped: CASHIER_GRPC_SERVICE_KEY is not configured",
             rpc_name,
+            extra={"event": "grpc_service_key_missing", "rpc": rpc_name},
         )
         return False
+
+    @contextmanager
+    def _rpc_span(self, rpc_name: str) -> Iterator[_RpcSpan]:
+        """Log start/finish of one RPC; exceptions propagate unchanged."""
+        span = _RpcSpan()
+        started = time.perf_counter()
+        logger.info(
+            "gRPC call started",
+            extra={
+                "event": "grpc_call_started",
+                "rpc": rpc_name,
+                "timeout_seconds": self._settings.timeout_seconds,
+            },
+        )
+        try:
+            yield span
+            span.status = "OK"
+        except grpc.aio.AioRpcError as err:
+            code = err.code()
+            span.status = getattr(code, "name", str(code))
+            raise
+        finally:
+            fields: dict[str, Any] = {
+                "event": "grpc_call_finished",
+                "rpc": rpc_name,
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                "status": span.status,
+            }
+            if span.items_count is not None:
+                fields["items_count"] = span.items_count
+            logger.info("gRPC call finished", extra=fields)
 
     @staticmethod
     def _log_rpc_error(rpc_name: str, err: grpc.aio.AioRpcError) -> None:
         """Log only the status code; never details, metadata or the key."""
         code = err.code()
         code_name = getattr(code, "name", str(code))
-        logger.warning("gRPC %s failed for tenant: code=%s", rpc_name, code_name)
+        logger.warning(
+            "gRPC %s failed for tenant: code=%s",
+            rpc_name,
+            code_name,
+            extra={
+                "event": "grpc_call_failed",
+                "rpc": rpc_name,
+                "error_type": type(err).__name__,
+                "code": code_name,
+            },
+        )
 
     async def get_catalog_items(
         self,
@@ -101,11 +165,13 @@ class CashierGrpcClient:
                 query=query,
                 limit=_clamp_catalog_limit(limit),
             )
-            response = await self._stub.GetCatalogItem(
-                request,
-                timeout=self._settings.timeout_seconds,
-                metadata=self._call_metadata(),
-            )
+            with self._rpc_span("GetCatalogItem") as span:
+                response = await self._stub.GetCatalogItem(
+                    request,
+                    timeout=self._settings.timeout_seconds,
+                    metadata=self._call_metadata(),
+                )
+                span.items_count = len(response.items)
             return [
                 {
                     "id": item.id,
@@ -123,6 +189,11 @@ class CashierGrpcClient:
             logger.warning(
                 "Unexpected error during gRPC GetCatalogItem: %s",
                 type(err).__name__,
+                extra={
+                    "event": "grpc_call_unexpected_error",
+                    "rpc": "GetCatalogItem",
+                    "error_type": type(err).__name__,
+                },
             )
             return []
 
@@ -143,11 +214,12 @@ class CashierGrpcClient:
                 tenant_id=tenant_id,
                 order_number=order_number,
             )
-            response = await self._stub.GetOrderStatus(
-                request,
-                timeout=self._settings.timeout_seconds,
-                metadata=self._call_metadata(),
-            )
+            with self._rpc_span("GetOrderStatus") as span:
+                response = await self._stub.GetOrderStatus(
+                    request,
+                    timeout=self._settings.timeout_seconds,
+                    metadata=self._call_metadata(),
+                )
             if not response.order_number:
                 return None
             return {
@@ -167,6 +239,11 @@ class CashierGrpcClient:
             logger.warning(
                 "Unexpected error during gRPC GetOrderStatus: %s",
                 type(err).__name__,
+                extra={
+                    "event": "grpc_call_unexpected_error",
+                    "rpc": "GetOrderStatus",
+                    "error_type": type(err).__name__,
+                },
             )
             return None
 

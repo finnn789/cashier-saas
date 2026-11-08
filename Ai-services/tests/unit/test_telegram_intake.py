@@ -14,7 +14,7 @@ import app.channels.telegram.handlers as handlers
 from app.channels.telegram.config import TelegramSettings
 from app.channels.telegram.handlers import Intake
 from app.channels.telegram.sender import Sender, split_chunks
-from app.chat.service import ChatService
+from app.chat.service import VERIFIED, ChatService, Identity, TenantOption
 
 
 def message_fixture(
@@ -50,15 +50,22 @@ def delivery(status: str, retry_after: int = 0) -> SimpleNamespace:
     return SimpleNamespace(status=status, retry_after=retry_after)
 
 
+TENANT_ID = uuid4()
+
+
 class IntakeTests(unittest.IsolatedAsyncioTestCase):
     def make_intake(
         self, allowed: frozenset[int] = frozenset({7})
     ) -> tuple[Intake, Mock, Mock]:
         chat = Mock(spec=ChatService)
+        # A verified user: the tenant is resolved server-side before chat.handle.
+        chat.identify = AsyncMock(return_value=Identity(
+            VERIFIED, TENANT_ID, 'CASHIER', (TenantOption(TENANT_ID, 'Kopi Senja'),)
+        ))
         chat.handle = AsyncMock(return_value='ok')
         sender = Mock(spec=Sender)
         sender.send = AsyncMock(return_value=delivery('SENT'))
-        settings = TelegramSettings('dummy-token', allowed, uuid4())
+        settings = TelegramSettings('dummy-token', allowed)
         return Intake(settings, chat, sender), chat, sender
 
     async def test_access_checks_precede_chat_and_sender_for_all_kinds(self) -> None:
@@ -72,6 +79,7 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(text=text, fields=fields):
                     intake, chat, sender = self.make_intake()
                     await intake.handle(message_fixture(text, **fields), Update(update_id=301))
+                    chat.identify.assert_not_awaited()
                     chat.handle.assert_not_awaited()
                     sender.send.assert_not_awaited()
                     self.assertTrue(intake.healthy)
@@ -81,6 +89,7 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         intake, chat, sender = self.make_intake(frozenset())
         await intake.handle(message_fixture(user_id=88), Update(update_id=301))
         chat.handle.assert_awaited_once_with(
+            tenant_id=TENANT_ID,
             external_user_id='88',
             external_chat_id='71',
             external_message_id='21',

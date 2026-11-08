@@ -9,12 +9,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Security settings for the internal gRPC server. The service key is supplied only through the
- * environment (CASHIER_GRPC_SERVICE_KEY); an empty tenant allowlist denies every tenant.
+ * environment (CASHIER_GRPC_SERVICE_KEY). Tenant authorization is not configured here: it is a database
+ * check (tenant exists, active, F&B enabled).
  */
 @Getter
 @Setter
@@ -26,8 +24,6 @@ public class GrpcSecurityProperties {
     @NotBlank
     @Size(min = 16)
     private String serviceKey;
-
-    private List<String> allowedTenantIds = new ArrayList<>();
 
     @Min(1)
     private int maxCatalogLimit = 50;

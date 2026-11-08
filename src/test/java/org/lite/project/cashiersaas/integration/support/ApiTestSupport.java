@@ -51,7 +51,7 @@ public final class ApiTestSupport {
         String accountToken = read(send(post("/api/v1/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"fullName\":\"Owner " + label + "\",\"email\":\"" + email
-                        + "\",\"password\":\"Passw0rd!23\"}"), 201), "$.data.accessToken");
+                        + "\",\"phoneNumber\":\"081234567890\",\"password\":\"Passw0rd!23\"}"), 201), "$.data.accessToken");
         String bearer = "Bearer " + accountToken;
         send(put("/api/v1/onboarding/intent").header(HttpHeaders.AUTHORIZATION, bearer)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"intent\":\"OWNER\"}"), 200);

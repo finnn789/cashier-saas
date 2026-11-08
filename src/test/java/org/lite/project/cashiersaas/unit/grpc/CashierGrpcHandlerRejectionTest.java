@@ -20,9 +20,10 @@ import org.lite.project.cashiersaas.grpc.mapper.GrpcOrderMapper;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
 import org.lite.project.cashiersaas.grpc.service.CashierCatalogGrpcHandler;
 import org.lite.project.cashiersaas.grpc.service.CashierOrderGrpcHandler;
+import org.lite.project.cashiersaas.repository.TenantRepository;
 import org.mockito.ArgumentCaptor;
 
-import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,6 +33,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @Tag("unit")
 class CashierGrpcHandlerRejectionTest {
@@ -39,6 +41,7 @@ class CashierGrpcHandlerRejectionTest {
     private static final String ALLOWED = "11111111-1111-1111-1111-111111111111";
     private static final String OTHER = "22222222-2222-2222-2222-222222222222";
 
+    private TenantRepository tenantRepository;
     private EntityManager entityManager;
     private CriteriaBuilderFactory criteriaBuilderFactory;
     private GrpcCatalogMapper catalogMapper;
@@ -60,8 +63,10 @@ class CashierGrpcHandlerRejectionTest {
 
         GrpcSecurityProperties properties = new GrpcSecurityProperties();
         properties.setServiceKey("unit-test-internal-service-key-0001");
-        properties.setAllowedTenantIds(List.of(ALLOWED));
-        GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(properties);
+        tenantRepository = mock(TenantRepository.class);
+        when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ALLOWED))).thenReturn(true);
+        when(tenantRepository.existsActiveFnbTenant(UUID.fromString(OTHER))).thenReturn(false);
+        GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(tenantRepository, properties);
 
         catalogHandler = new CashierCatalogGrpcHandler(entityManager, criteriaBuilderFactory, catalogMapper, policy);
         orderHandler = new CashierOrderGrpcHandler(entityManager, criteriaBuilderFactory, orderMapper, policy);
@@ -115,7 +120,7 @@ class CashierGrpcHandlerRejectionTest {
     }
 
     @Test
-    void catalogRejectsNonAllowlistedTenantWithoutLeakingIds() {
+    void catalogRejectsTenantNotActiveInTheDatabaseWithoutLeakingIds() {
         catalogHandler.getCatalogItem(
                 GetCatalogItemRequest.newBuilder().setTenantId(OTHER).setLimit(1000).build(), catalogObserver);
 
@@ -152,7 +157,7 @@ class CashierGrpcHandlerRejectionTest {
     }
 
     @Test
-    void orderRejectsNonAllowlistedTenantBeforeLookingUpTheOrder() {
+    void orderRejectsTenantNotActiveInTheDatabaseBeforeLookingUpTheOrder() {
         orderHandler.getOrderStatus(
                 GetOrderStatusRequest.newBuilder().setTenantId(OTHER).setOrderNumber("ORD-1").build(),
                 orderObserver);

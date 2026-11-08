@@ -12,7 +12,7 @@ A multi-tenant POS backend for small food-and-beverage businesses. Customers ord
 
 Everything below exists in source (`src/main/java/org/lite/project/cashiersaas`).
 
-- **Onboarding and free tier** - account registration, business intent, free-tier tenant/outlet creation (`OnboardingController`, `FreeTierOnboardingService`), public plan catalog.
+- **Onboarding and free tier** - account registration (a phone number is required and stored normalized, e.g. `6281234567890`), business intent, free-tier tenant/outlet creation (`OnboardingController`, `RegisterService`, `FreeTierOnboardingService`), public plan catalog.
 - **Staff invitations** - owners invite cashiers per outlet; invitation claim (`CashierInvitationController`, token stored as a SHA-256 digest).
 - **Catalog and options** - categories, products, option groups and options, with availability (`FnbCatalogController`).
 - **Tables and QR** - dining tables, per-table and per-outlet QR tokens with rotation (`FnbTableController`, `FnbOrderQrController`).
@@ -43,6 +43,7 @@ flowchart LR
     WS -->|"invalidate, then REST resync"| Staff
     AI["Ai-services<br/>FastAPI + LangGraph"] -->|"gRPC :9090"| GRPC["gRPC handlers"]
     GRPC --> Repo
+    Svc -. "staff sync after commit, HTTP PUT (in progress)" .-> AI
     Tg[Telegram] <--> AI
     AI <--> OR["OpenRouter LLM"]
     AI --> AIDB[("cashier_ai DB")]
@@ -97,7 +98,8 @@ Prerequisite: Docker with Compose. The first build downloads Maven dependencies 
 
 ```bash
 cp .env.example .env                 # PowerShell: Copy-Item .env.example .env
-# set CASHIER_JWT_SECRET_B64 and CASHIER_GRPC_SERVICE_KEY in .env (compose refuses to start without them):
+# set CASHIER_JWT_SECRET_B64, CASHIER_GRPC_SERVICE_KEY and AI_INTERNAL_API_KEY in .env (compose refuses to start without them).
+# The two service keys must be different values:
 openssl rand -base64 32              # PowerShell: [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 
 docker compose up -d --build                 # postgres + backend (demo profile, seeded)
@@ -116,7 +118,16 @@ docker compose down -v                       # stop and delete data
 
 Demo data: tenant **Kopi Demo**, outlet **Kopi Demo - Pusat**. Accounts (password `Demo123!`): `owner@demo.local` (OWNERMERCHANT) and `cashier@demo.local` (CASHIER). Login with `POST /api/v1/auth/login`, then `POST /api/v1/auth/select-merchant` with `{tenantId, outletId}` to get an operational token. Full walkthrough with ids, QR tokens and a curl flow: [docs/demo.md](docs/demo.md).
 
-The Telegram assistant needs `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY` and `AI_MODEL` in `.env`; see `Ai-services/README.md` (Indonesian).
+The Telegram assistant needs `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`, `AI_MODEL` and the shared `AI_INTERNAL_API_KEY` in `.env`; see `Ai-services/README.md` (Indonesian).
+
+### Staff identity for the Telegram assistant (in progress)
+
+This flow is under active development and is not yet verified end to end. The contract is in [docs/contracts/member-sync.md](docs/contracts/member-sync.md).
+
+- **Registration** requires a phone number. The number is normalized to digits with a country code (Indonesian local numbers such as `0812-3456-7890` become `6281234567890`).
+- **Staff sync**: when an owner completes the business profile, and when a cashier invitation is claimed, the backend pushes the staff member's tenant, full name, normalized phone, role and status to Ai-services (`PUT` on the internal member API, authenticated by `AI_INTERNAL_API_KEY`). Sync is best-effort and runs after the business transaction commits; a failed sync does not fail registration or invitation claim. Sync is disabled when `AI_SERVICE_BASE_URL` is blank.
+- **Telegram identification**: a Telegram user proves who they are by sharing their own Telegram contact (the contact must belong to the sender). The phone number is then matched against the synced staff list. Typed phone numbers are ignored, and forwarded or foreign contacts are rejected. A user who matches several tenants chooses one, and `/tenant` switches between verified tenants.
+- **Tenant resolution**: for verified users the tenant and role come from the verified membership on every message. `AI_TENANT_ID` is only a **development fallback** for unverified or local use; it never overrides a verified tenant.
 
 ## Running tests
 
@@ -148,7 +159,8 @@ Requires JDK 17 and a local **PostgreSQL 17 or newer** (the V1 migration uses `S
 | `CASHIER_REFRESH_COOKIE_SECURE` | set `false` for plain-HTTP local use | `true` |
 | `CASHIER_GRPC_PORT` | gRPC port | `9090` |
 | `CASHIER_GRPC_SERVICE_KEY` | **required**, shared secret for gRPC callers (`x-internal-service-key` metadata), at least 16 characters | none |
-| `CASHIER_GRPC_ALLOWED_TENANT_IDS` | comma-separated tenant UUIDs that gRPC may serve; empty denies all | empty |
+| `AI_SERVICE_BASE_URL` | base URL of Ai-services for staff sync (in progress); blank disables sync | blank |
+| `AI_INTERNAL_API_KEY` | shared secret for the Ai-services internal member API (`X-Internal-Service-Key`), at least 16 characters, different from `CASHIER_GRPC_SERVICE_KEY` (in progress) | none |
 | `CASHIER_DB_POOL_MAX_SIZE` | Hikari pool size | `10` |
 
 A `.env` file in the working directory is also imported (`spring.config.import`). Then:
@@ -186,7 +198,8 @@ cashier-saas/
 - **Payments use a mock gateway.** No real payment provider is integrated.
 - **Realtime is single-JVM.** No message broker, replay or cross-node fan-out; clients must resync via REST.
 - **Tenant lock is a bottleneck** for a very busy single tenant (see trade-offs).
-- **gRPC is protected by a shared service key and a tenant allowlist** (`CASHIER_GRPC_SERVICE_KEY`, `CASHIER_GRPC_ALLOWED_TENANT_IDS`), but `tenant_id` is still a request field. The demo compose file does not publish 9090 to the host; it is reachable only on the internal compose network. Token-bound tenant identity is a follow-up item.
+- **gRPC is protected by a shared service key and a database tenant check.** Callers must send `CASHIER_GRPC_SERVICE_KEY`; a request tenant is served only when the tenant exists and is active (a missing and an inactive tenant get the same response). The env tenant allowlist was removed. `tenant_id` is still a request field. The demo compose file does not publish 9090 to the host; it is reachable only on the internal compose network. Token-bound tenant identity is a follow-up item.
+- **Staff sync to the AI service and Telegram identity verification are in progress** (see the section above). Until they are verified, do not rely on `AI_TENANT_ID` for tenant resolution.
 - **AI service container is built but not runtime-verified** (needs real Telegram/OpenRouter credentials).
 - **Test gaps:** CASHIER-role paths and MOCK_GATEWAY payments have no integration tests yet.
 - **Frontend lives in a separate repository** (`cashier-saas-ui`); this repo is backend only.

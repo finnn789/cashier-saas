@@ -19,6 +19,9 @@ from sqlalchemy.pool import NullPool
 
 CONNECT_TIMEOUT_SECONDS = 10
 COMMAND_TIMEOUT_SECONDS = 15
+# Single source of truth for the Alembic head the service requires at startup.
+# Bump this constant (and only this) whenever a new migration revision is added.
+EXPECTED_ALEMBIC_REVISION = "0003_shared_bot_tenants"
 
 
 @dataclass(frozen=True)
@@ -80,7 +83,7 @@ class Database:
             version = await transaction.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-            if version != "0001_channels":
+            if version != EXPECTED_ALEMBIC_REVISION:
                 raise RuntimeError("Migrasi AI belum sesuai. Operator harus menjalankan Alembic.")
 
     @asynccontextmanager

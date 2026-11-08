@@ -1,20 +1,24 @@
--- Demo seed (profile "demo" only). Idempotent: safe to re-run; every insert is ON CONFLICT DO NOTHING.
+-- Demo seed (profile "demo" only). Idempotent: safe to re-run; every insert is ON CONFLICT DO NOTHING; the phone UPDATEs only fill NULLs.
 -- Accounts (password for both: Demo123!):
---   owner@demo.local   -> OWNERMERCHANT of "Kopi Demo"
---   cashier@demo.local -> CASHIER of "Kopi Demo"
+--   owner@demo.local   -> OWNERMERCHANT of "Kopi Demo" (phone 6281200000001)
+--   cashier@demo.local -> CASHIER of "Kopi Demo" (phone 6281200000002)
 -- Public QR tokens are stored in plain text (table_qr_tokens.token, 43 chars [A-Za-z0-9_-]).
 
 INSERT INTO business_types (id, code, name, is_active, created_at)
 VALUES ('00000000-0000-4000-8000-000000000001', 'FNB', 'Food & Beverage', true, now())
 ON CONFLICT DO NOTHING;
 
-INSERT INTO staff_users (id, email, password_hash, full_name, status, onboarding_intent, created_at, updated_at, version)
+INSERT INTO staff_users (id, email, password_hash, full_name, phone_number, status, onboarding_intent, created_at, updated_at, version)
 VALUES
  ('00000000-0000-4000-8000-0000000000a1', 'owner@demo.local',
-  '$2a$10$7aYv8fyMt6blrrbDYedSBe89hQ/WuJDvntvdSgmt87GiNGqEcOQ3u', 'Demo Owner', 'ACTIVE', 'OWNER', now(), now(), 0),
+  '$2a$10$7aYv8fyMt6blrrbDYedSBe89hQ/WuJDvntvdSgmt87GiNGqEcOQ3u', 'Demo Owner', '6281200000001', 'ACTIVE', 'OWNER', now(), now(), 0),
  ('00000000-0000-4000-8000-0000000000a2', 'cashier@demo.local',
-  '$2a$10$7aYv8fyMt6blrrbDYedSBe89hQ/WuJDvntvdSgmt87GiNGqEcOQ3u', 'Demo Cashier', 'ACTIVE', 'CASHIER_ONLY', now(), now(), 0)
+  '$2a$10$7aYv8fyMt6blrrbDYedSBe89hQ/WuJDvntvdSgmt87GiNGqEcOQ3u', 'Demo Cashier', '6281200000002', 'ACTIVE', 'CASHIER_ONLY', now(), now(), 0)
 ON CONFLICT DO NOTHING;
+
+-- Heal demo databases seeded before staff phone numbers existed (only fills missing values).
+UPDATE staff_users SET phone_number = '6281200000001' WHERE id = '00000000-0000-4000-8000-0000000000a1' AND phone_number IS NULL;
+UPDATE staff_users SET phone_number = '6281200000002' WHERE id = '00000000-0000-4000-8000-0000000000a2' AND phone_number IS NULL;
 
 INSERT INTO tenants (id, name, currency, time_zone, tax_rate, service_charge_rate, address, phone_number, status,
                      business_type_id, created_by_user_id, profile_completed_at, created_at, updated_at, version)

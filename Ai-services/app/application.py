@@ -6,12 +6,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from app.api.internal_members import router as internal_members_router
 from app.channels.telegram.bot import TelegramChannel, start_telegram_channel
 from app.config import load_settings
+from app.observability import setup_logging
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    # Idempotent: a no-op when main.py already configured logging with the same settings.
+    setup_logging()
     settings = load_settings()
     channel: TelegramChannel = await start_telegram_channel(settings)
     application.state.telegram_channel = channel
@@ -22,6 +26,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="AI Service", lifespan=lifespan)
+app.include_router(internal_members_router)
 
 
 @app.get("/")

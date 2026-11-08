@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 import app.core.database as database_module
-from app.core.database import Database, DatabaseSettings, OwnershipLost
+from app.core.database import (
+    EXPECTED_ALEMBIC_REVISION,
+    Database,
+    DatabaseSettings,
+    OwnershipLost,
+)
 
 
 class BeginBoundary:
@@ -26,7 +31,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.connection = Mock(spec=AsyncConnection)
         self.connection.closed = False
         self.connection.invalidated = False
-        self.connection.scalar = AsyncMock(side_effect=[True, "0001_channels"])
+        self.connection.scalar = AsyncMock(side_effect=[True, EXPECTED_ALEMBIC_REVISION])
         self.connection.commit = AsyncMock()
         self.connection.execute = AsyncMock()
         self.connection.close = AsyncMock()
@@ -68,8 +73,27 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
             await self.database.acquire(71)
         self.assertEqual(self.begin.events, ["begin", "rollback"])
-        self.assertFalse(self.database.owned)
         await self.database.close()
+        self.assertFalse(self.database.owned)
+
+    async def test_database_still_at_revision_0001_is_rejected(self) -> None:
+        self.assertNotEqual(EXPECTED_ALEMBIC_REVISION, "0001_channels")
+        self.connection.scalar.side_effect = [True, "0001_channels"]
+        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
+            await self.database.acquire(71)
+        self.assertEqual(self.begin.events, ["begin", "rollback"])
+        await self.database.close()
+        self.assertFalse(self.database.owned)
+
+    async def test_database_still_at_revision_0002_is_rejected(self) -> None:
+        # TASK-059-F: the shared-bot code needs the 0003 schema (tenant-scoped conversations).
+        self.assertEqual(EXPECTED_ALEMBIC_REVISION, "0003_shared_bot_tenants")
+        self.connection.scalar.side_effect = [True, "0002_tenant_members"]
+        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
+            await self.database.acquire(71)
+        self.assertEqual(self.begin.events, ["begin", "rollback"])
+        await self.database.close()
+        self.assertFalse(self.database.owned)
 
     async def test_transaction_commit_rollback_and_ping(self) -> None:
         await self.database.acquire(71)

@@ -359,7 +359,7 @@ class MerchantBusinessSettingsServiceTest {
                 new BigDecimal("10.00"), new BigDecimal("5.00"), "Asia/Jakarta");
         OutletEntity outlet = OutletEntity.open(tenant, "Outlet Lama", "Asia/Jakarta", "Lantai Satu", "08124");
         ReflectionTestUtils.setField(outlet, "id", outletId);
-        StaffUserEntity actor = StaffUserEntity.createCashier("owner@example.test", "hash", "Owner");
+        StaffUserEntity actor = StaffUserEntity.createCashier("owner@example.test", "hash", "Owner", "6281234567890");
         TenantMembershipEntity membership = TenantMembershipEntity.grantOwner(actor, tenant);
         return new Fixture(tenant, outlet, actor, new MerchantAccessContext(tenant, outlet, membership));
     }

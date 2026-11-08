@@ -12,7 +12,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.ai.openrouter import OpenRouterClient
 from app.channels.telegram.handlers import Intake
 from app.channels.telegram.sender import Sender
-from app.chat.repositories import Repository, register_telegram_channel
+from app.chat.members import upsert_tenant
+from app.chat.repositories import ChannelRepository, register_telegram_channel
 from app.chat.service import ChatService
 from app.config import Settings
 from app.core.database import Database, OwnershipLost
@@ -59,8 +60,13 @@ class TelegramChannel:
     async def observe_startup(self, bot: Bot, **kwargs: Any) -> None:
         # start_polling has initialized its public stop signals before this call.
         self.polling_started.set()
+        logger.info(
+            'Polling started, waiting for Telegram updates',
+            extra={'event': 'bot_polling_started'},
+        )
 
     async def run_poller(self) -> None:
+        logger.info('Polling loop starting', extra={'event': 'bot_polling_loop_starting'})
         try:
             await self.dispatcher.start_polling(
                 self.bot,
@@ -71,6 +77,7 @@ class TelegramChannel:
             )
         finally:
             self.polling_finished.set()
+            logger.info('Polling loop finished', extra={'event': 'bot_polling_loop_finished'})
 
     def start(self) -> None:
         self.polling_task = asyncio.create_task(
@@ -84,9 +91,11 @@ class TelegramChannel:
         failure_waiter = asyncio.create_task(
             self.intake.failed.wait(), name='intake-failure-wait'
         )
+        reason = 'unspecified'
         try:
             if self.polling_task is None:
                 raise RuntimeError('CHANNEL_TASKS_MISSING')
+            logger.info('Supervisor started', extra={'event': 'bot_supervisor_started'})
             while not self.closing:
                 done, _ = await asyncio.wait(
                     [self.polling_task, failure_waiter],
@@ -95,14 +104,30 @@ class TelegramChannel:
                 )
                 if done:
                     self.failed = True
+                    if self.polling_task in done:
+                        error = (
+                            None
+                            if self.polling_task.cancelled()
+                            else self.polling_task.exception()
+                        )
+                        reason = 'polling task ended' + (
+                            f' error_type={type(error).__name__}' if error else ''
+                        )
+                    else:
+                        reason = 'intake reported a fatal handler failure'
                     break
                 try:
                     await self.database.ping()
-                except (SQLAlchemyError, OwnershipLost, asyncio.TimeoutError):
+                except (SQLAlchemyError, OwnershipLost, asyncio.TimeoutError) as error:
                     self.failed = True
+                    reason = f'database check failed error_type={type(error).__name__}'
                     break
             if self.failed:
-                logger.error('Telegram channel stopped after a supervised failure.')
+                # Only types are logged: SDK/database messages can carry secrets.
+                logger.error(
+                    'Telegram channel stopped after a supervised failure',
+                    extra={'event': 'bot_supervised_failure', 'reason': reason},
+                )
                 await self.stop_poller()
         finally:
             failure_waiter.cancel()
@@ -185,6 +210,7 @@ class TelegramChannel:
 
     async def cleanup(self) -> None:
         self.closing = True
+        logger.info('Shutting down Telegram channel', extra={'event': 'bot_shutting_down'})
         try:
             if self.supervisor_task is not None:
                 self.supervisor_task.cancel()
@@ -198,8 +224,10 @@ class TelegramChannel:
 async def start_telegram_channel(
     settings: Settings, ai: Any | None = None
 ) -> TelegramChannel:
-    # SDK exception payloads can contain tokens or connection details.
-    logging.getLogger('aiogram').setLevel(logging.CRITICAL)
+    # SDK exception payloads can contain tokens or connection details. WARNING keeps polling
+    # failures (network loss, 409 conflict, bad token) visible while routine INFO stays quiet;
+    # RedactionFilter (app.observability) masks bot-token patterns that may appear in them.
+    logging.getLogger('aiogram').setLevel(logging.WARNING)
     logging.getLogger('sqlalchemy.engine').disabled = True
     if not settings.telegram.token:
         raise RuntimeError('Isi TELEGRAM_BOT_TOKEN.')
@@ -210,23 +238,61 @@ async def start_telegram_channel(
     database = Database(settings.database)
     channel: TelegramChannel | None = None
     try:
+        logger.info(
+            'Authenticating bot with Telegram', extra={'event': 'startup_authenticating'}
+        )
         profile = await bot.get_me()
+        logger.info(
+            'Bot authenticated',
+            extra={
+                'event': 'startup_bot_authenticated',
+                'bot_id': profile.id,
+                'bot_username': profile.username,
+            },
+        )
         webhook = await bot.get_webhook_info()
         if webhook.url:
             raise RuntimeError('Webhook aktif; operator harus menghapusnya sebelum polling.')
+        logger.info(
+            'No webhook active, polling is allowed', extra={'event': 'startup_no_webhook'}
+        )
         await database.acquire(bot.id)
+        logger.info('Database ownership acquired', extra={'event': 'startup_database_acquired'})
+        fallback_tenant_id = settings.telegram.fallback_tenant_id
         async with database.transaction() as connection:
+            # One shared bot for every tenant: registered without a tenant.
             channel_id = await register_telegram_channel(
-                connection, settings.telegram.tenant_id, profile.id, profile.username
+                connection, profile.id, profile.username
             )
-        repository = Repository(settings.telegram.tenant_id, channel_id, 'TELEGRAM')
+            if fallback_tenant_id is not None:
+                # Conversations reference tenants; make the fallback tenant row exist.
+                await upsert_tenant(connection, fallback_tenant_id, None)
+        logger.info(
+            'Telegram channel registered',
+            extra={'event': 'startup_channel_registered', 'channel_id': channel_id},
+        )
+        if fallback_tenant_id is not None:
+            logger.warning(
+                'AI_TENANT_ID development fallback is active for unverified Telegram users.',
+                extra={'event': 'startup_tenant_fallback_active'},
+            )
+        channel_repository = ChannelRepository(channel_id, 'TELEGRAM')
         tools = get_default_tool_registry()
         chat = ChatService(
             database=database,
-            repository=repository,
+            channel_repository=channel_repository,
             ai=ai,
             tools=tools,
             ai_settings=settings.ai,
+            fallback_tenant_id=fallback_tenant_id,
+        )
+        logger.info(
+            'Chat service ready',
+            extra={
+                'event': 'startup_chat_service_ready',
+                'ai_graph': getattr(chat, 'graph', None) is not None,
+                'allowlist_size': len(getattr(settings.telegram, 'allowed_user_ids', None) or ()),
+            },
         )
         intake = Intake(settings.telegram, chat, Sender(bot))
         dispatcher = Dispatcher(disable_fsm=True)
@@ -234,8 +300,14 @@ async def start_telegram_channel(
         channel = TelegramChannel(bot, dispatcher, database, intake)
         channel.start()
         await asyncio.sleep(0)
+        logger.info('Telegram channel started', extra={'event': 'startup_channel_started'})
         return channel
     except BaseException as error:
+        if not isinstance(error, asyncio.CancelledError):
+            logger.error(
+                'Telegram channel startup failed',
+                extra={'event': 'startup_channel_failed', 'error_type': type(error).__name__},
+            )
         if channel is not None:
             await channel.stop()
         else:

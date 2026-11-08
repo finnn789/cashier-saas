@@ -79,6 +79,13 @@ flowchart TD
 - **`workflow.py`**:
   Menyediakan fungsi kompilasi `build_chat_graph(openrouter_key, ai_model, tools=None)` yang mengembalikan `CompiledStateGraph`.
 
+### 2.4a. Sinkronisasi Staf & Verifikasi Identitas Telegram (*dalam pengembangan*)
+Status: belum terverifikasi end-to-end. Kontrak lengkap ada di [docs/contracts/member-sync.md](../docs/contracts/member-sync.md).
+- **Sinkronisasi dorong (*push*) dari backend**: saat profil owner selesai dilengkapi dan saat undangan kasir diklaim, backend mengirim data staf (nama tenant, nama lengkap, nomor telepon ternormalisasi, role, status) ke endpoint internal `PUT /api/v1/internal/tenants/{tenant_id}/members/{java_user_id}`, diautentikasi dengan `AI_INTERNAL_API_KEY`.
+- **Verifikasi lewat kontak Telegram**: pengguna hanya dikenali jika membagikan kontak Telegram miliknya sendiri (`contact.user_id` harus sama dengan pengirim). Nomor yang diketik manual diabaikan, kontak milik orang lain atau yang diteruskan ditolak. Nomor dicocokkan dengan staf `ACTIVE`: tidak ada yang cocok ditolak, satu kecocokan membuat keanggotaan terverifikasi, lebih dari satu membuat pengguna memilih tenant (`/tenant` untuk berganti).
+- **Tenant per pesan**: untuk pengguna terverifikasi, tenant dan role diambil dari keanggotaan terverifikasi pada setiap pesan. Staf yang dinonaktifkan kehilangan akses.
+- **`AI_TENANT_ID`** hanya fallback pengembangan dan tidak pernah menggantikan tenant dari staf terverifikasi.
+
 ### 2.4. Subsistem Tool Calling ([`app/tools`](app/tools))
 - **[`BaseTool`](app/tools/base.py)**: Interface kelas dasar untuk mendefinisikan nama, deskripsi, parameter JSON Schema, dan method async `execute(*, tenant_id, **kwargs)`.
 - **[`ToolRegistry`](app/tools/registry.py)**: Registry untuk mendaftarkan dan mengeksekusi tool lokal.
@@ -104,8 +111,10 @@ cp .env.example .env
 
 Buka file `.env` dan lengkapi variabel berikut:
 ```ini
-# Kredensial Bot Telegram & Tenant
+# Kredensial Bot Telegram
 TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+
+# Fallback tenant pengembangan (opsional, dalam pengembangan). Tidak menggantikan tenant dari staf yang sudah terverifikasi.
 AI_TENANT_ID="00000000-0000-0000-0000-000000000001" # UUID tenant valid
 
 # Konfigurasi LLM OpenRouter
@@ -123,6 +132,12 @@ CASHIER_GRPC_HOST="127.0.0.1"
 CASHIER_GRPC_PORT=9090
 CASHIER_GRPC_TIMEOUT_SECONDS=5.0
 CASHIER_GRPC_USE_TLS=false
+# Wajib: harus sama dengan CASHIER_GRPC_SERVICE_KEY di backend (minimal 16 karakter)
+CASHIER_GRPC_SERVICE_KEY="isi-dengan-secret-acak-minimal-16-karakter"
+
+# Wajib untuk sinkronisasi staf (dalam pengembangan): harus sama dengan AI_INTERNAL_API_KEY di backend,
+# dan berbeda dari CASHIER_GRPC_SERVICE_KEY. Dikirim sebagai header X-Internal-Service-Key.
+AI_INTERNAL_API_KEY="isi-dengan-secret-acak-berbeda-minimal-16-karakter"
 ```
 
 ### 3.3. Instalasi Dependensi & Migrasi Database
@@ -150,6 +165,26 @@ uv run main.py
 ```
 Aplikasi akan menjalankan server HTTP Uvicorn pada `http://127.0.0.1:8001` sekaligus mengaktifkan long-polling bot Telegram di latar belakang.
 
+### 3.6. Logging
+Log berformat JSON satu objek per baris ke stdout (`ts`, `level`, `logger`, `message`, field korelasi seperti
+`update_id`/`chat_id`/`tenant_id`, serta `event` dan field tambahan lain). Paket: [`app/observability`](app/observability).
+
+| Variabel | Default | Keterangan |
+| --- | --- | --- |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; nilai tidak valid menjadi `INFO` |
+| `LOG_FORMAT` | `json` | `json` atau `text` (hanya untuk stdout; file selalu JSON) |
+| `LOG_FILE_ENABLED` | `false` | `true` menulis juga ke `LOG_DIR/ai-services.log` (rotasi, ditulis lewat antrean agar event loop tidak terblokir) |
+| `LOG_DIR` | `logs` | Relatif terhadap direktori kerja (`/app/logs` di Docker); sudah ada di `.gitignore` |
+| `LOG_MAX_BYTES` / `LOG_BACKUP_COUNT` | `10485760` / `5` | Batas ukuran per file dan jumlah file cadangan |
+
+Privasi: log tidak boleh berisi nomor telepon, nama, username, isi pesan/balasan, prompt, argumen/hasil tool, token,
+kunci API, atau pesan exception dari SDK/DB. Hanya ID, jumlah/panjang, status, durasi, dan nama tipe exception.
+`RedactionFilter` menutupi token bot Telegram, `Bearer ...`, kunci `sk-...`, dan deretan 9+ digit sebagai lapisan
+pengaman tambahan, bukan pengganti aturan di atas.
+
+Membaca log container: `docker logs <container> | jq 'select(.chat_id=="71")'` atau
+`docker logs <container> | jq -r '[.ts,.level,.event,.message]|@tsv'`.
+
 ---
 
 ## 4. Verifikasi & Penggunaan
@@ -159,7 +194,10 @@ Aplikasi akan menjalankan server HTTP Uvicorn pada `http://127.0.0.1:8001` sekal
 - **`GET /ready`**: Pemeriksaan kesiapan bot, supervisor, koneksi DB, dan advisory lock kepemilikan bot (mengembalikan status 200 `{"status": "ready"}` atau 503 jika komponen belum siap).
 
 ### 4.2. Berinteraksi Melalui Telegram
-Buka bot Telegram Anda dan coba perintah/pertanyaan berikut:
+Buka bot Telegram Anda dan coba perintah/pertanyaan berikut.
+
+*Dalam pengembangan:* pengguna staf perlu membagikan kontak Telegram miliknya (tombol *Bagikan kontak*) sebelum dapat menggunakan layanan. Nomor telepon yang diketik tidak diproses.
+
 - **`/start`**: Menginisialisasi sesi dan menampilkan instruksi awal.
 - **`/session`**: Menampilkan ID sesi percakapan aktif Anda.
 - **`/new`**: Menutup sesi chat lama dan membuka sesi percakapan baru tanpa menghapus data history lama.

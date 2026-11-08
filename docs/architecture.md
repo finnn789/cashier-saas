@@ -131,7 +131,17 @@ sequenceDiagram
 
 Server side: `grpc/service/CashierGrpcService` delegates to `CashierCatalogGrpcHandler` and `CashierOrderGrpcHandler`. On the Python side (`Ai-services/`), a tool adapter hides `tenant_id` from the LLM schema and injects it from server-side context; conversations are stored in a separate database (`cashier_ai`) with its own Alembic migrations. The AI service is read-only against the backend (two lookup RPCs); it cannot create or modify orders.
 
-Caveat: no gRPC authentication interceptor was found in the backend source, and `tenant_id` is supplied by the caller. Keep the gRPC port on a private network until authentication is added; the demo compose file publishes 9090 to the host.
+Access control: callers must send `x-internal-service-key` equal to `CASHIER_GRPC_SERVICE_KEY`. The request `tenant_id` is then checked against the database: a tenant is served only when it exists and is active (the earlier environment-variable tenant allowlist was removed). A missing and an inactive tenant return the same status, so the response does not reveal whether a tenant exists. Caveat: `tenant_id` is still supplied by the caller, not bound to a token. The demo compose file does not publish 9090 to the host (internal network only), but keep the gRPC port private until token-bound tenant identity is added.
+
+## 8. Staff sync and Telegram identity (in progress)
+
+Status: under development and not yet verified end to end. Contract: `docs/contracts/member-sync.md`.
+
+- **Registration** requires a phone number, stored normalized (digits with country code, e.g. `6281234567890`). Normalization rules are shared by Java `PhoneNumberNormalizer` and Python `normalize_phone`.
+- **Push sync** (Java `MemberSyncClient`, after commit): owner profile completion and cashier invitation claim send `PUT /api/v1/internal/tenants/{tenantId}/members/{userId}` to Ai-services with tenant name, full name, normalized phone, role and status, authenticated by `X-Internal-Service-Key` (`AI_INTERNAL_API_KEY`). Retries are bounded; failures are logged without phone numbers or keys and never fail the business transaction. Disabled when `AI_SERVICE_BASE_URL` is blank.
+- **Verification in Telegram**: the Python service identifies a staff member only from a Telegram contact shared by the sender (`contact.user_id` must match the sender). The phone is matched against ACTIVE `tenant_members`; typed numbers are ignored. Zero matches are rejected, one match creates a verified membership, several matches let the user choose a tenant.
+- **Tenant per message**: a verified user's tenant and role are resolved from the verified membership on every message, and a disabled member loses access. The tenant flows through graph state into `tool.execute(tenant_id=...)`; tool schemas are unchanged.
+- **Development fallback**: `AI_TENANT_ID` is optional and only used for unverified or local use. It never overrides a verified tenant.
 
 ## 7. Persistence
 

@@ -14,7 +14,7 @@ from app.ai.config import OpenRouterSettings
 from app.ai.graph.workflow import build_chat_graph
 from app.ai.openrouter import AIError, OpenRouterClient
 from app.ai.prompts import MAX_INPUT_CHARS
-from app.chat.repositories import Repository
+from app.chat.repositories import ChannelRepository, Repository
 from app.chat.service import ChatService
 from app.core.database import Database
 from app.tools.base import BaseTool
@@ -97,6 +97,9 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.repository.resolve_conversation = AsyncMock(side_effect=self._resolve_conversation)
         self.repository.insert_message = AsyncMock(side_effect=self._insert_message)
         self.repository.completed_history = AsyncMock(side_effect=self._completed_history)
+        # The tenant is per request: ChatService asks the channel for this tenant view.
+        self.channels = Mock(spec=ChannelRepository)
+        self.channels.for_tenant = Mock(return_value=self.repository)
 
         self.db_events: list[tuple[str, int]] = []
         self.history_pairs: list[tuple[str, str]] = [
@@ -104,6 +107,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         self.input: dict[str, Any] = {
+            "tenant_id": self.tenant_id,
             "external_user_id": "tg-user-100",
             "external_chat_id": "tg-chat-200",
             "external_message_id": "tg-msg-300",
@@ -182,7 +186,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             }
 
         mock_graph.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
 
         result = await service.handle(**self.input)
 
@@ -242,7 +246,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             }
 
         mock_graph.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
 
         result = await service.handle(**self.input)
         self.assertEqual(result, "Jawaban dari AIMessage langsung.")
@@ -291,7 +295,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
 
             service = ChatService(
                 self.database,
-                self.repository,
+                self.channels,
                 tools=registry,
                 graph=compiled_graph,
             )
@@ -334,7 +338,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_graph = AsyncMock()
         mock_graph.ainvoke.side_effect = AIError("AI_NOT_CONFIGURED")
 
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
         result = await service.handle(**self.input)
 
         self.assertIn("AI belum dikonfigurasi", result)
@@ -346,7 +350,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_graph = AsyncMock()
         mock_graph.ainvoke.side_effect = AIError("AI_HTTP_401")
 
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
         result = await service.handle(**self.input)
 
         self.assertIn("Akses AI ditolak", result)
@@ -356,7 +360,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_graph = AsyncMock()
         mock_graph.ainvoke.side_effect = AIError("AI_HTTP_402")
 
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
         result = await service.handle(**self.input)
 
         self.assertIn("Saldo layanan AI tidak mencukupi", result)
@@ -367,11 +371,75 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_graph = AsyncMock()
         mock_graph.ainvoke.side_effect = TimeoutError("OpenRouter timeout after 45s")
 
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
+        result = await service.handle(**self.input)
+
+        # A bare TimeoutError is classified as AI_TRANSPORT_UNKNOWN (transport message).
+        self.assertIn("Koneksi AI terputus", result)
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_error_handling_graph_unclassified_exception_uses_default_message(self) -> None:
+        """An exception that classifies as AI_UNKNOWN yields the default text, nothing persisted."""
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.side_effect = RuntimeError("boom 401 402 403")
+
+        service = ChatService(self.database, self.channels, graph=mock_graph)
         result = await service.handle(**self.input)
 
         self.assertIn("Layanan AI belum dapat menjawab", result)
         self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    def _assistant_inserts(self) -> list[Any]:
+        return [
+            call
+            for call in self.repository.insert_message.await_args_list
+            if len(call.args) > 4 and call.args[4] == "ASSISTANT"
+        ]
+
+    async def test_graph_state_error_code_402_returns_message_and_persists_nothing(self) -> None:
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.return_value = {
+            "messages": [HumanMessage(content="Halo")],
+            "error_code": "AI_HTTP_402",
+        }
+
+        service = ChatService(self.database, self.channels, graph=mock_graph)
+        result = await service.handle(**self.input)
+
+        self.assertIn("Saldo layanan AI tidak mencukupi", result)
+        self.assertEqual(self._assistant_inserts(), [])
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_graph_state_unknown_error_code_returns_default_and_persists_nothing(self) -> None:
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.return_value = {
+            "messages": [AIMessage(content="Jawaban yang tidak boleh disimpan.")],
+            "final_response": "Jawaban yang tidak boleh disimpan.",
+            "error_code": "weird_code",
+        }
+
+        service = ChatService(self.database, self.channels, graph=mock_graph)
+        result = await service.handle(**self.input)
+
+        self.assertIn("Layanan AI belum dapat menjawab", result)
+        self.assertEqual(self._assistant_inserts(), [])
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_graph_state_without_error_code_still_persists_assistant_answer(self) -> None:
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.return_value = {
+            "messages": [AIMessage(content="Pesanan siap.")],
+            "final_response": "Pesanan siap.",
+        }
+
+        service = ChatService(self.database, self.channels, graph=mock_graph)
+        result = await service.handle(**self.input)
+
+        self.assertEqual(result, "Pesanan siap.")
+        self.assertEqual(len(self._assistant_inserts()), 1)
+        self.assertEqual(
+            self.boundary.events, [("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)]
+        )
 
     async def test_error_handling_graph_state_error_code(self) -> None:
         """Verify state returning error_code mapped to localized response."""
@@ -382,7 +450,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             "error_code": "AI_TRANSPORT_UNKNOWN",
         }
 
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
         result = await service.handle(**self.input)
 
         self.assertIn("Koneksi AI terputus", result)
@@ -396,7 +464,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.repository.find_duplicate_incoming.return_value = True
         mock_graph = AsyncMock()
 
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
         result = await service.handle(**self.input)
 
         self.assertIsNone(result)
@@ -405,7 +473,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_commands_do_not_invoke_graph(self) -> None:
         mock_graph = AsyncMock()
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
 
         for kind in ("START", "NEW", "SESSION"):
             with self.subTest(kind=kind):
@@ -415,7 +483,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_and_unsupported_inputs(self) -> None:
         mock_graph = AsyncMock()
-        service = ChatService(self.database, self.repository, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph)
 
         for kind, content in (
             ("INVALID", ""),
@@ -439,7 +507,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             ai_model="google/gemini-2.5-flash",
         )
         ai_client = OpenRouterClient(ai_settings, session=Mock())
-        service = ChatService(self.database, self.repository, ai=ai_client)
+        service = ChatService(self.database, self.channels, ai=ai_client)
 
         self.assertIsNotNone(service.graph)
         self.assertIs(service.ai, ai_client)
@@ -447,7 +515,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_init_with_unconfigured_ai_settings(self) -> None:
         ai_settings = OpenRouterSettings(openrouter_key="", ai_model="")
         ai_client = OpenRouterClient(ai_settings, session=Mock())
-        service = ChatService(self.database, self.repository, ai=ai_client)
+        service = ChatService(self.database, self.channels, ai=ai_client)
 
         # Unconfigured key still compiles graph or detects unconfigured at runtime
         result = await service.handle(**self.input)
