@@ -1,11 +1,11 @@
 # Project memory
 
-Memory version: 58
+Memory version: 59
 Updated: 2026-11-10 (Asia/Jakarta)
 
 ## Evidence-qualified state
 
-- TASK-063 — COMPLETE (file-level): 13 Postman requests for the inventory/recipe API added to `F&B Catalog Controller` (folders 05-07); YAML validity re-checked by the orchestrator, never executed against a live server. Known pre-existing defect: invalid JSON body in `01 - Categories/Create Category.request.yaml`. Canonical 57 -> 58. Details in TASKS.md.
+- TASK-063 — COMPLETE (file-level): 13 Postman requests for the inventory/recipe API added to `F&B Catalog Controller` (folders 05-07); YAML validity re-checked by the orchestrator (35 files, 0 bad), never executed against a live server. The pre-existing invalid JSON body in `01 - Categories/Create Category.request.yaml` was fixed at the user's request. Canonical 57 -> 59. Details in TASKS.md.
 
 - TASK-061 + TASK-062 — COMPLETE / VERIFIED (user-requested `mvnw.cmd verify -B`, 2026-11-10, Docker 29.9.2, main @ 95bd9af + uncommitted changes): BUILD SUCCESS 1:04, unit 427/427, integration 61/61 (incl. 13 new `FnbInventoryFlowIntegrationTest` scenarios), Flyway V1->V4 on PostgreSQL 17.11. The inventory/recipe/stock-warning feature is now proven end to end for both payment paths, roles, tenant isolation and idempotency. One test bug (T2 `ReflectionTestUtils` overload) found and fixed on the first run; no production bug found. Still open: concurrency tests, Postman collection for the new endpoints, frontend (Stitch prompt ready), Phase 2 reusable option groups, nothing committed yet. Supersedes the "no dedicated tests" gap below. Canonical 56 -> 57.
 

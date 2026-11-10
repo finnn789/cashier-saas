@@ -6,7 +6,7 @@ headers:
   Accept: application/json
 body:
   type: json
-  content: "{name:Makanan Utama,displayOrder:1}"
+  content: '{"name": "Makanan Utama", "displayOrder": 1}'
 scripts:
   - type: afterResponse
     code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); if (res.data && res.data.id) pm.collectionVariables.set('categoryId', res.data.id);
