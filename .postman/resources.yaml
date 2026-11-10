@@ -3,3 +3,4 @@ workspace:
 cloudResources:
   collections:
     ../postman/collections/KedaiMbo API: 27489349-26b2d778-a8ec-4ce9-81be-5d78f21f9082
+    ../postman/collections/F&B Catalog Controller: 27489349-deee8abd-9661-46bf-a458-ebc438084783

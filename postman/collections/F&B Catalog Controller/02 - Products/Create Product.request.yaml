@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products"
+method: POST
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"categoryId": "{{categoryId}}", "name": "Nasi Goreng Spesial KedaiMbo", "description": "Nasi goreng dengan bumbu khas KedaiMbo, telur, dan suwiran ayam", "price": 25000.0, "imageUrl": "https://example.com/images/nasgor.jpg", "available": true, "displayOrder": 1, "priceChangeReason": null}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); if (res.data && res.data.id) pm.collectionVariables.set('productId', res.data.id);
+    language: text/javascript
+order: 1000

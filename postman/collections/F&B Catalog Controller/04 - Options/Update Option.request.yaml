@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}/groups/{{groupId}}/options/{{optionId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"name": "Level 1 (Pedas Sedang)", "priceAdjustment": 2000.0, "available": true, "displayOrder": 1, "priceChangeReason": "Penyesuaian cabai rawit ekstra"}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 200 OK', () => pm.response.to.have.status(200)); var res = pm.response.json(); pm.expect(res.success).to.be.true;
+    language: text/javascript
+order: 3000

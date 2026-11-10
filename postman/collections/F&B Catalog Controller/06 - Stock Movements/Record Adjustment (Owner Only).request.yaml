@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/inventory/items/{{inventoryItemId}}/movements"
+method: POST
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"type": "ADJUSTMENT", "quantity": -50.000, "reason": "Koreksi stock opname", "idempotencyKey": "{{$guid}}"}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); pm.expect(res.success).to.be.true; pm.expect(res.data.type).to.eql('ADJUSTMENT');
+    language: text/javascript
+order: 3000
