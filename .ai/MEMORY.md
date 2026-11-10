@@ -1,9 +1,13 @@
 # Project memory
 
-Memory version: 62
+Memory version: 64
 Updated: 2026-11-10 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- TASK-069 — demo walkthrough EXECUTED (2026-11-10): the `docs/demo.md` inventory section ran against the stack-tip jar (profile demo, V1-V5 + seed, PG17 container, not docker compose) and every expected number matched; README/architecture/demo docs are UNCOMMITTED (awaiting the user), as are tasks/TASK-068-069 and reports/TASK-068-069. `src` is clean. `mvnw clean` fails here (locked `target/classes/aiohttp` Python files); build without clean. Canonical 63 -> 64.
+
+- TASK-068 — COMPLETE (2026-11-10): mutation check of `FnbStockConcurrencyIntegrationTest`. Killed: balance-lock removal in `recordMovement` and in `FnbStockService`, sale sign flip, fingerprint-check removal (only on run 2 = timing-dependent). Survived the concurrency IT: `lockTenant` removal in `FnbPaymentService.pay` (stock/payment stay consistent via unique constraints + balance lock; pay-vs-cancel/discount race untested) and the sale idempotency guard in `FnbStockService` (killed by unit test `FnbStockServiceTest`). Production code untouched. TASK-069 docs (README, architecture, demo) written and reviewed, demo curl steps not yet executed, uncommitted. Canonical 62 -> 63.
 
 - TASK-067 — COMPLETE / VERIFIED, NOT COMMITTED (2026-11-10): `mvnw -B verify` BUILD SUCCESS, unit 460, integration 75 (8 new concurrency scenarios in `FnbStockConcurrencyIntegrationTest`, green first run, no production change). Stock invariants hold under parallel same-key movements, parallel payments and mixed load; not proven: mutation sensitivity (tests failing if locks were removed), MockFnbGateway/deactivation/multi-outlet concurrency. Branch `feature/fnb-stock-concurrency-tests`. Canonical 62. Superseded delegation note: stock concurrency tests (one new test-only class `FnbStockConcurrencyIntegrationTest`: parallel same idempotency key, parallel payments of different/same orders, mixed load for deadlocks, negative stock under load). Branch `feature/fnb-stock-concurrency-tests` from `feature/fnb-reusable-option-groups` @ 741a244. Canonical 61 -> 62. Packet `tasks/TASK-067.md`.
 
