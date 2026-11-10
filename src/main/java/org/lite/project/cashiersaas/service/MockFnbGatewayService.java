@@ -1,6 +1,7 @@
 package org.lite.project.cashiersaas.service;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
@@ -37,6 +38,7 @@ public class MockFnbGatewayService {
     private final AuditLogRepository audit;
     private final FnbTableReconciliationService reconciliation;
     private final FnbRealtimePublisher realtime;
+    private final FnbStockService stock;
 
     @Transactional
     public FnbPaymentResponse initiate(TenantPrincipal principal, UUID outletId, UUID orderId, FnbPaymentRequest request) {
@@ -103,10 +105,13 @@ public class MockFnbGatewayService {
         order.confirmPaid();
         PaymentEntity payment = PaymentEntity.settle(context.getTenant(), context.getOutlet(), order, PaymentMethod.MOCK_GATEWAY, attempt.getAmount(), BigDecimal.ZERO, receiptNumber(), attempt.getIdempotencyKey(), attempt.getRequestFingerprint(), attempt.getProviderReference(), context.getMembership().getUser());
         payments.persist(payment); orders.flush();
+        List<String> stockWarnings = stock.consumeForPaidOrder(context, order);
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_PAYMENT_RECORDED, order.getId(), null, "method=MOCK_GATEWAY;paymentId=" + payment.getId()));
         reconciliation.reconcile(order);
         realtime.orderChanged("PAYMENT_SETTLED", order);
-        return FnbPaymentMapper.mockPayment(payment, attempt);
+        FnbPaymentResponse response = FnbPaymentMapper.mockPayment(payment, attempt);
+        response.setStockWarnings(stockWarnings);
+        return response;
     }
     private static String receiptNumber() { return "R-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase(); }
 }

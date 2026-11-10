@@ -6,6 +6,8 @@ import org.lite.project.cashiersaas.entity.shared.catalog.CategoryEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.RecipeLineEntity;
+import java.util.List;
 
 public final class FnbCatalogMapper {
     private FnbCatalogMapper() { }
@@ -39,5 +41,18 @@ public final class FnbCatalogMapper {
         response.setName(entity.getName()); response.setPriceAdjustment(entity.getPriceAdjustment());
         response.setAvailable(entity.isAvailable()); response.setDisplayOrder(entity.getDisplayOrder());
         return response;
+    }
+    public static FnbRecipeResponse recipe(List<RecipeLineEntity> lines) {
+        FnbRecipeResponse response = new FnbRecipeResponse();
+        response.setLines(lines.stream().map(FnbCatalogMapper::recipeLine).toList());
+        return response;
+    }
+    private static FnbRecipeResponse.Line recipeLine(RecipeLineEntity entity) {
+        FnbRecipeResponse.Line line = new FnbRecipeResponse.Line();
+        line.setInventoryItemId(entity.getInventoryItem().getId());
+        line.setInventoryItemName(entity.getInventoryItem().getName());
+        line.setUnit(entity.getInventoryItem().getUnit());
+        line.setQuantityPerUnit(entity.getQuantityPerUnit());
+        return line;
     }
 }

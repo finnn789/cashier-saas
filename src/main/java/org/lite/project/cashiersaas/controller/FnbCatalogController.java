@@ -109,4 +109,24 @@ public class FnbCatalogController {
     public ApiResponse<List<FnbOptionResponse>> options(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID groupId) {
         return ApiResponse.success("Pilihan diambil.", service.options(principal, outletId, productId, groupId));
     }
+
+    @PutMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/recipe")
+    public ApiResponse<FnbRecipeResponse> replaceProductRecipe(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @Valid @RequestBody FnbRecipeRequest request) {
+        return ApiResponse.success("Resep produk diperbarui.", service.replaceProductRecipe(principal, outletId, productId, request));
+    }
+
+    @GetMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/recipe")
+    public ApiResponse<FnbRecipeResponse> productRecipe(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId) {
+        return ApiResponse.success("Resep produk diambil.", service.productRecipe(principal, outletId, productId));
+    }
+
+    @PutMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups/{groupId}/options/{id}/recipe")
+    public ApiResponse<FnbRecipeResponse> replaceOptionRecipe(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID groupId, @PathVariable UUID id, @Valid @RequestBody FnbRecipeRequest request) {
+        return ApiResponse.success("Resep pilihan diperbarui.", service.replaceOptionRecipe(principal, outletId, productId, groupId, id, request));
+    }
+
+    @GetMapping("/merchant/outlets/{outletId}/fnb/products/{productId}/groups/{groupId}/options/{id}/recipe")
+    public ApiResponse<FnbRecipeResponse> optionRecipe(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID productId, @PathVariable UUID groupId, @PathVariable UUID id) {
+        return ApiResponse.success("Resep pilihan diambil.", service.optionRecipe(principal, outletId, productId, groupId, id));
+    }
 }

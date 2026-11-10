@@ -1,9 +1,17 @@
 # Project memory
 
-Memory version: 52
-Updated: 2026-11-07 (Asia/Jakarta)
+Memory version: 57
+Updated: 2026-11-10 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- TASK-061 + TASK-062 — COMPLETE / VERIFIED (user-requested `mvnw.cmd verify -B`, 2026-11-10, Docker 29.9.2, main @ 95bd9af + uncommitted changes): BUILD SUCCESS 1:04, unit 427/427, integration 61/61 (incl. 13 new `FnbInventoryFlowIntegrationTest` scenarios), Flyway V1->V4 on PostgreSQL 17.11. The inventory/recipe/stock-warning feature is now proven end to end for both payment paths, roles, tenant isolation and idempotency. One test bug (T2 `ReflectionTestUtils` overload) found and fixed on the first run; no production bug found. Still open: concurrency tests, Postman collection for the new endpoints, frontend (Stitch prompt ready), Phase 2 reusable option groups, nothing committed yet. Supersedes the "no dedicated tests" gap below. Canonical 56 -> 57.
+
+- TASK-061 — EXISTING SUITE GREEN (user-requested `mvnw verify`, 2026-11-10, Docker up): BUILD SUCCESS 57.6 s, unit 321/321 + integration 48/48, Flyway V1->V4 on PostgreSQL 17.11, Spring context starts with the new entities. Extra throwaway-Postgres check: demo seed idempotent, balance == movement sums, recipe CHECK works. Gap: the new inventory/recipe endpoints and the deduct-on-paid path with real recipes have NO dedicated tests, so they are unproven beyond compile + no-regression. Next: delegate new tests (unit + integration) if the user asks. Canonical 54 -> 55.
+
+- TASK-061 — IMPLEMENTED / SOURCE REVIEWED / COMPILES, TESTS NOT RUN BY POLICY (2026-11-10): four workers (W1 schema+repository, W2 inventory endpoints, W3 recipe endpoints, W4 deduct-on-paid + `stockWarnings`) done; orchestrator `mvnw.cmd -q compile` exit 0, diff vs 95bd9af limited to reserved paths, mechanical rule greps clean. Runtime/test-compile/DB migration (V4 on V3, `ddl-auto=validate`) unverified; Postman not updated; Phase 2 (reusable option groups) pending. Details, risks and recommended tests in TASKS.md and tasks/TASK-061.md; worker reports reports/TASK-061-W1..W4.md. Canonical 53 -> 54.
+
+- TASK-061 — DELEGATED / IN PROGRESS, nothing verified (2026-11-10): F&B ingredient inventory/recipes/stock warnings. User decisions recorded in `.ai/DECISIONS.md` (PRD §5 inventory scope pulled in). Verified facts behind the design: category is dynamic CRUD (no FOOD/DRINK enum); variants/add-ons = `OptionGroup` per product; inventory entities/tables existed from V1 but were unused (no repo/service/controller); an order becomes paid in two places (`FnbPaymentService.settle`, `MockFnbGatewayService.settle`); `SalesOrderEntity.cancel` rejects paid orders; `/merchant/**` = OWNER only, `/cashier/**` = OWNER+CASHIER. Packet with binding contract: `tasks/TASK-061.md`. Canonical 52 -> 53.
 
 - TASK-060 — IMPLEMENTED / TESTS NOT RUN BY POLICY (2026-11-07): Ai-services JSON logging (`app/observability`, python-json-logger, stdout + optional rotating file via `LOG_*` env), correlation context (update/message/chat/user/tenant ids) across Telegram handler, sender, ChatService, gRPC client and LangGraph nodes/tools; aiogram logger raised to WARNING. Behaviour fix: agent-node LLM failures now return only `error_code`; ChatService maps any error_code to its message and no longer persists a fallback apology as an ASSISTANT message; error classification is type/status based (`classify_llm_error`). Evidence: py_compile + import smoke + simulated message trace + real-graph 402 simulation; unit tests written/adjusted but NOT run. Open: pre-existing logs that print exception messages (see tasks/TASK-060.md), manual Telegram E2E. Canonical 51 -> 52.
 
