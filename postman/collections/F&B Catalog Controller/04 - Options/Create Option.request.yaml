@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}/groups/{{groupId}}/options"
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/option-groups/{{groupId}}/options"
 method: POST
 headers:
   Content-Type: application/json

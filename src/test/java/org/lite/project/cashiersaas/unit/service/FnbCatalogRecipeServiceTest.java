@@ -100,7 +100,7 @@ class FnbCatalogRecipeServiceTest {
         ReflectionTestUtils.setField(category, "id", categoryId);
         product = ProductEntity.create(tenant, outlet, productDetails(category, "10000.00"));
         ReflectionTestUtils.setField(product, "id", productId);
-        group = OptionGroupEntity.create(tenant, outlet, product, new OptionGroupEntity.Details("Topping", false, 0, 2, 0));
+        group = OptionGroupEntity.create(tenant, outlet, new OptionGroupEntity.Details("Topping", false, 0, 2, 0));
         ReflectionTestUtils.setField(group, "id", groupId);
         option = ProductOptionEntity.create(tenant, outlet, group, "Boba", new BigDecimal("3000.00"), true, 0);
         ReflectionTestUtils.setField(option, "id", optionId);
@@ -285,7 +285,7 @@ class FnbCatalogRecipeServiceTest {
         when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                         recipeRequest(line(itemAId, "50"))));
 
         verify(guard).requireOwner(owner, outletId);
@@ -295,61 +295,53 @@ class FnbCatalogRecipeServiceTest {
     @Test
     void replaceOptionRecipeRejectsGroupIdThatDoesNotMatchTheOptionGroup() {
         UUID otherGroupId = UUID.randomUUID();
-        OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet, product,
+        OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet,
                 new OptionGroupEntity.Details("Size", false, 0, 1, 1));
         ReflectionTestUtils.setField(otherGroup, "id", otherGroupId);
         stubOwner();
-        stubProduct();
         when(catalog.group(tenantId, outletId, otherGroupId)).thenReturn(Optional.of(otherGroup));
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, otherGroupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, otherGroupId, optionId,
                         recipeRequest(line(itemAId, "50"))));
 
         verifyNoInteractions(inventory, audit);
     }
 
     @Test
-    void replaceOptionRecipeRejectsGroupThatBelongsToAnotherProduct() {
-        UUID otherProductId = UUID.randomUUID();
-        ProductEntity otherProduct = ProductEntity.create(tenant, outlet, productDetails(category, "7000.00"));
-        ReflectionTestUtils.setField(otherProduct, "id", otherProductId);
-        OptionGroupEntity foreignGroup = OptionGroupEntity.create(tenant, outlet, otherProduct,
-                new OptionGroupEntity.Details("Topping", false, 0, 2, 0));
-        ReflectionTestUtils.setField(foreignGroup, "id", groupId);
+    void replaceOptionRecipeRejectsGroupThatIsNotFoundForThisTenantAndOutlet() {
         stubOwner();
-        stubProduct();
-        when(catalog.group(tenantId, outletId, groupId)).thenReturn(Optional.of(foreignGroup));
+        when(catalog.group(tenantId, outletId, groupId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                         recipeRequest(line(itemAId, "50"))));
 
+        verify(catalog, never()).option(any(UUID.class), any(UUID.class), any(UUID.class));
         verifyNoInteractions(inventory, audit);
     }
 
     @Test
     void replaceOptionRecipeRejectsMissingOption() {
         stubOwner();
-        stubProduct();
         stubGroup();
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                         recipeRequest(line(itemAId, "50"))));
 
         verifyNoInteractions(inventory, audit);
     }
 
     @Test
-    void replaceOptionRecipeRejectsMissingProduct() {
+    void replaceOptionRecipeRejectsMissingGroup() {
         stubOwner();
-        when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.empty());
+        when(catalog.group(tenantId, outletId, groupId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                         recipeRequest(line(itemAId, "50"))));
 
         verifyNoInteractions(inventory, audit);
@@ -362,7 +354,7 @@ class FnbCatalogRecipeServiceTest {
         stubItem(itemA);
 
         assertThrows(InvalidOperationException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                         recipeRequest(line(itemAId, "50"), line(itemAId, "10"))));
 
         verifyNothingWrittenForRecipe();
@@ -375,7 +367,7 @@ class FnbCatalogRecipeServiceTest {
         when(inventory.item(tenantId, outletId, itemAId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                         recipeRequest(line(itemAId, "50"))));
 
         verifyNothingWrittenForRecipe();
@@ -385,7 +377,7 @@ class FnbCatalogRecipeServiceTest {
     void replaceOptionRecipeDeletesOptionLinesThenPersistsOptionLinesThenAudits() {
         arrangeOptionRecipeHappyPath();
 
-        service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+        service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                 recipeRequest(line(itemAId, "50"), line(itemBId, "15")));
 
         InOrder order = inOrder(inventory, audit);
@@ -399,7 +391,7 @@ class FnbCatalogRecipeServiceTest {
     void replaceOptionRecipePersistsOptionLinesNotProductLines() {
         arrangeOptionRecipeHappyPath();
 
-        service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+        service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                 recipeRequest(line(itemAId, "50"), line(itemBId, "15")));
 
         ArgumentCaptor<RecipeLineEntity> captor = ArgumentCaptor.forClass(RecipeLineEntity.class);
@@ -421,7 +413,7 @@ class FnbCatalogRecipeServiceTest {
     void replaceOptionRecipeAuditsWithOptionIdAndSharedRecipeFormat() {
         arrangeOptionRecipeHappyPath();
 
-        service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+        service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                 recipeRequest(line(itemAId, "50"), line(itemBId, "15")));
 
         AuditLogEntity log = captureAudit();
@@ -439,7 +431,7 @@ class FnbCatalogRecipeServiceTest {
     void replaceOptionRecipeReturnsMappedLines() {
         arrangeOptionRecipeHappyPath();
 
-        FnbRecipeResponse response = service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId,
+        FnbRecipeResponse response = service.replaceOptionRecipe(owner, outletId, groupId, optionId,
                 recipeRequest(line(itemAId, "50"), line(itemBId, "15")));
 
         assertEquals(2, response.getLines().size());
@@ -455,7 +447,7 @@ class FnbCatalogRecipeServiceTest {
         stubOption();
         stubAuditReferences();
 
-        FnbRecipeResponse response = service.replaceOptionRecipe(owner, outletId, productId, groupId, optionId, recipeRequest());
+        FnbRecipeResponse response = service.replaceOptionRecipe(owner, outletId, groupId, optionId, recipeRequest());
 
         verify(inventory).deleteOptionRecipe(tenantId, outletId, optionId);
         verify(inventory, never()).persist(any(RecipeLineEntity.class));
@@ -543,7 +535,7 @@ class FnbCatalogRecipeServiceTest {
         when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.optionRecipe(owner, outletId, productId, groupId, optionId));
+                () -> service.optionRecipe(owner, outletId, groupId, optionId));
 
         verify(guard).requireOwner(owner, outletId);
         verifyNoInteractions(catalog, inventory, audit);
@@ -552,16 +544,15 @@ class FnbCatalogRecipeServiceTest {
     @Test
     void optionRecipeRejectsGroupIdThatDoesNotMatchTheOptionGroup() {
         UUID otherGroupId = UUID.randomUUID();
-        OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet, product,
+        OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet,
                 new OptionGroupEntity.Details("Size", false, 0, 1, 1));
         ReflectionTestUtils.setField(otherGroup, "id", otherGroupId);
         stubOwner();
-        stubProduct();
         when(catalog.group(tenantId, outletId, otherGroupId)).thenReturn(Optional.of(otherGroup));
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.optionRecipe(owner, outletId, productId, otherGroupId, optionId));
+                () -> service.optionRecipe(owner, outletId, otherGroupId, optionId));
 
         verifyNoInteractions(inventory);
     }
@@ -569,12 +560,11 @@ class FnbCatalogRecipeServiceTest {
     @Test
     void optionRecipeRejectsMissingOption() {
         stubOwner();
-        stubProduct();
         stubGroup();
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.optionRecipe(owner, outletId, productId, groupId, optionId));
+                () -> service.optionRecipe(owner, outletId, groupId, optionId));
 
         verifyNoInteractions(inventory);
     }
@@ -586,7 +576,7 @@ class FnbCatalogRecipeServiceTest {
         when(inventory.optionRecipes(tenantId, outletId, List.of(optionId))).thenReturn(List.of(
                 RecipeLineEntity.forOption(tenant, outlet, option, itemA, new BigDecimal("50.000"))));
 
-        FnbRecipeResponse response = service.optionRecipe(owner, outletId, productId, groupId, optionId);
+        FnbRecipeResponse response = service.optionRecipe(owner, outletId, groupId, optionId);
 
         assertEquals(1, response.getLines().size());
         FnbRecipeResponse.Line line = response.getLines().get(0);
@@ -605,7 +595,7 @@ class FnbCatalogRecipeServiceTest {
         stubOption();
         when(inventory.optionRecipes(tenantId, outletId, List.of(optionId))).thenReturn(List.of());
 
-        FnbRecipeResponse response = service.optionRecipe(owner, outletId, productId, groupId, optionId);
+        FnbRecipeResponse response = service.optionRecipe(owner, outletId, groupId, optionId);
 
         assertTrue(response.getLines().isEmpty());
     }
@@ -617,7 +607,7 @@ class FnbCatalogRecipeServiceTest {
         when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.updateOption(owner, outletId, productId, groupId, optionId, optionRequest("Boba", "3000.00", null)));
+                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "3000.00", null)));
 
         verifyNoInteractions(catalog, audit, references);
     }
@@ -628,7 +618,7 @@ class FnbCatalogRecipeServiceTest {
         stubOption();
 
         InvalidOperationException error = assertThrows(InvalidOperationException.class,
-                () -> service.updateOption(owner, outletId, productId, groupId, optionId, optionRequest("Boba", "4000.00", null)));
+                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "4000.00", null)));
 
         assertEquals(PRICE_REASON_MESSAGE, error.getMessage());
         verifyNoInteractions(audit);
@@ -641,7 +631,7 @@ class FnbCatalogRecipeServiceTest {
         stubOption();
 
         InvalidOperationException error = assertThrows(InvalidOperationException.class,
-                () -> service.updateOption(owner, outletId, productId, groupId, optionId, optionRequest("Boba", "4000.00", "   ")));
+                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "4000.00", "   ")));
 
         assertEquals(PRICE_REASON_MESSAGE, error.getMessage());
         verifyNoInteractions(audit);
@@ -654,7 +644,7 @@ class FnbCatalogRecipeServiceTest {
         stubOption();
         stubAuditReferences();
 
-        service.updateOption(owner, outletId, productId, groupId, optionId,
+        service.updateOption(owner, outletId, groupId, optionId,
                 optionRequest("Boba", "4000.00", "  Harga bahan naik  "));
 
         AuditLogEntity log = captureAudit();
@@ -674,7 +664,7 @@ class FnbCatalogRecipeServiceTest {
         stubAuditReferences();
 
         // 4.5E+3 must be rendered with toPlainString(), and old value keeps its stored scale.
-        service.updateOption(owner, outletId, productId, groupId, optionId,
+        service.updateOption(owner, outletId, groupId, optionId,
                 optionRequest("Boba", "4.5E+3", "Naik"));
 
         assertEquals("old=3000.00;new=4500", captureAudit().getDetails());
@@ -686,7 +676,7 @@ class FnbCatalogRecipeServiceTest {
         stubOption();
         stubAuditReferences();
 
-        FnbOptionResponse response = service.updateOption(owner, outletId, productId, groupId, optionId,
+        FnbOptionResponse response = service.updateOption(owner, outletId, groupId, optionId,
                 optionRequest("Boba Premium", "4000.00", "Naik"));
 
         assertEquals("Boba Premium", option.getName());
@@ -701,7 +691,7 @@ class FnbCatalogRecipeServiceTest {
         stubOwner();
         stubOption();
 
-        FnbOptionResponse response = service.updateOption(owner, outletId, productId, groupId, optionId,
+        FnbOptionResponse response = service.updateOption(owner, outletId, groupId, optionId,
                 optionRequest("Boba Renamed", "3000", "ignored reason"));
 
         verifyNoInteractions(audit, references);
@@ -712,16 +702,15 @@ class FnbCatalogRecipeServiceTest {
     @Test
     void updateOptionRejectsGroupIdThatDoesNotMatchTheOptionGroup() {
         UUID otherGroupId = UUID.randomUUID();
-        OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet, product,
+        OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet,
                 new OptionGroupEntity.Details("Size", false, 0, 1, 1));
         ReflectionTestUtils.setField(otherGroup, "id", otherGroupId);
         stubOwner();
-        stubProduct();
         when(catalog.group(tenantId, outletId, otherGroupId)).thenReturn(Optional.of(otherGroup));
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
 
         assertThrows(ResourceNotFoundException.class,
-                () -> service.updateOption(owner, outletId, productId, otherGroupId, optionId,
+                () -> service.updateOption(owner, outletId, otherGroupId, optionId,
                         optionRequest("Hacked", "4000.00", "Naik")));
 
         verifyNoInteractions(audit);
@@ -875,7 +864,6 @@ class FnbCatalogRecipeServiceTest {
     }
 
     private void stubOption() {
-        stubProduct();
         stubGroup();
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
     }

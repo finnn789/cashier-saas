@@ -8,6 +8,8 @@ import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public final class FnbMenuMapper {
     private FnbMenuMapper() { }
@@ -25,7 +27,7 @@ public final class FnbMenuMapper {
         return response;
     }
     public static PublicMenuResponse menu(TableQrTokenEntity qr, List<CategoryEntity> categories,
-                                          List<ProductEntity> products, List<OptionGroupEntity> groups,
+                                          List<ProductEntity> products, Map<UUID, List<OptionGroupEntity>> groupsByProduct,
                                           List<ProductOptionEntity> options) {
         PublicMenuResponse response = new PublicMenuResponse();
         response.setOutletName(qr.getOutlet().getName());
@@ -45,7 +47,7 @@ public final class FnbMenuMapper {
                         p.setId(product.getId()); p.setName(product.getName()); p.setDescription(product.getDescription());
                         p.setPrice(product.getPrice()); p.setImageUrl(product.getImageUrl());
                         p.setAvailable(product.isAvailable());
-                        p.setGroups(groups.stream().filter(g -> g.getProduct().getId().equals(product.getId()))
+                        p.setGroups(groupsByProduct.getOrDefault(product.getId(), List.of()).stream()
                                 .map(group -> {
                                     PublicMenuResponse.OptionGroup g = new PublicMenuResponse.OptionGroup();
                                     g.setId(group.getId()); g.setName(group.getName()); g.setRequired(group.isRequired());
