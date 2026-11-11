@@ -1,7 +1,9 @@
 # Tasks
 
 Updated: 2026-11-11 (Asia/Jakarta)
-Memory version: 67
+Memory version: 68
+
+- TASK-073 — DONE, REVIEWED, NOT COMMITTED, NOT EXECUTED (2026-11-11): Postman `KedaiMbo API` folders 08/09 repointed to the V5 option-group routes (+3 new requests). See `.ai/MEMORY.md`. Open: user's choice for the formatting-only dirty `FnbCatalogService.java`; whether to commit TASK-073 files and the frontend prompt.
 
 - TASK-072 — IMPLEMENTED, COMPILED, TESTS NOT RUN BY POLICY, NOT COMMITTED (2026-11-11): REST rate limiter (429 + Retry-After), constants in `RateLimitConstants`, tunable limits in `application.properties` via `CASHIER_RATE_LIMIT_*` (+ `.env`, `.env.example`, `docker-compose.yml`). See `.ai/MEMORY.md` for details and gaps. Unit tests run 2026-11-11 (3 new classes + `GrpcRateLimiterTest`: 37 tests, 0 failures). Full `mvnw -B verify` BUILD SUCCESS 2026-11-11 (493 unit + 77 integration, 0 failures). Awaiting: the commit decision, then the commit decision (TASK-070/071/072 together).
 
