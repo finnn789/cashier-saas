@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -51,6 +52,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     private static final String PRICE = "25000";
     private static final int THREADS = 8;
     private static final int WAIT_SECONDS = 60;
+    private static final int ROUNDS = 15;
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -150,6 +152,19 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
                 .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
+    /** Raw cancel call (cashier route): the status is NOT asserted here, the scenarios assert the legal outcome set. */
+    private MvcResult cancelCall(MerchantFixture actor, String orderId) throws Exception {
+        return api.call(post(orders(actor) + "/" + orderId + "/cancel").header(AUTH, actor.bearer())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Salah pesan\"}"));
+    }
+
+    /** Raw NOMINAL 1000 discount call (owner-only merchant route); the status is NOT asserted here. */
+    private MvcResult discountCall(MerchantFixture owner, String orderId) throws Exception {
+        return api.call(post("/api/v1/merchant/outlets/" + owner.outletId() + "/fnb/orders/" + orderId + "/discount")
+                .header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"type\":\"NOMINAL\",\"value\":1000,\"reason\":\"Promo\"}"));
+    }
+
     // ------------------------------------------------------------------ JSON, SQL and result helpers
 
     private static List<String> readList(MvcResult result, String path) throws Exception {
@@ -212,6 +227,14 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
 
     private static boolean isPaymentSuccess(MvcResult result) {
         return status(result) == 200 || status(result) == 201;
+    }
+
+    private static boolean is2xx(MvcResult result) {
+        return status(result) >= 200 && status(result) < 300;
+    }
+
+    private static boolean is4xx(MvcResult result) {
+        return status(result) >= 400 && status(result) < 500;
     }
 
     private static void assertNoServerError(List<MvcResult> results) throws Exception {
@@ -298,6 +321,18 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         assertEquals(1, movementsOfItem(item), "no other movement exists for the ingredient");
         assertDecimal("100", balance(item), "the restock is applied exactly once");
         assertLedgerMatchesBalance(item);
+
+        // Deterministic follow-up (TASK-070): a sequential replay of the same key and payload is answered 201
+        // with the winner's movement id and changes nothing, whether or not the parallel requests overlapped.
+        MvcResult replay = postMovement(owner, item, body);
+        assertEquals(201, status(replay), "sequential replay must be 201: " + describe(replay));
+        assertEquals(ids.get(0), ApiTestSupport.read(replay, "$.data.id"), "replay returns the winner's movement id");
+        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+                + "AND idempotency_key = ?", owner.tenantId().toString(), key), "still one movement row for the key");
+        assertDecimal("100", balance(item), "the replay does not apply the restock again");
+        assertLedgerMatchesBalance(item);
+        System.out.println("[concurrency] A same key+payload: 201=" + ids.size() + " 409="
+                + (results.size() - ids.size()) + " of " + results.size() + " parallel requests");
     }
 
     // ------------------------------------------------------------------ B. same key, different payload
@@ -331,6 +366,27 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
                 "stored delta must be one of the submitted quantities, was " + delta);
         assertEquals(0, delta.compareTo(balance(item)), "balance equals the single applied delta " + delta);
         assertLedgerMatchesBalance(item);
+
+        // Deterministic follow-up (TASK-070): the stored movement identifies the winner's payload, so the key reuse
+        // checks no longer depend on the parallel requests having overlapped.
+        int winnerQuantity = delta.intValueExact();
+        String winnerId = ids.get(0);
+        MvcResult differing = postMovement(owner, item,
+                movementJson("RESTOCK", String.valueOf(winnerQuantity + 50), "Belanja", key));
+        assertEquals(409, status(differing), "same key with a different payload must be 409: " + describe(differing));
+        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+                + "AND idempotency_key = ?", owner.tenantId().toString(), key), "still one movement row for the key");
+        assertEquals(0, delta.compareTo(balance(item)), "balance unchanged by the rejected payload");
+        MvcResult replay = postMovement(owner, item,
+                movementJson("RESTOCK", String.valueOf(winnerQuantity), "Belanja", key));
+        assertEquals(201, status(replay), "the winner's exact payload is a replay: " + describe(replay));
+        assertEquals(winnerId, ApiTestSupport.read(replay, "$.data.id"), "replay returns the winner's movement id");
+        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+                + "AND idempotency_key = ?", owner.tenantId().toString(), key), "replay adds no movement row");
+        assertEquals(0, delta.compareTo(balance(item)), "balance unchanged by the replay");
+        assertLedgerMatchesBalance(item);
+        System.out.println("[concurrency] B same key+different payloads: 201=" + ids.size() + " 409="
+                + (results.size() - ids.size()) + " of " + results.size() + " parallel requests");
     }
 
     // ------------------------------------------------------------------ C. distinct keys, no lost update
@@ -564,6 +620,143 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         Collections.sort(expectedWarnings);
         Collections.sort(actualWarnings);
         assertEquals(expectedWarnings, actualWarnings);
+        assertLedgerMatchesBalance(item);
+    }
+
+    // ------------------------------------------------------------------ H. payment racing with cancel
+
+    @Test
+    void paymentRacingWithCancelLeavesExactlyOneConsistentOutcomePerOrder() throws Exception {
+        MerchantFixture owner = api.onboardOwner("conc-h");
+        MerchantFixture cashier = api.onboardCashier(owner, "conc-h-cashier");
+        String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
+        String item = createIngredient(owner, "Biji Kopi", "g", "10", "10000");
+        setRecipe(owner, productId, item, "50");
+        int paymentWins = 0;
+        int cancelWins = 0;
+
+        for (int round = 0; round < ROUNDS; round++) {
+            String orderId = createOrder(cashier, productId);
+            String paymentKey = "pay-" + UUID.randomUUID();
+            List<Callable<MvcResult>> tasks = new ArrayList<>();
+            tasks.add(() -> payCashCall(cashier, orderId, paymentKey));
+            tasks.add(() -> cancelCall(cashier, orderId));
+            List<MvcResult> results = runInParallel(tasks);
+            MvcResult payment = results.get(0);
+            MvcResult cancel = results.get(1);
+            String context = "round " + round + " order " + orderId + " payment=" + describe(payment)
+                    + " cancel=" + describe(cancel);
+
+            assertNoServerError(results);
+            boolean paid = is2xx(payment);
+            assertTrue(paid ^ is2xx(cancel), "exactly one of payment and cancel is 2xx: " + context);
+            assertTrue(is4xx(paid ? cancel : payment), "the loser must be a clean 4xx: " + context);
+
+            String paymentStatus = api.jdbc().queryForObject(
+                    "SELECT payment_status FROM sales_orders WHERE id = ?::uuid", String.class, orderId);
+            String orderStatus = api.jdbc().queryForObject(
+                    "SELECT status FROM sales_orders WHERE id = ?::uuid", String.class, orderId);
+            if (paid) {
+                paymentWins++;
+                assertEquals("PAID", paymentStatus, "payment won: " + context);
+                assertFalse("CANCELLED".equals(orderStatus), "payment won, order must not be cancelled: " + context);
+                assertEquals(1, countPayments(orderId), "payment won, exactly one payment row: " + context);
+                assertEquals(1, saleMovements(orderId), "payment won, exactly one SALE movement: " + context);
+                assertDecimal("-50", api.jdbc().queryForObject("SELECT quantity_delta FROM inventory_movements "
+                        + "WHERE order_id = ?::uuid AND movement_type = 'SALE'", BigDecimal.class, orderId),
+                        "sale delta of " + orderId);
+            } else {
+                cancelWins++;
+                assertEquals("UNPAID", paymentStatus, "cancel won: " + context);
+                assertEquals("CANCELLED", orderStatus, "cancel won: " + context);
+                assertEquals(0, countPayments(orderId), "cancel won, no payment row: " + context);
+                assertEquals(0, saleMovements(orderId), "cancel won, no SALE movement: " + context);
+            }
+        }
+
+        System.out.println("[concurrency] H pay vs cancel: payment won=" + paymentWins + " cancel won=" + cancelWins
+                + " of " + ROUNDS + " rounds");
+        assertEquals(ROUNDS, paymentWins + cancelWins);
+        assertDecimal(String.valueOf(10000 - 50 * paymentWins), balance(item), "10000 - 50 x rounds won by the payment");
+        assertEquals(paymentWins, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+                + "AND movement_type = 'SALE'", item), "one SALE movement per paid order");
+        assertLedgerMatchesBalance(item);
+    }
+
+    // ------------------------------------------------------------------ I. payment racing with discount
+
+    @Test
+    void paymentRacingWithDiscountKeepsTheChargedTotalAndTheDiscountRowConsistent() throws Exception {
+        MerchantFixture owner = api.onboardOwner("conc-i");
+        MerchantFixture cashier = api.onboardCashier(owner, "conc-i-cashier");
+        String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
+        String item = createIngredient(owner, "Biji Kopi", "g", "10", "10000");
+        setRecipe(owner, productId, item, "50");
+        int discountApplied = 0;
+        int discountRejected = 0;
+
+        for (int round = 0; round < ROUNDS; round++) {
+            String orderId = createOrder(cashier, productId);
+            BigDecimal undiscountedTotal = api.jdbc().queryForObject(
+                    "SELECT total FROM sales_orders WHERE id = ?::uuid", BigDecimal.class, orderId);
+            String paymentKey = "pay-" + UUID.randomUUID();
+            List<Callable<MvcResult>> tasks = new ArrayList<>();
+            tasks.add(() -> payCashCall(cashier, orderId, paymentKey));
+            tasks.add(() -> discountCall(owner, orderId));
+            List<MvcResult> results = runInParallel(tasks);
+            MvcResult payment = results.get(0);
+            MvcResult discount = results.get(1);
+            String context = "round " + round + " order " + orderId + " payment=" + describe(payment)
+                    + " discount=" + describe(discount);
+
+            assertNoServerError(results);
+            assertTrue(is2xx(payment), "the payment must always succeed: " + context);
+            assertTrue(is2xx(discount) || is4xx(discount), "the discount is 2xx or a clean 4xx: " + context);
+
+            Map<String, Object> order = api.jdbc().queryForMap("SELECT subtotal, discount_amount, tax_amount, "
+                    + "service_charge_amount, total, payment_status FROM sales_orders WHERE id = ?::uuid", orderId);
+            BigDecimal subtotal = (BigDecimal) order.get("subtotal");
+            BigDecimal discountAmount = (BigDecimal) order.get("discount_amount");
+            BigDecimal tax = (BigDecimal) order.get("tax_amount");
+            BigDecimal serviceCharge = (BigDecimal) order.get("service_charge_amount");
+            BigDecimal total = (BigDecimal) order.get("total");
+            assertEquals("PAID", order.get("payment_status"), context);
+            assertEquals(1, countPayments(orderId), "exactly one payment row: " + context);
+            assertEquals(1, saleMovements(orderId), "exactly one SALE movement: " + context);
+            Map<String, Object> paymentRow = api.jdbc().queryForMap("SELECT amount_paid, change_amount "
+                    + "FROM payments WHERE sales_order_id = ?::uuid", orderId);
+            BigDecimal tendered = (BigDecimal) paymentRow.get("amount_paid");
+            BigDecimal change = (BigDecimal) paymentRow.get("change_amount");
+            assertEquals(0, change.compareTo(tendered.subtract(total)),
+                    "change " + change + " must equal tendered " + tendered + " - persisted total " + total + ": "
+                            + context);
+            assertEquals(0, total.compareTo(subtotal.subtract(discountAmount).add(tax).add(serviceCharge)),
+                    "persisted total must add up from its persisted parts: " + context);
+            int discountRows = count("SELECT count(*) FROM discounts WHERE sales_order_id = ?::uuid", orderId);
+            if (is2xx(discount)) {
+                discountApplied++;
+                assertEquals(1, discountRows, "discount applied, exactly one discount row: " + context);
+                assertDecimal("1000", discountAmount, "persisted discount amount of " + orderId);
+                assertDecimal("1000", api.jdbc().queryForObject("SELECT amount FROM discounts "
+                        + "WHERE sales_order_id = ?::uuid", BigDecimal.class, orderId), "discount row amount");
+                assertTrue(total.compareTo(undiscountedTotal) < 0,
+                        "discounted total " + total + " must be below " + undiscountedTotal + ": " + context);
+            } else {
+                discountRejected++;
+                assertEquals(0, discountRows, "discount rejected, no discount row: " + context);
+                assertDecimal("0", discountAmount, "no persisted discount amount of " + orderId);
+                assertEquals(0, total.compareTo(undiscountedTotal),
+                        "discount rejected, total must stay " + undiscountedTotal + " but was " + total + ": "
+                                + context);
+            }
+        }
+
+        System.out.println("[concurrency] I pay vs discount: discount applied before payment=" + discountApplied
+                + " rejected=" + discountRejected + " of " + ROUNDS + " rounds");
+        assertEquals(ROUNDS, discountApplied + discountRejected);
+        assertDecimal(String.valueOf(10000 - 50 * ROUNDS), balance(item), "every order was paid, 50 g each");
+        assertEquals(ROUNDS, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+                + "AND movement_type = 'SALE'", item), "one SALE movement per paid order");
         assertLedgerMatchesBalance(item);
     }
 }
