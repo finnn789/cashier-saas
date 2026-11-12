@@ -81,8 +81,12 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         return productUrl(merchant, productId) + "/recipe";
     }
 
-    private static String optionRecipeUrl(MerchantFixture merchant, String productId, String groupId, String optionId) {
-        return productUrl(merchant, productId) + "/groups/" + groupId + "/options/" + optionId + "/recipe";
+    private static String optionGroups(MerchantFixture merchant) {
+        return "/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/option-groups";
+    }
+
+    private static String optionRecipeUrl(MerchantFixture merchant, String groupId, String optionId) {
+        return optionGroups(merchant) + "/" + groupId + "/options/" + optionId + "/recipe";
     }
 
     private static String itemJson(String name, String unit, String reorderLevel, String initialQuantity) {
@@ -131,16 +135,27 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(200, result.getResponse().getStatus(), result.getResponse().getContentAsString());
     }
 
-    private String createGroup(MerchantFixture owner, String productId) throws Exception {
-        return ApiTestSupport.read(api.send(post(productUrl(owner, productId) + "/groups")
+    private String createGroup(MerchantFixture owner) throws Exception {
+        return ApiTestSupport.read(api.send(post(optionGroups(owner))
                 .header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"Tambahan\",\"required\":false,\"minimumSelections\":0,"
                         + "\"maximumSelections\":3,\"displayOrder\":1}"), 201), "$.data.id");
     }
 
-    private String createOption(MerchantFixture owner, String productId, String groupId, String name, String price)
-            throws Exception {
-        return ApiTestSupport.read(api.send(post(productUrl(owner, productId) + "/groups/" + groupId + "/options")
+    /** Replaces the groups attached to the product; an attached group is required for the order flow to accept its options. */
+    private void attachGroups(MerchantFixture owner, String productId, String... groupIds) throws Exception {
+        StringBuilder ids = new StringBuilder();
+        for (int i = 0; i < groupIds.length; i++) {
+            if (i > 0) {
+                ids.append(',');
+            }
+            ids.append('"').append(groupIds[i]).append('"');
+        }
+        setRecipe(owner, productUrl(owner, productId) + "/option-groups", "{\"groupIds\":[" + ids + "]}");
+    }
+
+    private String createOption(MerchantFixture owner, String groupId, String name, String price) throws Exception {
+        return ApiTestSupport.read(api.send(post(optionGroups(owner) + "/" + groupId + "/options")
                 .header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"" + name + "\",\"priceAdjustment\":" + price
                         + ",\"available\":true,\"displayOrder\":1}"), 201), "$.data.id");
@@ -273,9 +288,10 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         String kopi = createIngredient(owner, "Biji Kopi", "g", "100", "1000");
         String susu = createIngredient(owner, "Susu", "ml", "50", "500");
         setRecipe(owner, productRecipeUrl(owner, productId), recipeJson(kopi, "18", susu, "100"));
-        String groupId = createGroup(owner, productId);
-        String shotId = createOption(owner, productId, groupId, "Extra Shot", "5000");
-        setRecipe(owner, optionRecipeUrl(owner, productId, groupId, shotId), recipeJson(kopi, "18"));
+        String groupId = createGroup(owner);
+        attachGroups(owner, productId, groupId);
+        String shotId = createOption(owner, groupId, "Extra Shot", "5000");
+        setRecipe(owner, optionRecipeUrl(owner, groupId, shotId), recipeJson(kopi, "18"));
 
         String orderId = createOrder(owner, productId, 2, shotId);
         MvcResult paid = payCash(owner, orderId, "pay-" + UUID.randomUUID());
@@ -598,7 +614,6 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MerchantFixture owner = api.onboardOwner("inv-recipe");
         MerchantFixture other = api.onboardOwner("inv-recipe-other");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi Susu", PRICE);
-        String otherProductId = api.createProduct(owner, api.createCategory(owner, "Lain"), "Teh", PRICE);
         String kopi = createIngredient(owner, "Biji Kopi", "g", "10", "100");
         String susu = createIngredient(owner, "Susu", "ml", "10", "100");
         String foreign = createIngredient(other, "Biji Kopi", "g", "10", "100");
@@ -651,19 +666,22 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(1, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ?::uuid AND action = 'FNB_RECIPE_CHANGED' "
                 + "AND details = 'lines=0'", owner.tenantId().toString()));
 
-        // Option recipe: same rules, and the option must belong to the given group and product.
-        String groupId = createGroup(owner, productId);
-        String otherGroupId = createGroup(owner, productId);
-        String optionId = createOption(owner, productId, groupId, "Extra Shot", "5000");
-        String optionUrl = optionRecipeUrl(owner, productId, groupId, optionId);
+        // Option recipe: same rules, and the option must belong to the given group (groups are outlet-level).
+        String groupId = createGroup(owner);
+        String otherGroupId = createGroup(owner);
+        attachGroups(owner, productId, groupId, otherGroupId);
+        String foreignGroupId = createGroup(other);
+        String optionId = createOption(owner, groupId, "Extra Shot", "5000");
+        String optionUrl = optionRecipeUrl(owner, groupId, optionId);
         assertStatus(200, putRecipe(owner, optionUrl, recipeJson(kopi, "18")));
         assertStatus(200, putRecipe(owner, optionUrl, recipeJson(kopi, "18")));
         assertEquals(1, count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
         MvcResult optionRead = api.send(get(optionUrl).header(AUTH, owner.bearer()), 200);
         assertEquals(List.of("Biji Kopi"), readList(optionRead, "$.data.lines[*].inventoryItemName"));
-        assertStatus(404, putRecipe(owner, optionRecipeUrl(owner, productId, otherGroupId, optionId),
+        assertStatus(404, putRecipe(owner, optionRecipeUrl(owner, otherGroupId, optionId),
                 recipeJson(kopi, "18")));
-        assertStatus(404, putRecipe(owner, optionRecipeUrl(owner, otherProductId, groupId, optionId),
+        // Replaces the former "group of another product" check: a group of another tenant is not found.
+        assertStatus(404, putRecipe(owner, optionRecipeUrl(owner, foreignGroupId, optionId),
                 recipeJson(kopi, "18")));
         assertStatus(400, putRecipe(owner, optionUrl, recipeJson(kopi, "1", kopi, "2")));
         assertStatus(404, putRecipe(owner, optionUrl, recipeJson(foreign, "1")));

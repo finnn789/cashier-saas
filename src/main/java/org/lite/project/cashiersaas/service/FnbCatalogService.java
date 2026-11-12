@@ -11,8 +11,10 @@ import org.lite.project.cashiersaas.entity.shared.catalog.CategoryEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
+import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbCatalogRepository;
@@ -101,43 +103,72 @@ public class FnbCatalogService {
                 .filter(p -> !p.getCategory().isArchived()).map(FnbCatalogMapper::product).toList();
     }
     @Transactional
-    public FnbOptionGroupResponse createGroup(TenantPrincipal principal, UUID outletId, UUID productId, FnbOptionGroupRequest request) {
+    public FnbOptionGroupResponse createGroup(TenantPrincipal principal, UUID outletId, FnbOptionGroupRequest request) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         validateGroup(request);
-        ProductEntity product = product(principal.getTenantId(), outletId, productId);
-        OptionGroupEntity entity = OptionGroupEntity.create(context.getTenant(), context.getOutlet(), product,
-                groupDetails(request));
+        OptionGroupEntity entity = OptionGroupEntity.create(context.getTenant(), context.getOutlet(), groupDetails(request));
         catalog.persist(entity);
         return FnbCatalogMapper.group(entity);
     }
     @Transactional
-    public FnbOptionGroupResponse updateGroup(TenantPrincipal principal, UUID outletId, UUID productId, UUID id, FnbOptionGroupRequest request) {
+    public FnbOptionGroupResponse updateGroup(TenantPrincipal principal, UUID outletId, UUID id, FnbOptionGroupRequest request) {
         guard.requireOwner(principal, outletId);
         validateGroup(request);
-        product(principal.getTenantId(), outletId, productId);
-        OptionGroupEntity entity = group(principal.getTenantId(), outletId, productId, id);
+        OptionGroupEntity entity = group(principal.getTenantId(), outletId, id);
         entity.update(groupDetails(request));
         return FnbCatalogMapper.group(entity);
     }
+    @Transactional
+    public FnbOptionGroupResponse archiveGroup(TenantPrincipal principal, UUID outletId, UUID id) {
+        guard.requireOwner(principal, outletId);
+        OptionGroupEntity entity = group(principal.getTenantId(), outletId, id);
+        if (catalog.groupInUse(principal.getTenantId(), outletId, id)) {
+            throw new OperationConflictException("Grup pilihan masih dipakai produk.");
+        }
+        entity.archive();
+        return FnbCatalogMapper.group(entity);
+    }
     @Transactional(readOnly = true)
-    public List<FnbOptionGroupResponse> groups(TenantPrincipal principal, UUID outletId, UUID productId) {
+    public List<FnbOptionGroupResponse> groups(TenantPrincipal principal, UUID outletId) {
+        guard.requireOutlet(principal, outletId);
+        return catalog.outletGroups(principal.getTenantId(), outletId).stream().map(FnbCatalogMapper::group).toList();
+    }
+    @Transactional(readOnly = true)
+    public List<FnbOptionGroupResponse> productGroups(TenantPrincipal principal, UUID outletId, UUID productId) {
         guard.requireOutlet(principal, outletId);
         product(principal.getTenantId(), outletId, productId);
         return catalog.groups(principal.getTenantId(), outletId, productId).stream().map(FnbCatalogMapper::group).toList();
     }
     @Transactional
-    public FnbOptionResponse createOption(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, FnbOptionRequest request) {
+    public List<FnbOptionGroupResponse> replaceProductGroups(TenantPrincipal principal, UUID outletId, UUID productId,
+                                                             FnbProductOptionGroupsRequest request) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
-        OptionGroupEntity group = group(principal.getTenantId(), outletId, productId, groupId);
+        ProductEntity product = product(principal.getTenantId(), outletId, productId);
+        Set<UUID> seen = new HashSet<>();
+        List<OptionGroupEntity> groups = new ArrayList<>();
+        for (UUID groupId : request.getGroupIds()) {
+            if (groupId == null || !seen.add(groupId)) throw new InvalidOperationException("Grup pilihan tidak boleh duplikat.");
+            groups.add(group(principal.getTenantId(), outletId, groupId));
+        }
+        catalog.deleteProductGroups(principal.getTenantId(), outletId, productId);
+        for (int i = 0; i < groups.size(); i++) {
+            catalog.persist(ProductOptionGroupEntity.create(context.getTenant(), context.getOutlet(), product, groups.get(i), i));
+        }
+        return groups.stream().map(FnbCatalogMapper::group).toList();
+    }
+    @Transactional
+    public FnbOptionResponse createOption(TenantPrincipal principal, UUID outletId, UUID groupId, FnbOptionRequest request) {
+        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        OptionGroupEntity group = group(principal.getTenantId(), outletId, groupId);
         ProductOptionEntity entity = ProductOptionEntity.create(context.getTenant(), context.getOutlet(), group,
                 request.getName().trim(), request.getPriceAdjustment(), request.isAvailable(), request.getDisplayOrder());
         catalog.persist(entity);
         return FnbCatalogMapper.option(entity);
     }
     @Transactional
-    public FnbOptionResponse updateOption(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, UUID id, FnbOptionRequest request) {
+    public FnbOptionResponse updateOption(TenantPrincipal principal, UUID outletId, UUID groupId, UUID id, FnbOptionRequest request) {
         guard.requireOwner(principal, outletId);
-        ProductOptionEntity entity = option(principal.getTenantId(), outletId, productId, groupId, id);
+        ProductOptionEntity entity = option(principal.getTenantId(), outletId, groupId, id);
         if (entity.getPriceAdjustment().compareTo(request.getPriceAdjustment()) != 0) {
             requirePriceReason(request.getPriceChangeReason());
             recordPrice(principal, outletId, id, AuditLogEntity.Action.FNB_OPTION_PRICE_CHANGED,
@@ -147,9 +178,9 @@ public class FnbCatalogService {
         return FnbCatalogMapper.option(entity);
     }
     @Transactional(readOnly = true)
-    public List<FnbOptionResponse> options(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId) {
+    public List<FnbOptionResponse> options(TenantPrincipal principal, UUID outletId, UUID groupId) {
         guard.requireOutlet(principal, outletId);
-        group(principal.getTenantId(), outletId, productId, groupId);
+        group(principal.getTenantId(), outletId, groupId);
         return catalog.options(principal.getTenantId(), outletId, groupId).stream().map(FnbCatalogMapper::option).toList();
     }
     @Transactional
@@ -167,17 +198,17 @@ public class FnbCatalogService {
         return FnbCatalogMapper.recipe(inventory.productRecipes(principal.getTenantId(), outletId, List.of(productId)));
     }
     @Transactional
-    public FnbRecipeResponse replaceOptionRecipe(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, UUID id, FnbRecipeRequest request) {
+    public FnbRecipeResponse replaceOptionRecipe(TenantPrincipal principal, UUID outletId, UUID groupId, UUID id, FnbRecipeRequest request) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
-        ProductOptionEntity option = option(principal.getTenantId(), outletId, productId, groupId, id);
+        ProductOptionEntity option = option(principal.getTenantId(), outletId, groupId, id);
         return FnbCatalogMapper.recipe(replaceRecipe(principal, outletId, id, request,
                 () -> inventory.deleteOptionRecipe(principal.getTenantId(), outletId, id),
                 (item, quantity) -> RecipeLineEntity.forOption(context.getTenant(), context.getOutlet(), option, item, quantity)));
     }
     @Transactional(readOnly = true)
-    public FnbRecipeResponse optionRecipe(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, UUID id) {
+    public FnbRecipeResponse optionRecipe(TenantPrincipal principal, UUID outletId, UUID groupId, UUID id) {
         guard.requireOwner(principal, outletId);
-        option(principal.getTenantId(), outletId, productId, groupId, id);
+        option(principal.getTenantId(), outletId, groupId, id);
         return FnbCatalogMapper.recipe(inventory.optionRecipes(principal.getTenantId(), outletId, List.of(id)));
     }
     private List<RecipeLineEntity> replaceRecipe(TenantPrincipal principal, UUID outletId, UUID ownerId, FnbRecipeRequest request,
@@ -198,8 +229,8 @@ public class FnbCatalogService {
         recordAudit(principal, outletId, ownerId, AuditLogEntity.Action.FNB_RECIPE_CHANGED, null, "lines=" + lines.size());
         return lines;
     }
-    private ProductOptionEntity option(UUID tenant, UUID outlet, UUID productId, UUID groupId, UUID id) {
-        group(tenant, outlet, productId, groupId);
+    private ProductOptionEntity option(UUID tenant, UUID outlet, UUID groupId, UUID id) {
+        group(tenant, outlet, groupId);
         ProductOptionEntity entity = catalog.option(tenant, outlet, id).orElseThrow(ResourceNotFoundException::new);
         if (!entity.getOptionGroup().getId().equals(groupId)) throw new ResourceNotFoundException();
         return entity;
@@ -212,11 +243,8 @@ public class FnbCatalogService {
         if (entity.getCategory().isArchived()) throw new ResourceNotFoundException();
         return entity;
     }
-    private OptionGroupEntity group(UUID tenant, UUID outlet, UUID productId, UUID id) {
-        product(tenant, outlet, productId);
-        OptionGroupEntity entity = catalog.group(tenant, outlet, id).orElseThrow(ResourceNotFoundException::new);
-        if (!entity.getProduct().getId().equals(productId)) throw new ResourceNotFoundException();
-        return entity;
+    private OptionGroupEntity group(UUID tenant, UUID outlet, UUID id) {
+        return catalog.group(tenant, outlet, id).orElseThrow(ResourceNotFoundException::new);
     }
     private void validateGroup(FnbOptionGroupRequest request) {
         if (request.getMinimumSelections() > request.getMaximumSelections()

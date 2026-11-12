@@ -2,6 +2,9 @@ package org.lite.project.cashiersaas.configuration;
 
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.component.ApiSecurityExceptionHandler;
+import org.lite.project.cashiersaas.component.HttpRateLimiter;
+import org.lite.project.cashiersaas.component.RateLimitFilter;
+import org.lite.project.cashiersaas.shared.RateLimitConstants;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -13,6 +16,7 @@ import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
@@ -20,6 +24,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.beans.factory.annotation.Value;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -32,7 +37,9 @@ public class SecurityConfiguration {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
             Converter<Jwt, AbstractAuthenticationToken> jwtAuthenticationConverter,
-            ApiSecurityExceptionHandler securityExceptionHandler) {
+            ApiSecurityExceptionHandler securityExceptionHandler,
+            HttpRateLimiter httpRateLimiter,
+            ObjectMapper objectMapper) {
         return http
                 .cors(cors-> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf
@@ -62,7 +69,11 @@ public class SecurityConfiguration {
                                                         .authenticationEntryPoint(securityExceptionHandler)
                                                         .accessDeniedHandler(securityExceptionHandler)
                                                         .jwt(jwt ->
-                                                        jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))).build();
+                                                        jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
+                // Not a bean on purpose: it must run after the Bearer filter so the user is known.
+                .addFilterAfter(new RateLimitFilter(httpRateLimiter, objectMapper),
+                        BearerTokenAuthenticationFilter.class)
+                .build();
     }
 
     @Bean
@@ -71,7 +82,7 @@ public class SecurityConfiguration {
         config.setAllowedOrigins(FnbWebSocketConfiguration.allowedOrigins(realtimeAllowedOrigins));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("X-XSRF-TOKEN"));
+        config.setExposedHeaders(List.of("X-XSRF-TOKEN", RateLimitConstants.RETRY_AFTER_HEADER));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

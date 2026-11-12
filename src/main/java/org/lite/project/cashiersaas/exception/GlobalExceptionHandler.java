@@ -28,6 +28,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.lite.project.cashiersaas.shared.response.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -96,6 +97,14 @@ public class GlobalExceptionHandler {
     public ApiResponse<Object> handleDatabaseConflict(DataIntegrityViolationException exception) {
         log.warn("Operation rejected by a database integrity rule.");
         return ApiResponse.error(HttpStatus.CONFLICT.value(), "Data sudah berubah atau terjadi duplikasi.");
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiResponse<Object> handleOptimisticLockConflict(OptimisticLockingFailureException exception) {
+        log.warn("Operation rejected because the data was changed concurrently.");
+        return ApiResponse.error(HttpStatus.CONFLICT.value(),
+                "Data baru saja diubah oleh proses lain. Silakan coba lagi.");
     }
 
     @ExceptionHandler(BusinessProfileAlreadyCompletedException.class)

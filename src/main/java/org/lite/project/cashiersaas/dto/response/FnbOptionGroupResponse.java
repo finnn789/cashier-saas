@@ -7,7 +7,6 @@ import java.util.UUID;
 @Getter @Setter
 public class FnbOptionGroupResponse {
     private UUID id;
-    private UUID productId;
     private String name;
     private boolean required;
     private int minimumSelections;

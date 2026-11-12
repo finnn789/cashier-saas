@@ -4,3 +4,13 @@ cloudResources:
   collections:
     ../postman/collections/KedaiMbo API: 27489349-26b2d778-a8ec-4ce9-81be-5d78f21f9082
     ../postman/collections/F&B Catalog Controller: 27489349-deee8abd-9661-46bf-a458-ebc438084783
+  flows:
+    ../postman/flows/New flow.flow: 6ae0b623ab7a9eb1ec248f48
+  specs:
+    ../E:/Java/cashier-saas/postman/specs/New Specification/index.yaml: 87169621-728d-46b6-8a4a-dd5b232254ef
+resourceNameMappings:
+  specs:
+    - ../E:/Java/cashier-saas/postman/specs/New Specification/index.yaml: New Specification
+localResources:
+  specs:
+    - ../E:/Java/cashier-saas/postman/specs/New Specification/index.yaml

@@ -1,7 +1,0 @@
-$kind: http-request
-url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}"
-method: GET
-headers:
-  - key: Accept
-    value: application/json
-order: 3000

@@ -15,6 +15,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,7 +37,7 @@ class FnbMenuMapperTest {
         ReflectionTestUtils.setField(category, "id", java.util.UUID.randomUUID());
         ReflectionTestUtils.setField(product, "id", java.util.UUID.randomUUID());
 
-        PublicMenuResponse response = FnbMenuMapper.menu(qr, List.of(category), List.of(product), List.of(), List.of());
+        PublicMenuResponse response = FnbMenuMapper.menu(qr, List.of(category), List.of(product), Map.of(), List.of());
         String json = new ObjectMapper().writeValueAsString(response);
 
         assertEquals(List.of(ServiceType.DINE_IN, ServiceType.TAKEAWAY), response.getServiceTypes());
@@ -61,7 +62,7 @@ class FnbMenuMapperTest {
         ProductEntity product = ProductEntity.create(tenant, outlet,
                 new ProductEntity.Details(category, "Nasi", "Hangat", new BigDecimal("25000.00"), "/nasi.png", true, 1));
         org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity group =
-                org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity.create(tenant, outlet, product,
+                org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity.create(tenant, outlet,
                         new org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity.Details("Level", true, 1, 1, 1));
         org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity option =
                 org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity.create(tenant, outlet, group,
@@ -72,7 +73,7 @@ class FnbMenuMapperTest {
         ReflectionTestUtils.setField(option, "id", UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"));
 
         PublicMenuResponse response = FnbMenuMapper.menu(qr, List.of(category), List.of(product),
-                List.of(group), List.of(option));
+                Map.of(product.getId(), List.of(group)), List.of(option));
 
         assertEquals(List.of(ServiceType.DINE_IN), response.getServiceTypes());
         assertEquals("A1", response.getTableName());
@@ -81,5 +82,40 @@ class FnbMenuMapperTest {
         assertEquals(1, mappedGroup.getMinimumSelections());
         assertEquals("Pedas", mappedGroup.getOptions().get(0).getName());
         assertEquals(new BigDecimal("2000.00"), mappedGroup.getOptions().get(0).getPriceAdjustment());
+    }
+
+    @Test
+    void sharedGroupIsExposedUnderEachProductOnceWithOptionsNotDuplicated() {
+        TenantEntity tenant = new TenantEntity();
+        OutletEntity outlet = OutletEntity.open(tenant, "Main", "Asia/Jakarta", null, null);
+        TableQrTokenEntity qr = TableQrTokenEntity.outlet(tenant, outlet, "C".repeat(43));
+        CategoryEntity category = CategoryEntity.create(tenant, outlet, "Minuman", 1);
+        ProductEntity tea = ProductEntity.create(tenant, outlet,
+                new ProductEntity.Details(category, "Teh", null, new BigDecimal("10000.00"), null, true, 1));
+        ProductEntity coffee = ProductEntity.create(tenant, outlet,
+                new ProductEntity.Details(category, "Kopi", null, new BigDecimal("15000.00"), null, true, 2));
+        org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity group =
+                org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity.create(tenant, outlet,
+                        new org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity.Details("Topping", false, 0, 2, 1));
+        org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity option =
+                org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity.create(tenant, outlet, group,
+                        "Boba", new BigDecimal("3000.00"), true, 1);
+        ReflectionTestUtils.setField(category, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(tea, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(coffee, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(group, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(option, "id", UUID.randomUUID());
+
+        PublicMenuResponse response = FnbMenuMapper.menu(qr, List.of(category), List.of(tea, coffee),
+                Map.of(tea.getId(), List.of(group), coffee.getId(), List.of(group)), List.of(option));
+
+        List<PublicMenuResponse.Product> products = response.getCategories().get(0).getProducts();
+        assertEquals(2, products.size());
+        for (PublicMenuResponse.Product mapped : products) {
+            assertEquals(1, mapped.getGroups().size());
+            assertEquals("Topping", mapped.getGroups().get(0).getName());
+            assertEquals(1, mapped.getGroups().get(0).getOptions().size());
+            assertEquals("Boba", mapped.getGroups().get(0).getOptions().get(0).getName());
+        }
     }
 }

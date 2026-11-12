@@ -2,6 +2,7 @@ package org.lite.project.cashiersaas.component;
 
 import java.util.List;
 import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.service.FnbRealtimeTicketService;
 import org.springframework.http.server.ServerHttpRequest;
@@ -15,6 +16,7 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 public class FnbRealtimeHandshakeInterceptor implements HandshakeInterceptor {
     public static final String TICKET_ATTRIBUTE = "fnbRealtimeTicket";
     private final FnbRealtimeTicketService tickets;
+
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler handler,
                                    Map<String, Object> attributes) {
@@ -29,7 +31,11 @@ public class FnbRealtimeHandshakeInterceptor implements HandshakeInterceptor {
                 .map(value -> value.substring("ticket.".length())).findFirst().orElse(null);
         FnbRealtimeTicketService.Ticket ticket = tickets.consume(raw);
         if (ticket == null) return false;
-        attributes.put(TICKET_ATTRIBUTE, ticket); return true;
+        attributes.put(TICKET_ATTRIBUTE, ticket);
+        return true;
     }
-    @Override public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler handler, Exception exception) { }
+
+    @Override
+    public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler handler, Exception exception) {
+    }
 }

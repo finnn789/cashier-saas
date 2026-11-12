@@ -21,7 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -75,16 +79,20 @@ public class FnbTableService {
         List<CategoryEntity> categories = catalog.categories(tenantId, outletId);
         List<ProductEntity> products = catalog.products(tenantId, outletId).stream()
                 .filter(product -> categories.stream().anyMatch(category -> category.getId().equals(product.getCategory().getId()))).toList();
-        List<OptionGroupEntity> groups = new ArrayList<>();
+        Map<UUID, List<OptionGroupEntity>> groupsByProduct = new LinkedHashMap<>();
+        Set<UUID> seenGroups = new HashSet<>();
         List<ProductOptionEntity> options = new ArrayList<>();
         for (ProductEntity product : products) {
             List<OptionGroupEntity> productGroups = catalog.groups(tenantId, outletId, product.getId());
-            groups.addAll(productGroups);
+            groupsByProduct.put(product.getId(), productGroups);
             for (OptionGroupEntity group : productGroups) {
-                options.addAll(catalog.options(tenantId, outletId, group.getId()));
+                // a group shared by several products must load its options only once
+                if (seenGroups.add(group.getId())) {
+                    options.addAll(catalog.options(tenantId, outletId, group.getId()));
+                }
             }
         }
-        return FnbMenuMapper.menu(qr, categories, products, groups, options);
+        return FnbMenuMapper.menu(qr, categories, products, groupsByProduct, options);
     }
 
     private DiningTableEntity table(UUID tenant, UUID outlet, UUID id) {

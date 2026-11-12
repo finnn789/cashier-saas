@@ -23,9 +23,6 @@ public class OptionGroupEntity extends MutableBaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "outlet_id", nullable = false)
     private OutletEntity outlet;
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "product_id", nullable = false)
-    private ProductEntity product;
     @Column(nullable = false, length = 120)
     private String name;
     @Column(nullable = false)
@@ -36,18 +33,22 @@ public class OptionGroupEntity extends MutableBaseEntity {
     private int maximumSelections;
     @Column(nullable = false)
     private int displayOrder;
+    @Column(nullable = false)
+    private boolean archived;
 
     public record Details(String name, boolean required, int minimumSelections,
                           int maximumSelections, int displayOrder) { }
 
-    public static OptionGroupEntity create(TenantEntity tenant, OutletEntity outlet, ProductEntity product,
-                                           Details details) {
+    public static OptionGroupEntity create(TenantEntity tenant, OutletEntity outlet, Details details) {
         OptionGroupEntity group = new OptionGroupEntity();
         group.tenant = tenant;
         group.outlet = outlet;
-        group.product = product;
         group.update(details);
         return group;
+    }
+
+    public void archive() {
+        this.archived = true;
     }
 
     public void update(Details details) {

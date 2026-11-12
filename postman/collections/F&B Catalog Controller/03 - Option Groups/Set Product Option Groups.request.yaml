@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}/option-groups"
+method: PUT
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"groupIds": ["{{groupId}}"]}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 200 OK', () => pm.response.to.have.status(200)); var res = pm.response.json(); pm.expect(res.success).to.be.true; pm.expect(res.data).to.be.an('array');
+    language: text/javascript
+order: 5000
