@@ -14,114 +14,82 @@ description: |-
 variables:
   - key: baseUrl
     value: http://localhost:8080
-    disabled: false
     secret: false
   - key: fullName
     value: Owner KedaiMbo
-    disabled: false
     secret: false
   - key: email
     value: ""
-    disabled: false
     secret: false
   - key: password
     value: ""
-    disabled: false
     secret: false
   - key: cashierEmail
     value: ""
-    disabled: false
     secret: false
   - key: accessToken
     value: ""
-    disabled: false
     secret: false
   - key: accountToken
     value: ""
-    disabled: false
     secret: false
   - key: csrfToken
     value: ""
-    disabled: false
     secret: false
   - key: tenantId
     value: ""
-    disabled: false
     secret: false
   - key: outletId
     value: ""
-    disabled: false
     secret: false
   - key: categoryId
     value: ""
-    disabled: false
     secret: false
   - key: productId
     value: ""
-    disabled: false
     secret: false
   - key: groupId
     value: ""
-    disabled: false
     secret: false
   - key: optionId
     value: ""
-    disabled: false
     secret: false
   - key: tableId
     value: ""
-    disabled: false
     secret: false
   - key: qrToken
     value: ""
-    disabled: false
     secret: false
   - key: outletQrToken
     value: ""
-    disabled: false
     secret: false
   - key: orderToken
     value: ""
-    disabled: false
     secret: false
   - key: itemId
     value: ""
-    disabled: false
     secret: false
   - key: saleId
     value: ""
-    disabled: false
     secret: false
   - key: invitationCode
     value: ""
-    disabled: false
     secret: false
   - key: onboardingKey
     value: ""
-    disabled: false
     secret: false
   - key: saleKey
     value: ""
-    disabled: false
     secret: false
   - key: publicOrderKey
     value: ""
-    disabled: false
-    secret: false
-  - key: posOrderKey
-    value: ""
-    disabled: false
     secret: false
   - key: bearer_token_0vit
     secret: true
-    disabled: false
-  - key: orderId
-    value: ""
-    disabled: false
 scripts:
   - type: http:beforeRequest
     code: |-
-      ["onboardingKey","saleKey","publicOrderKey","posOrderKey"].forEach(function (key) {
+      ["onboardingKey","saleKey","publicOrderKey"].forEach(function (key) {
        if (!pm.variables.get(key)) pm.collectionVariables.set(key, pm.variables.replaceIn("{{$guid}}"));
       });
     language: text/javascript
@@ -340,15 +308,6 @@ scripts:
       }
       break;
       }
-      case "Checkout POS Order": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.orderId !== undefined && r.data.orderId !== null) pm.collectionVariables.set("orderId", r.data.orderId);
-       }
-      }
-      break;
-      }
       case "Checkout Public Order": {
       if (pm.response.code >= 200 && pm.response.code < 300) {
        const r = pm.response.json();
@@ -379,7 +338,7 @@ scripts:
       }
     language: text/javascript
 auth:
-  - id: d9475054-3ee8-4947-b6b4-5b6645a490ad
+  - id: ac2645cd-2796-48d1-b42f-31bfb9db099d
     type: bearer
     name: bearer auth
     credentials:

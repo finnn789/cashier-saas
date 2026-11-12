@@ -9,8 +9,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @RequiredArgsConstructor
 public class FnbOrderChangedListener {
     private final FnbRealtimeWebSocketHandler handler;
+
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = false)
     public void afterCommit(FnbOrderChangedEvent event) {
-        try { handler.enqueue(event); } catch (RuntimeException ignored) { /* committed operation remains successful */ }
+        try {
+            handler.enqueue(event);
+        } catch (RuntimeException ignored) { /* committed operation remains successful */ }
     }
 }

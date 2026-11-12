@@ -2,6 +2,7 @@ package org.lite.project.cashiersaas.component;
 
 import java.time.Instant;
 import java.util.UUID;
+
 import lombok.Getter;
 import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentStatus;
@@ -19,7 +20,13 @@ public final class FnbOrderChangedEvent {
 
     public FnbOrderChangedEvent(String type, UUID tenantId, UUID outletId, UUID orderId,
                                 OrderStatus orderStatus, PaymentStatus paymentStatus, Instant occurredAt) {
-        this.eventId = UUID.randomUUID(); this.type = type; this.tenantId = tenantId; this.outletId = outletId;
-        this.orderId = orderId; this.orderStatus = orderStatus; this.paymentStatus = paymentStatus; this.occurredAt = occurredAt;
+        this.eventId = UUID.randomUUID();
+        this.type = type;
+        this.tenantId = tenantId;
+        this.outletId = outletId;
+        this.orderId = orderId;
+        this.orderStatus = orderStatus;
+        this.paymentStatus = paymentStatus;
+        this.occurredAt = occurredAt;
     }
 }
