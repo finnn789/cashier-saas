@@ -14,7 +14,8 @@ Everything below exists in source (`src/main/java/org/lite/project/cashiersaas`)
 
 - **Onboarding and free tier** - account registration (a phone number is required and stored normalized, e.g. `6281234567890`), business intent, free-tier tenant/outlet creation (`OnboardingController`, `RegisterService`, `FreeTierOnboardingService`), public plan catalog.
 - **Staff invitations** - owners invite cashiers per outlet; invitation claim (`CashierInvitationController`, token stored as a SHA-256 digest).
-- **Catalog and options** - categories, products, option groups and options, with availability (`FnbCatalogController`).
+- **Catalog and options** - categories, products, options, and **reusable option groups**: groups are an outlet-level library attached to any number of products (replace-all, ordered), with required/min/max rules on the group and archive instead of delete (`FnbCatalogController`, `FnbCatalogService`; migration V5).
+- **Inventory and recipes** - per-outlet ingredients with one unit each, a stock balance, an append-only movement ledger (`RESTOCK`, `WASTE`, `ADJUSTMENT`, automatic `SALE`; reason and idempotency key required), and recipes per product and per add-on option. Stock is deducted when an order becomes paid (cash, manual non-cash and mock gateway) and the payment response carries `stockWarnings`; stock may go negative and a payment is never blocked (`FnbInventoryController`, `FnbInventoryService`, `FnbStockService`; migration V4).
 - **Tables and QR** - dining tables, per-table and per-outlet QR tokens with rotation (`FnbTableController`, `FnbOrderQrController`).
 - **Public QR ordering** - anonymous menu by QR token and order submission with an `Idempotency-Key`; order status by opaque order token (`PublicOrderController`).
 - **POS orders** - cashier checkout for dine-in/takeaway (`FnbStaffOrderController`, `FnbPosOrderService`).
@@ -76,6 +77,8 @@ More detail: [docs/architecture.md](docs/architecture.md).
 | **WebSocket single-use ticket via `Sec-WebSocket-Protocol`** | Browsers cannot send a Bearer header on a WebSocket upgrade, and URL tokens leak into logs. The client first calls an authenticated REST endpoint for a 32-byte random ticket (TTL max 30 s, stored as a digest in memory, consumed on use, capped per principal). It is then sent as the `ticket.<value>` subprotocol next to `cashier-fnb-v1`; handshakes with a query string are rejected. | The ticket store is in memory, so it is per-JVM. | `service/FnbRealtimeTicketService.java`, `component/FnbRealtimeHandshakeInterceptor.java` |
 | **AFTER_COMMIT events + REST resync** | Services publish a minimal invalidation event; a `@TransactionalEventListener(AFTER_COMMIT)` hands it to a bounded executor (queue 1000, abort policy). Clients never see uncommitted state, and a failed or dropped delivery never fails the business transaction. Clients re-fetch via REST and poll as a fallback. | Best-effort, single JVM, no replay or broker. | `component/FnbOrderChangedListener.java`, `configuration/FnbWebSocketConfiguration.java`, `service/FnbRealtimePublisher.java` |
 | **BigDecimal and price snapshots** | Totals, tax and service charge are computed server-side with `BigDecimal`. Order lines and chosen options store a snapshot of product name and price, and the tax/service rates in effect, so later menu or settings edits do not rewrite history. | More columns and copy logic. | `service/FnbOrderPricingService.java`, `entity/fnb/` |
+| **Negative stock allowed, with warnings** | A sale is never blocked by stock: there is no check constraint on `inventory_balances.quantity_on_hand`. Status is derived from `reorder_level` (OK, LOW at or below it, OUT at exactly zero, NEGATIVE below zero) and low/out/negative ingredients are returned as `stockWarnings` in the payment response. | The balance can be wrong in the physical sense until staff restock or adjust; the ledger makes the gap visible rather than refusing the sale. | `service/FnbStockService.java`, `entity/shared/inventory/InventoryBalanceEntity.java`, `db/migration/V4__fnb_inventory_recipe.sql` |
+| **Deduct stock on paid, in the payment transaction** | Both settle paths (`FnbPaymentService.settle`, `MockFnbGatewayService.settle`) call `FnbStockService.consumeForPaidOrder` after the payment row is flushed. It writes one `SALE` movement per (order, ingredient) with key `sale:{orderId}:{inventoryItemId}`, locking balances in ascending ingredient id after the tenant lock. A paid order cannot be cancelled, so no stock reversal exists. | Unpaid orders reserve nothing, so stock is only consumed at settlement. Deactivating an ingredient does not remove existing recipe lines, which keep deducting. | `service/FnbStockService.java`, `service/FnbPaymentService.java`, `service/MockFnbGatewayService.java`, `entity/fnb/SalesOrderEntity.java` |
 | **Flyway + Hibernate `validate`** | Schema is owned by versioned SQL migrations; Hibernate only validates (`ddl-auto=validate`), so entity/schema drift fails at startup instead of silently mutating a database. | Every model change needs a hand-written migration. | `src/main/resources/db/migration/`, `application.properties` |
 
 ## Tech stack
@@ -116,7 +119,7 @@ docker compose down -v                       # stop and delete data
 | PostgreSQL 17 | localhost:5432 (override: `POSTGRES_HOST_PORT`), user `cashier` / `cashier_demo`, dbs `cashier_saas` and `cashier_ai` |
 | AI service (profile `ai`) | http://localhost:8001 (override: `AI_HTTP_PORT`) |
 
-Demo data: tenant **Kopi Demo**, outlet **Kopi Demo - Pusat**. Accounts (password `Demo123!`): `owner@demo.local` (OWNERMERCHANT) and `cashier@demo.local` (CASHIER). Login with `POST /api/v1/auth/login`, then `POST /api/v1/auth/select-merchant` with `{tenantId, outletId}` to get an operational token. Full walkthrough with ids, QR tokens and a curl flow: [docs/demo.md](docs/demo.md).
+Demo data: tenant **Kopi Demo**, outlet **Kopi Demo - Pusat**; the seed also contains seven ingredients with recipes (Gula Aren starts below its reorder level so a LOW warning is visible). Accounts (password `Demo123!`): `owner@demo.local` (OWNERMERCHANT) and `cashier@demo.local` (CASHIER). Login with `POST /api/v1/auth/login`, then `POST /api/v1/auth/select-merchant` with `{tenantId, outletId}` to get an operational token. Full walkthrough with ids, QR tokens and a curl flow: [docs/demo.md](docs/demo.md).
 
 The Telegram assistant needs `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`, `AI_MODEL` and the shared `AI_INTERNAL_API_KEY` in `.env`; see `Ai-services/README.md` (Indonesian).
 
@@ -135,16 +138,21 @@ This flow is under active development and is not yet verified end to end. The co
 ./mvnw verify          # Windows: mvnw.cmd verify
 ```
 
-Unit tests run through surefire (`mvn test` stays database-free). Integration tests run through failsafe against a real PostgreSQL 17 container via Testcontainers, so Docker must be running. The last recorded run (`reports/TASK-054.md`) passed 200 unit and 10 integration tests. The integration suite exercises the real security chain and transactions and proves:
+Unit tests run through surefire (`mvn test` stays database-free). Integration tests run through failsafe against a real PostgreSQL 17 container via Testcontainers, so Docker must be running. The last recorded run is `mvnw -B verify` on 2026-11-10 (run by the project orchestrator, PostgreSQL 17.11 via Testcontainers): 460 unit and 77 integration tests passed. The integration suite exercises the real security chain and transactions and covers:
 
 - the Pay First POS flow end to end (order NEW/UNPAID, kitchen blocked until paid, cash payment with change, kitchen to COMPLETED, sales report);
 - public QR ordering with idempotency (same key and body replays, same key and different body conflicts);
 - payment replay and conflict handling;
 - concurrent double-pay with different keys settles exactly once (one payment row);
 - cross-tenant access returns 404 and cannot pay another tenant's order;
-- application context, Flyway migrations and Hibernate schema validation on real PostgreSQL.
+- application context, Flyway migrations and Hibernate schema validation on real PostgreSQL;
+- inventory flow (`FnbInventoryFlowIntegrationTest`, 13 tests): a paid order deducts product and add-on recipes with one `SALE` movement per ingredient, negative stock never blocks payment, LOW/OUT warnings, MOCK_GATEWAY deducts only when resolved `SUCCEEDED` and only once, a replayed payment key does not deduct twice, cancelling an unpaid order creates no movements, CASHIER may RESTOCK/WASTE while ADJUSTMENT, ingredient and recipe management stay owner-only, and cross-tenant access to ingredients fails;
+- reusable option groups (`FnbReusableOptionGroupIntegrationTest`, 6 tests): one shared option attached to two products deducts its recipe once per ordered unit, the public menu lists the shared group under each product, orders enforce required groups and reject options of groups not attached to the product, archiving an attached group conflicts until it is detached, attach replaces all links in request order, and a cashier can only read;
+- stock concurrency (`FnbStockConcurrencyIntegrationTest`, 10 tests): parallel same-key movements apply once (and a sequential replay or conflicting payload afterwards behaves deterministically), parallel distinct-key restocks and wastes lose no update, parallel payments of different orders and of one order (same or different keys) deduct the shared ingredient exactly once per order, a mixed payment/restock/waste load finishes without deadlock with the ledger matching the balance, negative stock never blocks parallel payments, and a payment racing with a cancel or with a discount (15 rounds each) always ends in one consistent state with no server error.
 
-Not yet covered: CASHIER-role token paths and MOCK_GATEWAY payments.
+Mutation check of the concurrency tests (2026-11-10, six single-line mutants applied one at a time, only `FnbStockConcurrencyIntegrationTest` run, up to 3 runs per surviving mutant). First round (8 tests): removing the balance row lock in `recordMovement` (killed), removing the balance row lock in `FnbStockService` (killed), flipping the sale sign (killed), disabling the idempotency-fingerprint conflict check (killed only on the second of two runs: that scenario depended on the parallel requests overlapping), removing the per-(order, ingredient) sale guard in `FnbStockService` (survived the concurrency suite, killed by the unit test `FnbStockServiceTest`), and removing `lockTenant` from `FnbPaymentService.pay` (survived 3/3 runs). Second round after adding the payment-vs-cancel and payment-vs-discount races and deterministic replay/conflict checks (10 tests): removing `lockTenant` from `pay` is now killed on the first run, by both race tests with a `500` response (without the tenant lock a payment racing with a cancel or discount fails the order version check, and `GlobalExceptionHandler` reports it as a generic server error); the fingerprint mutant is killed on the first run, by the parallel assertion of the different-payload scenario (the requests overlapped in that run; the new sequential checks would fail it even without overlap, but that was not observed in isolation).
+
+Not covered: MOCK_GATEWAY under concurrency; concurrency over a real network (the concurrency tests drive the application in-process against a real PostgreSQL); the frontend; and any Postman run against a live server. An optimistic-lock failure is reported as a retryable `409` (`GlobalExceptionHandler`, unit-tested), but no integration test provokes a real lost `@Version` race, because the tenant row lock prevents it.
 
 ## Local development without Docker
 
@@ -201,10 +209,19 @@ cashier-saas/
 - **gRPC is protected by a shared service key and a database tenant check.** Callers must send `CASHIER_GRPC_SERVICE_KEY`; a request tenant is served only when the tenant exists and is active (a missing and an inactive tenant get the same response). The env tenant allowlist was removed. `tenant_id` is still a request field. The demo compose file does not publish 9090 to the host; it is reachable only on the internal compose network. Token-bound tenant identity is a follow-up item.
 - **Staff sync to the AI service and Telegram identity verification are in progress** (see the section above). Until they are verified, do not rely on `AI_TENANT_ID` for tenant resolution.
 - **AI service container is built but not runtime-verified** (needs real Telegram/OpenRouter credentials).
-- **Test gaps:** CASHIER-role paths and MOCK_GATEWAY payments have no integration tests yet.
+- **Test gaps:** MOCK_GATEWAY concurrency, concurrency over a real network, and a Postman run against a live server are not covered (see Running tests for the mutation check). CASHIER-role and MOCK_GATEWAY paths are covered for the inventory flows only.
+- **Optimistic lock:** a concurrent write that loses an optimistic-lock (`@Version`) race is reported as a retryable `409` ("Data baru saja diubah oleh proses lain..."); the tenant row lock normally prevents the race, which is what the payment-vs-cancel and payment-vs-discount tests rely on.
+- **Rate limiting:** the REST API is throttled by an in-memory token-bucket filter (HTTP `429` with `Retry-After`). Limits are tunable through `CASHIER_RATE_LIMIT_*` (see `.env.example`); the tests run with it disabled. Single instance only; behind a reverse proxy set `server.forward-headers-strategy=native`.
 - **Frontend lives in a separate repository** (`cashier-saas-ui`); this repo is backend only.
 - **WhatsApp channel is deferred**; only Telegram is active in the AI service.
-- Laundry and inventory entities exist in code but are outside the F&B MVP scope.
+- **Inventory and recipes are implemented for F&B** by explicit user decision, although `PRD-MVP.md` section 5 still lists them as post-MVP (see `.ai/DECISIONS.md`). Known limits:
+  - one unit per ingredient, no unit conversion;
+  - stock can go negative and warns instead of blocking;
+  - parallel movements with the same idempotency key may return 409 to the loser instead of a replay (the balance still changes once);
+  - deactivating an ingredient does not stop existing recipe lines from deducting it;
+  - `archiveGroup` takes no lock, the option-group response does not list its products, and attaching or detaching groups writes no audit row (recipe changes do);
+  - no supplier or purchasing workflow (still post-MVP in the PRD).
+- Laundry entities exist in code but are outside the F&B MVP scope.
 - Roles are limited to `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER`. The PRD mentions Manager/Kitchen roles and pay-after-meal flows; they are not implemented.
 
 ## License

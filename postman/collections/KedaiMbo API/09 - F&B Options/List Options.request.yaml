@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/products/{{productId}}/groups/{{groupId}}/options"
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/option-groups/{{groupId}}/options"
 method: GET
 headers:
   Accept: application/json
