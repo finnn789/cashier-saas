@@ -1,9 +1,13 @@
 # Project memory
 
-Memory version: 59
+Memory version: 61
 Updated: 2026-11-10 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- TASK-064/065/066 — COMPLETE / VERIFIED (2026-11-10): reusable option groups (Phase 2) on branch `feature/fnb-reusable-option-groups` (stacked on `feature/fnb-inventory-recipe` @ d41d731, NOT committed yet). User-requested `mvnw -B verify`: BUILD SUCCESS, unit 460/460, integration 67/67, Flyway V1->V5 on PostgreSQL 17.11, green on the first run; V5 backfill verified on a throwaway PG17 (4 groups -> 4 links). Groups are outlet-level, attached via `product_option_groups`; routes moved to `/option-groups/**` and `PUT /products/{id}/option-groups`. Postman folders 03/04/07 updated (file-level only); `KedaiMbo API` folder 08 is stale (user's dirty work, untouched). Open: commit/push awaiting the user, inventory PR not merged, concurrency tests, docs, UI, `archiveGroup` lock gap. Details in TASKS.md, `tasks/TASK-064..066.md`. Canonical 60 -> 61.
+
+- TASK-064/065/066 — DELEGATED / IN PROGRESS, nothing verified (2026-11-10): Phase 2 reusable option groups. Branch `feature/fnb-reusable-option-groups` created from `feature/fnb-inventory-recipe` @ d41d731 (user skipped merging the inventory PR; origin already had that branch, 0 unpushed commits). User decisions: groups become outlet-level with join table `product_option_groups`; rules live on the group; archive (not delete) a group, 409 while attached to a non-archived product; old product-scoped group/option/option-recipe routes replaced by `/option-groups/**` + `PUT /products/{id}/option-groups`; V5 backfills and drops `option_groups.product_id`. Six parallel sonnet workers (W1-W3 code, W4-W5 tests, W6 Postman) against the contract in `tasks/TASK-064.md`. `FnbTableService.publicMenu` would duplicate options of a shared group, handled in W3. Gaps accepted: group response does not list its products, no audit row for attach/detach. Canonical 59 -> 60.
 
 - TASK-063 — COMPLETE (file-level): 13 Postman requests for the inventory/recipe API added to `F&B Catalog Controller` (folders 05-07); YAML validity re-checked by the orchestrator (35 files, 0 bad), never executed against a live server. The pre-existing invalid JSON body in `01 - Categories/Create Category.request.yaml` was fixed at the user's request. Canonical 57 -> 59. Details in TASKS.md.
 

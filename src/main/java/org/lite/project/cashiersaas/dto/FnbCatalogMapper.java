@@ -28,7 +28,7 @@ public final class FnbCatalogMapper {
     }
     public static FnbOptionGroupResponse group(OptionGroupEntity entity) {
         FnbOptionGroupResponse response = new FnbOptionGroupResponse();
-        response.setId(entity.getId()); response.setProductId(entity.getProduct().getId());
+        response.setId(entity.getId());
         response.setName(entity.getName()); response.setRequired(entity.isRequired());
         response.setMinimumSelections(entity.getMinimumSelections());
         response.setMaximumSelections(entity.getMaximumSelections());
