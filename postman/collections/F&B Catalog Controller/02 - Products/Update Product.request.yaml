@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"categoryId": "{{categoryId}}", "name": "Nasi Goreng Spesial KedaiMbo Jumbo", "description": "Nasi goreng porsi jumbo spesial", "price": 28000.0, "imageUrl": "https://example.com/images/nasgor-jumbo.jpg", "available": true, "displayOrder": 1, "priceChangeReason": "Penyesuaian porsi jumbo dan harga bahan baku"}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 200 OK', () => pm.response.to.have.status(200)); var res = pm.response.json(); pm.expect(res.success).to.be.true;
+    language: text/javascript
+order: 3000

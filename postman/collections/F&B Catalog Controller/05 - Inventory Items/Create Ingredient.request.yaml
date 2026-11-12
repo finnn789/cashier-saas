@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/inventory/items"
+method: POST
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"name": "Susu Segar", "sku": "BAHAN-SUSU-01", "unit": "ml", "reorderLevel": 500.000, "initialQuantity": 5000.000}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); pm.expect(res.success).to.be.true; pm.expect(res.data.stockStatus).to.exist; pm.collectionVariables.set('inventoryItemId', res.data.id);
+    language: text/javascript
+order: 1000

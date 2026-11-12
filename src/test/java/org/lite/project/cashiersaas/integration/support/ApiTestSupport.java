@@ -68,6 +68,31 @@ public final class ApiTestSupport {
                 UUID.fromString(read(profile, "$.data.outletId")), read(profile, "$.data.accessToken"));
     }
 
+    /**
+     * Registers a CASHIER_ONLY account, has the owner invite and the cashier claim it, then selects the merchant
+     * and outlet; all through the real API. The fixture carries the same tenant/outlet as the owner and a CASHIER bearer.
+     */
+    public MerchantFixture onboardCashier(MerchantFixture owner, String label) throws Exception {
+        String email = label + "-" + UUID.randomUUID() + "@example.com";
+        String accountToken = read(send(post("/api/v1/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"fullName\":\"Cashier " + label + "\",\"email\":\"" + email
+                        + "\",\"phoneNumber\":\"081234567890\",\"password\":\"Passw0rd!23\"}"), 201), "$.data.accessToken");
+        String accountBearer = "Bearer " + accountToken;
+        send(put("/api/v1/onboarding/intent").header(HttpHeaders.AUTHORIZATION, accountBearer)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"intent\":\"CASHIER_ONLY\"}"), 200);
+        String code = read(send(post("/api/v1/merchant/outlets/" + owner.outletId() + "/cashier-invitations")
+                .header(HttpHeaders.AUTHORIZATION, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\"}"), 200, 201), "$.data.code");
+        send(post("/api/v1/onboarding/cashier-invitations/claim").header(HttpHeaders.AUTHORIZATION, accountBearer)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"" + code + "\"}"), 200);
+        String accessToken = read(send(post("/api/v1/auth/select-merchant")
+                .header(HttpHeaders.AUTHORIZATION, accountBearer).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"" + owner.tenantId() + "\",\"outletId\":\"" + owner.outletId() + "\"}"), 200),
+                "$.data.accessToken");
+        return new MerchantFixture(owner.tenantId(), owner.outletId(), accessToken);
+    }
+
     public String createCategory(MerchantFixture merchant, String name) throws Exception {
         return read(send(post("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/categories")
                 .header(HttpHeaders.AUTHORIZATION, merchant.bearer()).contentType(MediaType.APPLICATION_JSON)

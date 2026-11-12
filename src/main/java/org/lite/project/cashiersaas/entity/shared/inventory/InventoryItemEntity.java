@@ -10,7 +10,7 @@ import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 
 @Getter
 @Entity
-@Table(name="inventory_items")
+@Table(name="inventory_items", uniqueConstraints=@UniqueConstraint(name="uk_inventory_items_outlet_name", columnNames={"outlet_id","name"}))
 @NoArgsConstructor
 public class InventoryItemEntity extends MutableBaseEntity {
     @ManyToOne(fetch=FetchType.LAZY,optional=false)
@@ -29,4 +29,26 @@ public class InventoryItemEntity extends MutableBaseEntity {
     private BigDecimal reorderLevel;
     @Column(nullable=false)
     private boolean active=true;
+
+    public static InventoryItemEntity create(TenantEntity tenant, OutletEntity outlet, String sku, String name, String unit, BigDecimal reorderLevel) {
+        InventoryItemEntity item = new InventoryItemEntity();
+        item.tenant = tenant;
+        item.outlet = outlet;
+        item.sku = sku;
+        item.name = name;
+        item.unit = unit;
+        item.reorderLevel = reorderLevel;
+        return item;
+    }
+
+    public void update(String sku, String name, String unit, BigDecimal reorderLevel) {
+        this.sku = sku;
+        this.name = name;
+        this.unit = unit;
+        this.reorderLevel = reorderLevel;
+    }
+
+    public void deactivate() {
+        active = false;
+    }
 }

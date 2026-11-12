@@ -16,12 +16,19 @@ import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbCatalogRepository;
+import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
+import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.RecipeLineEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiFunction;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +37,7 @@ public class FnbCatalogService {
     private final FnbCatalogRepository catalog;
     private final MerchantReferenceRepository references;
     private final AuditLogRepository audit;
+    private final FnbInventoryRepository inventory;
 
     @Transactional
     public FnbCategoryResponse createCategory(TenantPrincipal principal, UUID outletId, FnbCategoryRequest request) {
@@ -129,9 +137,7 @@ public class FnbCatalogService {
     @Transactional
     public FnbOptionResponse updateOption(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, UUID id, FnbOptionRequest request) {
         guard.requireOwner(principal, outletId);
-        group(principal.getTenantId(), outletId, productId, groupId);
-        ProductOptionEntity entity = catalog.option(principal.getTenantId(), outletId, id).orElseThrow(ResourceNotFoundException::new);
-        if (!entity.getOptionGroup().getId().equals(groupId)) throw new ResourceNotFoundException();
+        ProductOptionEntity entity = option(principal.getTenantId(), outletId, productId, groupId, id);
         if (entity.getPriceAdjustment().compareTo(request.getPriceAdjustment()) != 0) {
             requirePriceReason(request.getPriceChangeReason());
             recordPrice(principal, outletId, id, AuditLogEntity.Action.FNB_OPTION_PRICE_CHANGED,
@@ -145,6 +151,58 @@ public class FnbCatalogService {
         guard.requireOutlet(principal, outletId);
         group(principal.getTenantId(), outletId, productId, groupId);
         return catalog.options(principal.getTenantId(), outletId, groupId).stream().map(FnbCatalogMapper::option).toList();
+    }
+    @Transactional
+    public FnbRecipeResponse replaceProductRecipe(TenantPrincipal principal, UUID outletId, UUID productId, FnbRecipeRequest request) {
+        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        ProductEntity product = product(principal.getTenantId(), outletId, productId);
+        return FnbCatalogMapper.recipe(replaceRecipe(principal, outletId, productId, request,
+                () -> inventory.deleteProductRecipe(principal.getTenantId(), outletId, productId),
+                (item, quantity) -> RecipeLineEntity.forProduct(context.getTenant(), context.getOutlet(), product, item, quantity)));
+    }
+    @Transactional(readOnly = true)
+    public FnbRecipeResponse productRecipe(TenantPrincipal principal, UUID outletId, UUID productId) {
+        guard.requireOwner(principal, outletId);
+        product(principal.getTenantId(), outletId, productId);
+        return FnbCatalogMapper.recipe(inventory.productRecipes(principal.getTenantId(), outletId, List.of(productId)));
+    }
+    @Transactional
+    public FnbRecipeResponse replaceOptionRecipe(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, UUID id, FnbRecipeRequest request) {
+        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        ProductOptionEntity option = option(principal.getTenantId(), outletId, productId, groupId, id);
+        return FnbCatalogMapper.recipe(replaceRecipe(principal, outletId, id, request,
+                () -> inventory.deleteOptionRecipe(principal.getTenantId(), outletId, id),
+                (item, quantity) -> RecipeLineEntity.forOption(context.getTenant(), context.getOutlet(), option, item, quantity)));
+    }
+    @Transactional(readOnly = true)
+    public FnbRecipeResponse optionRecipe(TenantPrincipal principal, UUID outletId, UUID productId, UUID groupId, UUID id) {
+        guard.requireOwner(principal, outletId);
+        option(principal.getTenantId(), outletId, productId, groupId, id);
+        return FnbCatalogMapper.recipe(inventory.optionRecipes(principal.getTenantId(), outletId, List.of(id)));
+    }
+    private List<RecipeLineEntity> replaceRecipe(TenantPrincipal principal, UUID outletId, UUID ownerId, FnbRecipeRequest request,
+                                                 Runnable clear, BiFunction<InventoryItemEntity, BigDecimal, RecipeLineEntity> factory) {
+        Set<UUID> seen = new HashSet<>();
+        List<InventoryItemEntity> items = new ArrayList<>();
+        for (FnbRecipeRequest.Line line : request.getLines()) {
+            if (!seen.add(line.getInventoryItemId())) throw new InvalidOperationException("Bahan resep tidak boleh duplikat.");
+            items.add(inventory.item(principal.getTenantId(), outletId, line.getInventoryItemId()).orElseThrow(ResourceNotFoundException::new));
+        }
+        clear.run();
+        List<RecipeLineEntity> lines = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            RecipeLineEntity line = factory.apply(items.get(i), request.getLines().get(i).getQuantityPerUnit());
+            inventory.persist(line);
+            lines.add(line);
+        }
+        recordAudit(principal, outletId, ownerId, AuditLogEntity.Action.FNB_RECIPE_CHANGED, null, "lines=" + lines.size());
+        return lines;
+    }
+    private ProductOptionEntity option(UUID tenant, UUID outlet, UUID productId, UUID groupId, UUID id) {
+        group(tenant, outlet, productId, groupId);
+        ProductOptionEntity entity = catalog.option(tenant, outlet, id).orElseThrow(ResourceNotFoundException::new);
+        if (!entity.getOptionGroup().getId().equals(groupId)) throw new ResourceNotFoundException();
+        return entity;
     }
     private CategoryEntity category(UUID tenant, UUID outlet, UUID id) {
         return catalog.category(tenant, outlet, id).orElseThrow(ResourceNotFoundException::new);
@@ -180,8 +238,12 @@ public class FnbCatalogService {
     }
     private void recordPrice(TenantPrincipal principal, UUID outletId, UUID id, AuditLogEntity.Action action,
                              String reason, BigDecimal oldValue, BigDecimal newValue) {
+        recordAudit(principal, outletId, id, action, reason.trim(),
+                "old=" + oldValue.toPlainString() + ";new=" + newValue.toPlainString());
+    }
+    private void recordAudit(TenantPrincipal principal, UUID outletId, UUID id, AuditLogEntity.Action action,
+                             String reason, String details) {
         audit.persist(AuditLogEntity.recordAction(references.tenant(principal.getTenantId()), references.outlet(outletId),
-                references.user(principal.getUserId()), action, id, reason.trim(),
-                "old=" + oldValue.toPlainString() + ";new=" + newValue.toPlainString()));
+                references.user(principal.getUserId()), action, id, reason, details));
     }
 }

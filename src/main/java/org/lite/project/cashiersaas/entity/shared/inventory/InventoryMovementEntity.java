@@ -13,6 +13,8 @@ import org.lite.project.cashiersaas.entity.shared.BaseEntity;
 @Table(name="inventory_movements",uniqueConstraints=@UniqueConstraint(columnNames={"tenant_id","idempotency_key"}))
 @NoArgsConstructor
 public class InventoryMovementEntity extends BaseEntity {
+    public enum Type { RESTOCK, WASTE, ADJUSTMENT, SALE }
+
     @Column(name="tenant_id",nullable=false)
     private UUID tenantId;
     @Column(name="outlet_id",nullable=false)
@@ -24,8 +26,9 @@ public class InventoryMovementEntity extends BaseEntity {
     private UUID orderId;
     @Column(name="reversal_of_movement_id")
     private UUID reversalOfMovementId;
+    @Enumerated(EnumType.STRING)
     @Column(name="movement_type",nullable=false,length=16)
-    private String movementType;
+    private Type type;
     @Column(name="quantity_delta",nullable=false,precision=14,scale=3)
     private BigDecimal quantityDelta;
     @Column(nullable=false,columnDefinition="TEXT")
@@ -38,4 +41,22 @@ public class InventoryMovementEntity extends BaseEntity {
     private UUID actorMembershipId;
     @Column(name="occurred_at",nullable=false)
     private Instant occurredAt;
+
+    public static InventoryMovementEntity record(UUID tenantId, UUID outletId, InventoryItemEntity item, UUID orderId,
+                                                 Type type, BigDecimal quantityDelta, String reason, String idempotencyKey,
+                                                 String requestFingerprint, UUID actorMembershipId) {
+        InventoryMovementEntity movement = new InventoryMovementEntity();
+        movement.tenantId = tenantId;
+        movement.outletId = outletId;
+        movement.inventoryItem = item;
+        movement.orderId = orderId;
+        movement.type = type;
+        movement.quantityDelta = quantityDelta;
+        movement.reason = reason;
+        movement.idempotencyKey = idempotencyKey;
+        movement.requestFingerprint = requestFingerprint;
+        movement.actorMembershipId = actorMembershipId;
+        movement.occurredAt = Instant.now();
+        return movement;
+    }
 }

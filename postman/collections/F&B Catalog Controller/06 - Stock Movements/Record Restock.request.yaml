@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/inventory/items/{{inventoryItemId}}/movements"
+method: POST
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"type": "RESTOCK", "quantity": 1000.000, "reason": "Belanja pasar pagi", "idempotencyKey": "{{$guid}}"}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); pm.expect(res.success).to.be.true; pm.expect(res.data.type).to.eql('RESTOCK'); pm.expect(Number(res.data.quantityDelta)).to.be.above(0); pm.collectionVariables.set('movementId', res.data.id);
+    language: text/javascript
+order: 1000

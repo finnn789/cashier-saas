@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/inventory/items/{{inventoryItemId}}"
+method: DELETE
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 200 OK', () => pm.response.to.have.status(200)); var res = pm.response.json(); pm.expect(res.success).to.be.true;
+    language: text/javascript
+order: 3000
