@@ -1,8 +1,5 @@
 package org.lite.project.cashiersaas.enums;
 public enum OrderStatus {
-    NEW,
-    CONFIRMED,
-    PREPARING,
-    READY,
+    OPEN,
     COMPLETED,
     CANCELLED }

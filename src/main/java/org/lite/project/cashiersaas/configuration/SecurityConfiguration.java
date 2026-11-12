@@ -26,14 +26,14 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.beans.factory.annotation.Value;
 import tools.jackson.databind.ObjectMapper;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfiguration {
-    // Property key kept as-is so existing deployments keep their CORS origins.
-    @Value("${app.fnb.realtime.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
 
     @Bean
@@ -61,6 +61,7 @@ public class SecurityConfiguration {
                                 .requestMatchers("/api/v1/auth/select-merchant", "/api/v1/auth/outlets").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/api/v1/onboarding/**").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/api/v1/public/plans").permitAll()
                                 .requestMatchers("/api/v1/platform/**").hasRole(Role.SUPERADMIN.name())
                                 .requestMatchers("/api/v1/merchant/**").hasRole(Role.OWNERMERCHANT.name())
                                 .requestMatchers("/api/v1/cashier/**").hasAnyRole(Role.OWNERMERCHANT.name(),
@@ -79,7 +80,7 @@ public class SecurityConfiguration {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(origin -> !origin.isEmpty()).toList());
+        config.setAllowedOrigins(allowedOrigins(allowedOrigins));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("X-XSRF-TOKEN", RateLimitConstants.RETRY_AFTER_HEADER));
@@ -94,5 +95,22 @@ public class SecurityConfiguration {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    private static List<String> allowedOrigins(String raw) {
+        if (raw == null || raw.isBlank()) throw new IllegalStateException("app.cors.allowed-origins must not be empty.");
+        List<String> origins = Arrays.stream(raw.split(",")).map(String::trim).filter(value -> !value.isEmpty()).toList();
+        if (origins.isEmpty()) throw new IllegalStateException("app.cors.allowed-origins must not be empty.");
+        for (String origin : origins) validateOrigin(origin);
+        return origins;
+    }
+
+    private static void validateOrigin(String origin) {
+        URI uri = URI.create(origin);
+        if (origin.contains("*") || !("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+                || uri.getHost() == null || uri.getPort() == 0 || uri.getPort() > 65_535 || uri.getUserInfo() != null
+                || uri.getQuery() != null || uri.getFragment() != null || (uri.getPath() != null && !uri.getPath().isEmpty())) {
+            throw new IllegalStateException("Invalid explicit origin in app.cors.allowed-origins.");
+        }
     }
 }

@@ -4,7 +4,7 @@ Kamu bekerja di repo frontend `E:\Java\cashier-saas-ui` (React 19, Vite 8, TypeS
 
 ## Mulai dari sini (baca dulu, jangan menebak kontrak)
 1. `E:\Java\cashier-saas-ui\AGENTS.md`/`GEMINI.md`/`ARCHITECTURE.md` bila ada, lalu `src/api/client.ts`, `src/api/response.ts`, `src/api/product.api.ts`, `inventory.api.ts`, `fnbOrder.api.ts`, dan mock-nya.
-2. Kontrak backend: DTO di `E:\Java\cashier-saas\src\main\java\org\lite\project\cashiersaas\dto\request|response\Fnb*.java` dan controller `controller\Fnb*Controller.java`. Docs: `E:\Java\cashier-saas\docs\fnb-pay-first-backend.md`, `docs\fnb-operations.md`, `docs\fnb-realtime.md`. Contoh request: koleksi Postman `E:\Java\cashier-saas\postman\collections\KedaiMbo API` (SEBAGIAN USANG: folder "08 - F&B Option Groups" masih memakai route lama sebelum V5; percayai controller, bukan Postman).
+2. Kontrak backend: DTO di `E:\Java\cashier-saas\src\main\java\org\lite\project\cashiersaas\dto\request|response\Fnb*.java` dan controller `controller\Fnb*Controller.java`. Docs: `E:\Java\cashier-saas\docs\fnb-pay-first-backend.md`, `docs\fnb-operations.md`. Pivot 2026-11-12: real-time, meja, QR dan dapur sudah dihapus; `prompts\refactore_feature_and_uui.md` berlaku jika bertentangan. Contoh request: koleksi Postman `E:\Java\cashier-saas\postman\collections\KedaiMbo API` (SEBAGIAN USANG: folder "08 - F&B Option Groups" masih memakai route lama sebelum V5; percayai controller, bukan Postman).
 3. Bentuk respons: semua `ApiResponse<T>` = `{ success, code, message, data, validationErrors[{field,message}], timestamp }`. Pesan dalam bahasa Indonesia. Uang dikirim sebagai angka/desimal (BigDecimal), tampilkan lewat `utils/formatCurrency.ts`.
 
 ## Prefix dan role

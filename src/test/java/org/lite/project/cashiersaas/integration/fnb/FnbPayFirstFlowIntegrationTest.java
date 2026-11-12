@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -78,7 +79,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult created = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
                 .header("Idempotency-Key", "pos-" + UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
                 .content(posOrderJson(productId, quantity)), 201);
-        assertEquals("NEW", ApiTestSupport.read(created, "$.data.status"));
+        assertEquals("OPEN", ApiTestSupport.read(created, "$.data.status"));
         assertEquals("UNPAID", ApiTestSupport.read(created, "$.data.paymentStatus"));
         assertEquals("POS", ApiTestSupport.read(created, "$.data.source"));
         return ApiTestSupport.read(created, "$.data.orderId");
@@ -117,7 +118,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertNotNull(ApiTestSupport.read(paid, "$.data.receiptNumber"));
 
         MvcResult afterPay = getOrder(merchant, orderId);
-        assertEquals("CONFIRMED", ApiTestSupport.read(afterPay, "$.data.status"));
+        assertEquals("COMPLETED", ApiTestSupport.read(afterPay, "$.data.status"));
         assertEquals("PAID", ApiTestSupport.read(afterPay, "$.data.paymentStatus"));
 
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Jakarta"));
@@ -132,6 +133,15 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals("2", ApiTestSupport.read(report, "$.data.topProducts[0].quantity"));
         assertEquals("CASH", ApiTestSupport.read(report, "$.data.paymentBreakdown[0].method"));
         assertEquals("1", ApiTestSupport.read(report, "$.data.paymentBreakdown[0].transactionCount"));
+        for (String rejected : new String[]{"OPEN", "CANCELLED"}) {
+            assertEquals(400, api.call(get("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/reports/sales")
+                    .param("startDate", today.minusDays(1).toString()).param("endDate", today.plusDays(1).toString())
+                    .param("orderStatus", rejected).header(HttpHeaders.AUTHORIZATION, merchant.bearer()))
+                    .getResponse().getStatus(), rejected + " is not a sales report status");
+        }
+        api.send(get("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/reports/sales")
+                .param("startDate", today.minusDays(1).toString()).param("endDate", today.plusDays(1).toString())
+                .param("orderStatus", "COMPLETED").header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
         assertEquals(1, countPayments(orderId));
     }
 
@@ -145,7 +155,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         String body = posOrderJson(productId, 1);
         MvcResult first = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
                 .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body), 201);
-        assertEquals("NEW", ApiTestSupport.read(first, "$.data.status"));
+        assertEquals("OPEN", ApiTestSupport.read(first, "$.data.status"));
         assertEquals("UNPAID", ApiTestSupport.read(first, "$.data.paymentStatus"));
         String orderNumber = ApiTestSupport.read(first, "$.data.orderNumber");
         String orderId = ApiTestSupport.read(first, "$.data.orderId");
@@ -166,7 +176,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
         MvcResult unpaid = getOrder(merchant, orderId);
         assertEquals("UNPAID", ApiTestSupport.read(unpaid, "$.data.paymentStatus"));
-        assertEquals("NEW", ApiTestSupport.read(unpaid, "$.data.status"));
+        assertEquals("OPEN", ApiTestSupport.read(unpaid, "$.data.status"));
 
         MvcResult list = api.send(get(orders(merchant)).param("source", "POS")
                 .header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
@@ -182,7 +192,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
         MvcResult afterPay = getOrder(merchant, orderId);
         assertEquals("PAID", ApiTestSupport.read(afterPay, "$.data.paymentStatus"));
-        assertEquals("CONFIRMED", ApiTestSupport.read(afterPay, "$.data.status"));
+        assertEquals("COMPLETED", ApiTestSupport.read(afterPay, "$.data.status"));
     }
 
     @Test
@@ -282,5 +292,97 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 "cross-tenant payment must be refused, was " + pay.getResponse().getStatus());
         assertEquals(0, countPayments(orderId));
         assertEquals("UNPAID", ApiTestSupport.read(getOrder(tenantA, orderId), "$.data.paymentStatus"));
+    }
+
+    private String replaceItemsUrl(MerchantFixture merchant, String orderId) {
+        return orders(merchant) + "/" + orderId + "/items";
+    }
+
+    private String replaceItemsJson(String productId, int quantity) {
+        return "{\"serviceType\":\"TAKEAWAY\",\"customerLabel\":\"Siti\","
+                + "\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":" + quantity
+                + ",\"note\":\"\",\"optionIds\":[]}]}";
+    }
+
+    private MvcResult replaceItems(MerchantFixture actor, MerchantFixture orderOwner, String orderId, String body)
+            throws Exception {
+        return api.call(put(replaceItemsUrl(orderOwner, orderId)).header(HttpHeaders.AUTHORIZATION, actor.bearer())
+                .contentType(MediaType.APPLICATION_JSON).content(body));
+    }
+
+    @Test
+    void heldPosOrderIsRepricedThenPaidWithStockDeductedOnce() throws Exception {
+        MerchantFixture owner = api.onboardOwner("hold");
+        String categoryId = api.createCategory(owner, "Minuman");
+        String teh = api.createProduct(owner, categoryId, "Es Teh", PRICE);
+        String kopi = api.createProduct(owner, categoryId, "Kopi", "30000");
+        String beans = ApiTestSupport.read(api.send(post("/api/v1/merchant/outlets/" + owner.outletId()
+                + "/fnb/inventory/items").header(HttpHeaders.AUTHORIZATION, owner.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Biji Kopi\",\"unit\":\"g\",\"reorderLevel\":10,\"initialQuantity\":100}"),
+                201), "$.data.id");
+        api.send(put("/api/v1/merchant/outlets/" + owner.outletId() + "/fnb/products/" + kopi + "/recipe")
+                .header(HttpHeaders.AUTHORIZATION, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"lines\":[{\"inventoryItemId\":\"" + beans + "\",\"quantityPerUnit\":10}]}"), 200);
+
+        String orderId = createPosOrder(owner, teh, 1);
+        BigDecimal heldTotal = money(getOrder(owner, orderId), "$.data.total");
+        MvcResult open = api.send(get(orders(owner)).param("status", "OPEN")
+                .header(HttpHeaders.AUTHORIZATION, owner.bearer()), 200);
+        assertTrue(ApiTestSupport.read(open, "$.data.orders[*].orderId").contains(orderId), "held bill is listed");
+
+        MvcResult replaced = replaceItems(owner, owner, orderId, replaceItemsJson(kopi, 3));
+        assertEquals(200, replaced.getResponse().getStatus(), replaced.getResponse().getContentAsString());
+        assertEquals("OPEN", ApiTestSupport.read(replaced, "$.data.status"));
+        assertEquals("TAKEAWAY", ApiTestSupport.read(replaced, "$.data.serviceType"));
+        assertEquals("1", ApiTestSupport.read(replaced, "$.data.items.length()"));
+        assertEquals("Kopi", ApiTestSupport.read(replaced, "$.data.items[0].productName"));
+        assertEquals("3", ApiTestSupport.read(replaced, "$.data.items[0].quantity"));
+        BigDecimal newTotal = money(replaced, "$.data.total");
+        assertTrue(newTotal.compareTo(heldTotal) != 0, "totals changed");
+        assertTrue(newTotal.compareTo(new BigDecimal("90000")) >= 0, "total includes subtotal 3 x 30000");
+        assertEquals(0, newTotal.compareTo(money(getOrder(owner, orderId), "$.data.total")), "persisted total");
+        assertEquals(0, api.jdbc().queryForObject("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid",
+                Integer.class, orderId), "no stock movement while the bill is held");
+
+        api.send(post(orders(owner) + "/" + orderId + "/payments")
+                .header(HttpHeaders.AUTHORIZATION, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content(paymentJson("CASH", newTotal.toPlainString(), "pay-" + UUID.randomUUID())), 200, 201);
+        MvcResult afterPay = getOrder(owner, orderId);
+        assertEquals("COMPLETED", ApiTestSupport.read(afterPay, "$.data.status"));
+        assertEquals("PAID", ApiTestSupport.read(afterPay, "$.data.paymentStatus"));
+        assertEquals(1, api.jdbc().queryForObject("SELECT count(*) FROM inventory_movements "
+                + "WHERE order_id = ?::uuid AND movement_type = 'SALE'", Integer.class, orderId), "stock deducted once");
+        assertEquals(0, new BigDecimal("70").compareTo(api.jdbc().queryForObject(
+                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid",
+                BigDecimal.class, beans)), "100 - 3 x 10");
+
+        assertEquals(409, replaceItems(owner, owner, orderId, replaceItemsJson(teh, 1)).getResponse().getStatus(),
+                "paid order cannot be edited");
+        assertEquals("Kopi", ApiTestSupport.read(getOrder(owner, orderId), "$.data.items[0].productName"));
+    }
+
+    @Test
+    void replaceItemsRejectsOtherTenantAnonymousAndDiscountedOrders() throws Exception {
+        MerchantFixture tenantA = api.onboardOwner("holdA");
+        MerchantFixture tenantB = api.onboardOwner("holdB");
+        MerchantFixture cashierB = api.onboardCashier(tenantB, "cashierB");
+        String teh = api.createProduct(tenantA, api.createCategory(tenantA, "Menu"), "Es Teh", PRICE);
+        String orderId = createPosOrder(tenantA, teh, 1);
+        String body = replaceItemsJson(teh, 2);
+
+        // Another tenant's cashier: own outlet with A's order id, and A's outlet path.
+        assertEquals(404, replaceItems(cashierB, tenantB, orderId, body).getResponse().getStatus());
+        assertEquals(404, replaceItems(cashierB, tenantA, orderId, body).getResponse().getStatus());
+        assertEquals(401, api.call(put(replaceItemsUrl(tenantA, orderId)).contentType(MediaType.APPLICATION_JSON)
+                .content(body)).getResponse().getStatus());
+        assertEquals("1", ApiTestSupport.read(getOrder(tenantA, orderId), "$.data.items[0].quantity"));
+
+        // An order with a discount keeps its lines.
+        api.send(post("/api/v1/merchant/outlets/" + tenantA.outletId() + "/fnb/orders/" + orderId + "/discount")
+                .header(HttpHeaders.AUTHORIZATION, tenantA.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"type\":\"NOMINAL\",\"value\":1000,\"reason\":\"Promo\"}"), 200, 201);
+        assertEquals(409, replaceItems(tenantA, tenantA, orderId, body).getResponse().getStatus());
+        assertEquals("1", ApiTestSupport.read(getOrder(tenantA, orderId), "$.data.items[0].quantity"));
     }
 }

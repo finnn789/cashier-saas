@@ -1,10 +1,10 @@
 $kind: collection
 description: |-
-  Collection dari 11 controller Java KedaiMbo (cashier-saas), 1 Oktober 2026. 46 endpoint sesuai kode saat dibuat.
+  Collection controller Java KedaiMbo (cashier-saas). Dibuat 1 Oktober 2026; disesuaikan setelah pivot kasir (QR, tabel, dapur, dan real-time dihapus) pada 12 November 2026.
 
   Mulai: isi baseUrl, email, password (gunakan nilai lokal/environment untuk kredensial), lalu Register atau Login. Token ACCOUNT disimpan ke accountToken; token operasional ke accessToken. Akun baru: Choose Intent OWNER -> Start Free Tier -> Complete Business Profile. Akun existing: List Merchant & Outlet Choices -> isi tenantId/outletId -> Select Merchant. Request merchant/cashier mewarisi {{bearer_token_0vit}}; onboarding/select-merchant memakai accountToken.
 
-  F&B: Create Category -> Create Product -> opsional Create Group/Option -> Create Table -> Get Menu -> Checkout Public Order -> Get Status. Endpoint Archive dan Rotate memiliki efek pada data/QR; jalankan masing-masing sesuai kebutuhan, bukan Run All sebagai alur onboarding.
+  F&B: Create Category -> Create Product -> opsional Create Group/Option -> Checkout POS Order (pesanan tertahan = status OPEN) -> opsional Replace Order Items (hanya pesanan OPEN yang belum dibayar) -> pembayaran -> status COMPLETED. Endpoint Archive memiliki efek pada data; jalankan masing-masing sesuai kebutuhan, bukan Run All sebagai alur onboarding.
 
   Refresh/logout menggunakan cookie jar cashier_refresh dan CSRF: jalankan Get CSRF terlebih dahulu. Backend default cookie secure=true; HTTPS atau konfigurasi development CASHIER_REFRESH_COOKIE_SECURE=false diperlukan untuk cookie melalui HTTP.
 
@@ -54,16 +54,7 @@ variables:
   - key: optionId
     value: ""
     secret: false
-  - key: tableId
-    value: ""
-    secret: false
-  - key: qrToken
-    value: ""
-    secret: false
-  - key: outletQrToken
-    value: ""
-    secret: false
-  - key: orderToken
+  - key: orderId
     value: ""
     secret: false
   - key: itemId
@@ -81,7 +72,7 @@ variables:
   - key: saleKey
     value: ""
     secret: false
-  - key: publicOrderKey
+  - key: posOrderKey
     value: ""
     secret: false
   - key: bearer_token_0vit
@@ -89,7 +80,7 @@ variables:
 scripts:
   - type: http:beforeRequest
     code: |-
-      ["onboardingKey","saleKey","publicOrderKey"].forEach(function (key) {
+      ["onboardingKey","saleKey","posOrderKey"].forEach(function (key) {
        if (!pm.variables.get(key)) pm.collectionVariables.set(key, pm.variables.replaceIn("{{$guid}}"));
       });
     language: text/javascript
@@ -258,61 +249,6 @@ scripts:
        const r = pm.response.json();
        if (r.success && r.data) {
         if (r.data.id !== undefined && r.data.id !== null) pm.collectionVariables.set("optionId", r.data.id);
-       }
-      }
-      break;
-      }
-      case "Create Table & QR": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.id !== undefined && r.data.id !== null) pm.collectionVariables.set("tableId", r.data.id);
-        if (r.data.qrToken !== undefined && r.data.qrToken !== null) pm.collectionVariables.set("qrToken", r.data.qrToken);
-       }
-      }
-      break;
-      }
-      case "Rotate Table QR": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.qrToken !== undefined && r.data.qrToken !== null) pm.collectionVariables.set("qrToken", r.data.qrToken);
-       }
-      }
-      break;
-      }
-      case "Get Outlet QR": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.token !== undefined && r.data.token !== null) pm.collectionVariables.set("outletQrToken", r.data.token);
-       }
-      }
-      break;
-      }
-      case "Create Outlet QR": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.token !== undefined && r.data.token !== null) pm.collectionVariables.set("outletQrToken", r.data.token);
-       }
-      }
-      break;
-      }
-      case "Rotate Outlet QR": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.token !== undefined && r.data.token !== null) pm.collectionVariables.set("outletQrToken", r.data.token);
-       }
-      }
-      break;
-      }
-      case "Checkout Public Order": {
-      if (pm.response.code >= 200 && pm.response.code < 300) {
-       const r = pm.response.json();
-       if (r.success && r.data) {
-        if (r.data.orderToken !== undefined && r.data.orderToken !== null) pm.collectionVariables.set("orderToken", r.data.orderToken);
        }
       }
       break;

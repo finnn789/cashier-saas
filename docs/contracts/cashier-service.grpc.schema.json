@@ -78,7 +78,7 @@
         "orderNumber": { "type": "string" },
         "status": {
           "type": "string",
-          "description": "Order status enum name from the backend."
+          "description": "Order status enum name from the backend: OPEN (belum dibayar), COMPLETED (selesai, sudah dibayar) or CANCELLED (dibatalkan)."
         },
         "paymentStatus": {
           "type": "string",

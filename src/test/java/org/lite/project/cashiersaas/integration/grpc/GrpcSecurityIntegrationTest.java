@@ -65,7 +65,7 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     private static final String DENIED_MESSAGE = "Tenant is not permitted for this service";
 
     private static final String ORDER_A1_PAID = "ORD-A1-0001";
-    private static final String ORDER_A1_NEW = "ORD-A1-0002";
+    private static final String ORDER_A1_OPEN = "ORD-A1-0002";
     private static final String ORDER_A2 = "ORD-A2-0001";
     private static final String ORDER_C = "ORD-C-0001";
     private static final int BULK_PRODUCTS = 60;
@@ -335,13 +335,13 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         GetOrderStatusResponse paid = validStub().getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_PAID));
         assertEquals(TENANT_A1.toString(), paid.getTenantId());
         assertEquals(ORDER_A1_PAID, paid.getOrderNumber());
-        assertEquals("CONFIRMED", paid.getStatus());
+        assertEquals("COMPLETED", paid.getStatus());
         assertEquals("PAID", paid.getPaymentStatus());
         assertEquals(75000L, paid.getTotalAmount());
         assertFalse(paid.getCreatedAt().isEmpty());
 
-        GetOrderStatusResponse fresh = validStub().getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_NEW));
-        assertEquals("NEW", fresh.getStatus());
+        GetOrderStatusResponse fresh = validStub().getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_OPEN));
+        assertEquals("OPEN", fresh.getStatus());
         assertEquals("UNPAID", fresh.getPaymentStatus());
         assertEquals(25000L, fresh.getTotalAmount());
     }
@@ -573,8 +573,8 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
             seedProduct(tenant, outlet, snacks, String.format("Bulk Item %03d", index), 5000L + index, true, false,
                     10 + index);
         }
-        seedOrder(tenant, outlet, ORDER_A1_PAID, "CONFIRMED", "PAID", 75000);
-        seedOrder(tenant, outlet, ORDER_A1_NEW, "NEW", "UNPAID", 25000);
+        seedOrder(tenant, outlet, ORDER_A1_PAID, "COMPLETED", "PAID", 75000);
+        seedOrder(tenant, outlet, ORDER_A1_OPEN, "OPEN", "UNPAID", 25000);
     }
 
     private void seedTenantA2() {
@@ -584,7 +584,7 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         UUID drinks = seedCategory(tenant, outlet, "Minuman");
         seedProduct(tenant, outlet, drinks, "Kopi Tetangga", 20000, true, false, 1);
         seedProduct(tenant, outlet, drinks, "Promo 100% Off", 9000, true, false, 2);
-        seedOrder(tenant, outlet, ORDER_A2, "NEW", "UNPAID", 40000);
+        seedOrder(tenant, outlet, ORDER_A2, "OPEN", "UNPAID", 40000);
     }
 
     /** A tenant with real data that is disabled: its data must stay unreachable through gRPC. */
@@ -594,6 +594,6 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         UUID outlet = seedOutlet(tenant, "Outlet C");
         UUID drinks = seedCategory(tenant, outlet, "Minuman");
         seedProduct(tenant, outlet, drinks, "Kopi Tenant C", 22000, true, false, 1);
-        seedOrder(tenant, outlet, ORDER_C, "NEW", "UNPAID", 30000);
+        seedOrder(tenant, outlet, ORDER_C, "OPEN", "UNPAID", 30000);
     }
 }

@@ -39,76 +39,60 @@ Menu (IDR): Kopi - Espresso 18.000 (`...2001`), Kopi Susu Gula Aren 25.000 (`...
 
 Ingredients (outlet stock, ids `00000000-0000-4000-8000-00000000XXXX`; the seed gives each a single `RESTOCK` movement "Stok awal", so balance equals ledger sum): Biji Kopi `...7001` 5000 g (reorder level 500), Susu `...7002` 20000 ml (2000), Gula Aren `...7003` 400 ml (500, so **LOW** from the start), Oat Milk `...7004` 6000 ml (1000), Bubuk Matcha `...7005` 1000 g (200), Boba `...7006` 3000 g (500; no recipe uses it), Croissant `...7007` 24 pcs (5). Quantities are plain numbers (no thousands separator). Recipes: Espresso 18 g Biji Kopi; Kopi Susu Gula Aren 18 g Biji Kopi + 120 ml Susu + 20 ml Gula Aren; Cappuccino 18 g + 150 ml Susu; Matcha Latte 5 g Bubuk Matcha + 150 ml Susu; Croissant Butter 1 pcs Croissant; add-on Extra Shot 18 g Biji Kopi; add-on Oat Milk 150 ml Oat Milk.
 
-Tables and public QR tokens (stored in plain text in `table_qr_tokens.token`, 43 chars `[A-Za-z0-9_-]`; the seed inserts the plain token so these work as-is):
-
-| Table | id | QR token | Public menu |
-|---|---|---|---|
-| Meja 01 | `00000000-0000-4000-8000-000000005001` | `demo-qr-meja-01-kopi-demo-public-token00000` | `/api/v1/public/fnb/menu/{token}` |
-| Meja 02 | `...5002` | `demo-qr-meja-02-kopi-demo-public-token00000` | same |
-| Meja 03 | `...5003` | `demo-qr-meja-03-kopi-demo-public-token00000` | same |
-| Outlet QR (takeaway) | - | `demo-qr-outlet-kopi-demo-public-token000000` | same |
-
-The seed (`src/main/resources/db/demo/R__demo_seed.sql`) is a Flyway repeatable migration loaded only by profile `demo`; every insert is `ON CONFLICT DO NOTHING`. It also inserts the `FNB` row in `business_types` (migrations do not).
+The seed (`src/main/resources/db/demo/R__demo_seed.sql`) is a Flyway repeatable migration loaded only by profile `demo`; every insert is `ON CONFLICT DO NOTHING`. It also inserts the `FNB` row in `business_types` (migrations do not). Older seed rows for dining tables and QR tokens may still exist in the database; they are unused after the cashier-first pivot.
 
 ## Verified curl walkthrough
 
-All requests were run against the compose stack (replace the port if you changed it). Responses are `{success, code, message, data}`.
+All requests were run against the compose stack before the cashier-first pivot (replace the port if you changed it). Responses are `{success, code, message, data}`. After the pivot the QR and kitchen steps were removed and the order statuses are now `OPEN`/`COMPLETED`; the changed steps (4 to 6) were not re-run.
 
 ```bash
 B=http://localhost:8080
 T=00000000-0000-4000-8000-0000000000b1   # tenant
 O=00000000-0000-4000-8000-0000000000d1   # outlet
 
-# 1. Public menu by QR token (no auth) -> 200
-curl -s $B/api/v1/public/fnb/menu/demo-qr-meja-01-kopi-demo-public-token00000
-
-# 2. Public QR order (Idempotency-Key must be 16-128 chars) -> 201, returns orderToken
-curl -s -H 'Content-Type: application/json' -H 'Idempotency-Key: demo-qr-order-0001' \
-  -d '{"serviceType":"DINE_IN","customerLabel":"Sari","items":[{"productId":"00000000-0000-4000-8000-000000002005","quantity":1,"optionIds":[]}]}' \
-  $B/api/v1/public/fnb/menu/demo-qr-meja-02-kopi-demo-public-token00000/orders
-
-# 3. Login (account token, nextStep=SELECT_MERCHANT_OUTLET) -> 200
+# 1. Login (account token, nextStep=SELECT_MERCHANT_OUTLET) -> 200
 ACC=$(curl -s -H 'Content-Type: application/json' -d '{"email":"cashier@demo.local","password":"Demo123!"}' \
   $B/api/v1/auth/login | python -c "import sys,json;print(json.load(sys.stdin)['data']['accessToken'])")
 
-# 4. Select merchant/outlet (operational token, nextStep=OPERATE) -> 200
+# 2. Select merchant/outlet (operational token, nextStep=OPERATE) -> 200
 TOK=$(curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $ACC" \
   -d "{\"tenantId\":\"$T\",\"outletId\":\"$O\"}" $B/api/v1/auth/select-merchant \
   | python -c "import sys,json;print(json.load(sys.stdin)['data']['accessToken'])")
 
-# 5. List products -> 200
+# 3. List products -> 200
 curl -s -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/products
 
-# 6. Create POS order (2 Espresso + Kopi Susu Large + Extra Shot, Meja 01) -> 201
+# 4. Create POS order (2 Espresso + Kopi Susu Large + Extra Shot) -> 201, status OPEN / paymentStatus UNPAID (a held bill)
 OID=$(curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK" -H "Idempotency-Key: demo-pos-$RANDOM$RANDOM" \
-  -d '{"serviceType":"DINE_IN","tableId":"00000000-0000-4000-8000-000000005001","customerLabel":"Budi","items":[{"productId":"00000000-0000-4000-8000-000000002001","quantity":2,"optionIds":[]},{"productId":"00000000-0000-4000-8000-000000002002","quantity":1,"note":"less ice","optionIds":["00000000-0000-4000-8000-000000004002","00000000-0000-4000-8000-000000004003"]}]}' \
+  -d '{"serviceType":"DINE_IN","customerLabel":"Budi","items":[{"productId":"00000000-0000-4000-8000-000000002001","quantity":2,"optionIds":[]},{"productId":"00000000-0000-4000-8000-000000002002","quantity":1,"note":"less ice","optionIds":["00000000-0000-4000-8000-000000004002","00000000-0000-4000-8000-000000004003"]}]}' \
   $B/api/v1/cashier/outlets/$O/fnb/orders | python -c "import sys,json;print(json.load(sys.stdin)['data']['orderId'])")
 
-# 7. Pay CASH -> 200 (total 83.520 incl. 11% tax + 5% service; change 116.480 on 200.000 tendered)
+# 5. Optional: replace the items of the held bill (only while OPEN/UNPAID) -> 200. Not run here: it re-sends the
+#    same items, so the totals and stock numbers in the steps below stay as they are.
+curl -s -X PUT -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK" \
+  -d '{"serviceType":"DINE_IN","customerLabel":"Budi","items":[{"productId":"00000000-0000-4000-8000-000000002001","quantity":2,"optionIds":[]},{"productId":"00000000-0000-4000-8000-000000002002","quantity":1,"note":"less ice","optionIds":["00000000-0000-4000-8000-000000004002","00000000-0000-4000-8000-000000004003"]}]}' \
+  $B/api/v1/cashier/outlets/$O/fnb/orders/$OID/items
+
+# 6. Pay CASH -> 200, order becomes COMPLETED / PAID (total 83.520 incl. 11% tax + 5% service; change 116.480 on 200.000 tendered)
 curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK" \
   -d "{\"method\":\"CASH\",\"amountTendered\":200000.00,\"idempotencyKey\":\"demo-pay-$OID\"}" \
   $B/api/v1/cashier/outlets/$O/fnb/orders/$OID/payments
 
-# 8. Kitchen: list queue, then prepare -> ready -> complete (each 200)
-curl -s -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/kitchen/orders
-for s in prepare ready complete; do
-  curl -s -X POST -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/kitchen/orders/$OID/$s; done
-
-# 9. Sales report (owner only: repeat steps 3-4 with owner@demo.local) -> 200
+# 7. Sales report (owner only: repeat steps 1-2 with owner@demo.local) -> 200
 curl -s -H "Authorization: Bearer $OWNER_TOK" "$B/api/v1/merchant/outlets/$O/fnb/reports/sales"
 # CSV: .../fnb/reports/sales/csv
 ```
 
-Owner-only endpoints (tables, categories, products CRUD, reports) are under `/api/v1/merchant/outlets/{outletId}/fnb/...`; cashier endpoints under `/api/v1/cashier/outlets/{outletId}/fnb/...`.
+Owner-only endpoints (categories, products CRUD, reports) are under `/api/v1/merchant/outlets/{outletId}/fnb/...`; cashier endpoints under `/api/v1/cashier/outlets/{outletId}/fnb/...`.
 
 ## Inventory and recipes walkthrough
 
 Verification: executed on 2026-11-10 by the project orchestrator, running the bash blocks of this document unchanged (only the port) in order, against the backend jar built from the branch that contains this section (`java -jar`, profile `demo`, Flyway V1-V5 plus the demo seed, PostgreSQL 17 in a throwaway Docker container). Every "expected" value below matched the response. It was not run through `docker compose`, and `python` was provided by another interpreter than the host's. Two things were not exercised: the Postman collection and anything over a real network between separate hosts.
 
-Continues the walkthrough above in the same shell: it needs `$B`, `$T`, `$O` and `$TOK` (the **cashier** operational token from steps 3-4). It creates its own ingredient, product and option group so the numbers below do not depend on how much stock earlier runs consumed; a random suffix makes every name and key unique, so it can be re-run. Side effects: it adds one ingredient, one product and one option group, and attaches that group to the seeded Espresso; `docker compose down -v` resets everything. Numbers marked "expected" come from the seed and the recipe arithmetic in the code and were confirmed by the run described above (quantities print as floats such as `-72.0` because the helper uses Python). Seed ids are the ones listed in "Demo data"; JSON field names are those of the request/response DTOs.
+Continues the walkthrough above in the same shell: it needs `$B`, `$T`, `$O` and `$TOK` (the **cashier** operational token from steps 1-2). It creates its own ingredient, product and option group so the numbers below do not depend on how much stock earlier runs consumed; a random suffix makes every name and key unique, so it can be re-run. Side effects: it adds one ingredient, one product and one option group, and attaches that group to the seeded Espresso; `docker compose down -v` resets everything. Numbers marked "expected" come from the seed and the recipe arithmetic in the code and were confirmed by the run described above (quantities print as floats such as `-72.0` because the helper uses Python). Seed ids are the ones listed in "Demo data"; JSON field names are those of the request/response DTOs.
 
 ```bash
-# 0. Owner operational token (same two calls as steps 3-4, with the owner account) and a unique suffix
+# 0. Owner operational token (same two calls as steps 1-2, with the owner account) and a unique suffix
 OACC=$(curl -s -H 'Content-Type: application/json' -d '{"email":"owner@demo.local","password":"Demo123!"}' \
   $B/api/v1/auth/login | python -c "import sys,json;print(json.load(sys.stdin)['data']['accessToken'])")
 OWNER_TOK=$(curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $OACC" \
@@ -218,7 +202,7 @@ What the steps demonstrate:
 
 - Recipes belong to a product or to an add-on option; the add-on recipe of a shared option applies to every product that has the group, once per ordered unit of the line.
 - Stock changes only when an order becomes paid (cash, manual non-cash, and a mock-gateway attempt resolved `SUCCEEDED`), inside the payment transaction, with one `SALE` movement per (order, ingredient). An unpaid order, and a cancelled unpaid order, deduct nothing, and a paid order cannot be cancelled, so there is no stock reversal.
-- The seeded steps 6-7 of the first walkthrough already consume stock with the seeded recipes. Observed on a fresh stack (confirmed by the run described above): the step 7 payment response carries `stockWarnings` of `["Gula Aren: sisa 380 ml (menipis)"]` (400 - 20 ml, reorder level 500).
+- The seeded steps 4 and 6 of the first walkthrough already consume stock with the seeded recipes. Observed on a fresh stack (confirmed by the run described above): the step 6 payment response carries `stockWarnings` of `["Gula Aren: sisa 380 ml (menipis)"]` (400 - 20 ml, reorder level 500).
 - RESTOCK and WASTE are open to CASHIER and OWNERMERCHANT; ADJUSTMENT, ingredient create/update/deactivate and recipes are OWNERMERCHANT only.
 - A movement key is unique per tenant: the same key with a different body is a `409`. Known limit: two parallel requests with the same key may return `409` to the loser instead of a replay (the balance still changes once).
 

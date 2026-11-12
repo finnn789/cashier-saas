@@ -40,7 +40,7 @@ public class SalesOrderEntity extends MutableBaseEntity {
     private ServiceType serviceType;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 24)
-    private OrderStatus status = OrderStatus.NEW;
+    private OrderStatus status = OrderStatus.OPEN;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 24)
     private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
@@ -91,7 +91,7 @@ public class SalesOrderEntity extends MutableBaseEntity {
     }
 
     public void snapshotRates(BigDecimal taxRate, BigDecimal serviceChargeRate) {
-        requireNewUnpaid();
+        requireOpenUnpaid();
         if (taxRateSnapshot != null || serviceChargeRateSnapshot != null)
             throw new InvalidOperationException("Snapshot tarif pesanan sudah tersedia.");
         requireNonNegative(taxRate, "Tarif pajak tidak valid.");
@@ -100,21 +100,34 @@ public class SalesOrderEntity extends MutableBaseEntity {
         serviceChargeRateSnapshot = serviceChargeRate;
     }
 
+    public void replaceLines(ServiceType serviceType, String customerLabel, Charges charges) {
+        requireOpenUnpaid();
+        if (discountAmount.signum() != 0)
+            throw new InvalidOperationException("Pesanan sudah memiliki diskon; item tidak dapat diubah.");
+        if (serviceType == null) throw new InvalidOperationException("Tipe layanan tidak valid.");
+        this.serviceType = serviceType;
+        this.customerLabel = customerLabel;
+        subtotal = charges.subtotal();
+        taxAmount = charges.tax();
+        serviceChargeAmount = charges.serviceCharge();
+        total = charges.subtotal().add(charges.tax()).add(charges.serviceCharge());
+    }
+
     public void confirmPaid() {
-        requireNewUnpaid();
+        requireOpenUnpaid();
         paymentStatus = PaymentStatus.PAID;
-        status = OrderStatus.CONFIRMED;
+        status = OrderStatus.COMPLETED;
     }
 
     public void cancel(String reason) {
-        requireNewUnpaid();
+        requireOpenUnpaid();
         if (reason == null || reason.isBlank()) throw new InvalidOperationException("Alasan pembatalan wajib diisi.");
         cancellationReason = reason.trim();
         status = OrderStatus.CANCELLED;
     }
 
     public void applyDiscount(BigDecimal amount) {
-        requireNewUnpaid();
+        requireOpenUnpaid();
         requireNonNegative(amount, "Diskon tidak valid.");
         if (amount.compareTo(subtotal) > 0) throw new InvalidOperationException("Diskon melebihi subtotal.");
         if (taxRateSnapshot == null || serviceChargeRateSnapshot == null)
@@ -126,9 +139,9 @@ public class SalesOrderEntity extends MutableBaseEntity {
         total = discountedSubtotal.add(taxAmount).add(serviceChargeAmount);
     }
 
-    private void requireNewUnpaid() {
-        if (status != OrderStatus.NEW || paymentStatus != PaymentStatus.UNPAID)
-            throw new InvalidOperationException("Perubahan hanya dapat dilakukan pada pesanan baru yang belum dibayar.");
+    private void requireOpenUnpaid() {
+        if (status != OrderStatus.OPEN || paymentStatus != PaymentStatus.UNPAID)
+            throw new InvalidOperationException("Perubahan hanya dapat dilakukan pada pesanan terbuka yang belum dibayar.");
     }
 
     private static void requireNonNegative(BigDecimal value, String message) {

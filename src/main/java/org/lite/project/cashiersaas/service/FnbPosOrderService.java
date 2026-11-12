@@ -8,13 +8,19 @@ import org.lite.project.cashiersaas.dto.request.FnbPosOrderRequest;
 import org.lite.project.cashiersaas.dto.response.FnbStaffOrderResponse;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.ServiceType;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
+import org.lite.project.cashiersaas.repository.FnbDiscountRepository;
+import org.lite.project.cashiersaas.repository.FnbGatewayAttemptRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +39,9 @@ public class FnbPosOrderService {
     private final MerchantAccessGuard guard;
     private final FnbOrderRepository orders;
     private final FnbOrderPricingService pricing;
+    private final FnbGatewayAttemptRepository attempts;
+    private final FnbDiscountRepository discounts;
+    private final AuditLogRepository audit;
 
     @Transactional
     public FnbStaffOrderResponse checkout(TenantPrincipal principal, UUID outletId, String key,
@@ -48,9 +57,7 @@ public class FnbPosOrderService {
         SalesOrderEntity existing = orders.byIdempotency(context.getTenant().getId(), idempotencyKey).orElse(null);
         if (existing != null) return replay(existing, outletId, fingerprint);
         FnbOrderPricingService.PricedOrder priced = pricing.price(context.getTenant().getId(), outletId,
-                request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
-                        item.getQuantity(), item.getNote(), item.getOptionIds())).toList(),
-                context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
+                lineInputs(request), context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
         String number = "POS-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase();
         SalesOrderEntity order = SalesOrderEntity.pos(context.getTenant(), context.getOutlet(),
                 new SalesOrderEntity.PosDetails(idempotencyKey, fingerprint, number,
@@ -61,6 +68,45 @@ public class FnbPosOrderService {
         persistLines(context, order, priced.lines());
         orders.flush();
         return response(order);
+    }
+
+    // Hold bill: replaces every line of an OPEN, unpaid POS order and reprices with the order's own rate snapshot.
+    @Transactional
+    public FnbStaffOrderResponse replaceItems(TenantPrincipal principal, UUID outletId, UUID orderId,
+                                              FnbPosOrderRequest request) {
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        UUID tenantId = context.getTenant().getId();
+        orders.lockTenant(tenantId);
+        context = guard.requireOutlet(principal, outletId);
+        if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
+            throw new ResourceNotFoundException();
+        SalesOrderEntity order = orders.byId(tenantId, outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+        orders.refreshOrder(order);
+        if (order.getSource() != OrderSource.POS) throw new OperationConflictException("Hanya pesanan POS yang dapat diubah.");
+        if (order.getStatus() != OrderStatus.OPEN || order.getPaymentStatus() != PaymentStatus.UNPAID)
+            throw new OperationConflictException("Pesanan hanya dapat diubah selama masih terbuka dan belum dibayar.");
+        if (attempts.pendingForOrder(tenantId, outletId, orderId).isPresent())
+            throw new OperationConflictException("Gateway attempt masih tertunda.");
+        if (discounts.byOrder(tenantId, outletId, orderId).isPresent())
+            throw new OperationConflictException("Pesanan sudah memiliki diskon; item tidak dapat diubah.");
+        requireServiceType(request);
+        FnbOrderPricingService.PricedOrder priced = pricing.price(tenantId, outletId, lineInputs(request),
+                order.getTaxRateSnapshot(), order.getServiceChargeRateSnapshot());
+        String previousSubtotal = order.getSubtotal().toPlainString();
+        orders.deleteLines(tenantId, outletId, order);
+        order.replaceLines(request.getServiceType(), request.getCustomerLabel().trim(),
+                new SalesOrderEntity.Charges(priced.subtotal(), priced.taxAmount(), priced.serviceChargeAmount()));
+        persistLines(context, order, priced.lines());
+        orders.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
+                AuditLogEntity.Action.FNB_ORDER_ITEMS_REPLACED, order.getId(), null,
+                "subtotal=" + previousSubtotal + "->" + priced.subtotal().toPlainString()));
+        return response(order);
+    }
+
+    private List<FnbOrderPricingService.LineInput> lineInputs(FnbPosOrderRequest request) {
+        return request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
+                item.getQuantity(), item.getNote(), item.getOptionIds())).toList();
     }
 
     private void requireServiceType(FnbPosOrderRequest request) {

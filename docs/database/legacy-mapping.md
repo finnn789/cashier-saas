@@ -16,9 +16,9 @@ Dokumen ini membaca model yang saat ini ada di `src/main/java/org/lite/project/c
 | `ProductEntity` | Gunakan `laundry_services` untuk layanan laundry | Jasa per kg/potong memiliki aturan satuan dan minimum tagihan, bukan produk makanan. Data produk lama tidak otomatis dikonversi. |
 | `OptionGroupEntity` | Simpan sebagai referensi pengembangan F&B | Ukuran minuman dan topping bukan kebutuhan inti laundry pertama. Regular/express dapat menjadi layanan berbeda. |
 | `ProductOptionEntity` | Simpan sebagai referensi pengembangan F&B | Belum perlu mesin modifier umum untuk laundry. |
-| `DiningTableEntity` | Tidak digunakan oleh modul laundry | Meja restoran bukan antrian atau mesin cuci. |
-| `TableQrTokenEntity` | Tidak digunakan oleh modul laundry | Link tagihan publik memiliki token dan otorisasi sendiri; tidak memakai token meja. |
-| `SalesOrderEntity` | Pisahkan identitas umum di `orders` dari detail `laundry_orders` | `DINE_IN`, `TAKEAWAY`, meja dan antrean dapur tidak sesuai dengan proses cucian. |
+| `DiningTableEntity` | Dihapus dari kode (pivot kasir, 12 November 2026); tabel database tetap ada | Tidak digunakan oleh modul laundry maupun alur kasir saat ini. |
+| `TableQrTokenEntity` | Dihapus dari kode (pivot kasir, 12 November 2026); tabel database tetap ada | Link tagihan publik memiliki token dan otorisasi sendiri. |
+| `SalesOrderEntity` | Pisahkan identitas umum di `orders` dari detail `laundry_orders` | `DINE_IN`, `TAKEAWAY` dan status order F&B (`OPEN`, `COMPLETED`, `CANCELLED`) tidak sesuai dengan proses cucian. |
 | `OrderItemEntity` | Gunakan `laundry_order_items` | Kuantitas desimal, satuan, berat aktual, jumlah tertagih, minimum, serta snapshot tarif diperlukan. |
 | `OrderItemOptionEntity` | Tunda untuk F&B | Laundry pertama memakai item layanan bertipe jelas. |
 | `PaymentEntity` | Pembayaran pelanggan menjadi `customer_payments`; pembayaran langganan berada di domain platform | Dua aliran uang memiliki penerima dan siklus hidup berbeda. Nominal yang melunasi tagihan dibedakan dari uang tunai diterima dan kembalian. |
@@ -55,6 +55,6 @@ Jika database ternyata hanya disposable development, fresh database merupakan al
 
 ## Perluasan F&B nanti
 
-Fondasi akun/tenant/langganan, identitas order, invoice, pembayaran, dan audit dapat digunakan kembali. Modul F&B menambahkan katalog menu, meja/QR, detail order F&B, item/options, serta status dapur. Tambahkan discriminator dan constraint subtype secara eksplisit ketika bisnis kedua diluncurkan; jangan membuka tipe bisnis di database sebelum modulnya siap.
+Fondasi akun/tenant/langganan, identitas order, invoice, pembayaran, dan audit dapat digunakan kembali. Modul F&B menambahkan katalog menu, detail order F&B, item/options, serta status order `OPEN`/`COMPLETED`/`CANCELLED`. Tambahkan discriminator dan constraint subtype secara eksplisit ketika bisnis kedua diluncurkan; jangan membuka tipe bisnis di database sebelum modulnya siap.
 
 Riwayat laundry tidak berubah menjadi data F&B, dan nominal tagihan historis tetap berasal dari snapshot. Rancangan pertama tidak memuat tabel operasional untuk retail, jasa, online seller, atau distributor.

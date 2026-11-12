@@ -1,6 +1,0 @@
-$kind: http-request
-url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/outlet-qr/rotate"
-method: POST
-headers:
-  Accept: application/json
-order: 3000

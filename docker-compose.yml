@@ -44,6 +44,7 @@ services:
       # Staff sync (in progress): blank AI_SERVICE_BASE_URL in .env falls back to the compose service below.
       AI_SERVICE_BASE_URL: ${AI_SERVICE_BASE_URL:-http://ai-services:8001}
       AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY:?set AI_INTERNAL_API_KEY in .env (see .env.example)}
+      CASHIER_CORS_ALLOWED_ORIGINS: ${CASHIER_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       # REST rate limiter: tunable from .env, defaults match application.properties.
       CASHIER_RATE_LIMIT_ENABLED: ${CASHIER_RATE_LIMIT_ENABLED:-true}
       CASHIER_RATE_LIMIT_MAX_BUCKETS: ${CASHIER_RATE_LIMIT_MAX_BUCKETS:-100000}

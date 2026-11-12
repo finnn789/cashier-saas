@@ -1,7 +1,11 @@
 # Tasks
 
-Updated: 2026-11-11 (Asia/Jakarta)
-Memory version: 68
+Updated: 2026-11-12 (Asia/Jakarta)
+Memory version: 70
+
+- TASK-075 — IMPLEMENTED, REVIEWED, VERIFIED, NOT COMMITTED (2026-11-12): pivot Wave B. `OrderStatus` = OPEN/COMPLETED/CANCELLED (paid -> COMPLETED at payment); V6 migration (relax, map, guard, tighten) checked on throwaway PG17: 12 old status x payment combinations map correctly, new CHECK rejects old values, a REFUNDED old-status row aborts V6 with rollback. Server-side hold bill: `PUT /api/v1/cashier/outlets/{outletId}/fnb/orders/{orderId}/items` (`FnbPosOrderService.replaceItems`, snapshot rates, 409 when not OPEN+UNPAID, QR source, pending gateway attempt or discount; audit `FNB_ORDER_ITEMS_REPLACED`). CORS property renamed `app.cors.allowed-origins` (env `CASHIER_CORS_ALLOWED_ORIGINS`) with the old fail-fast validation moved into `SecurityConfiguration` (A1). Regression from TASK-074 found by W4 and fixed by W5: `GET /api/v1/public/plans` re-permitted (GET only). Python `OrderStatusTool` adds `status_label` (Belum dibayar / Selesai (sudah dibayar) / Dibatalkan). Postman: folders 10/11/12 deleted, new `15 - F&B POS Orders` (checkout + replace items); docs updated, `docs/fnb-realtime.md` deleted. Evidence: `mvnw -B verify` BUILD SUCCESS 385 unit + 80 integration, 0 failures. Not run: Python unit tests, Postman collection. Whole refactor diff vs `cf949ff`: 128 files, +730 / -4910. Reports `reports/TASK-075-W1..W5.md`. UI refactor handed to Antigravity via `prompts/refactore_feature_and_uui.md` (UI repo is not under git). Awaiting: user commit approval (one commit per wave suggested).
+
+- TASK-074 — IMPLEMENTED, REVIEWED, VERIFIED (`mvnw -B verify` BUILD SUCCESS 2026-11-12: 368 unit + 77 integration, 0 failures; unit count fell from 493 because 12 test classes of deleted features were removed), NOT COMMITTED: pivot Wave A, delete QR/public orders, kitchen, dining tables, WebSocket real-time (backend). Branch `refactor/pivot-cashier-ai` from main `cf949ff`. Workers W1 main code, W2 security/rate limit/build + its tests, W3 other tests. Packet `tasks/TASK-074.md`. User asked for `mvnw verify` after the workers. Canonical 68 -> 69.
 
 - TASK-073 — DONE, REVIEWED, NOT COMMITTED, NOT EXECUTED (2026-11-11): Postman `KedaiMbo API` folders 08/09 repointed to the V5 option-group routes (+3 new requests). See `.ai/MEMORY.md`. Open: user's choice for the formatting-only dirty `FnbCatalogService.java`; whether to commit TASK-073 files and the frontend prompt.
 

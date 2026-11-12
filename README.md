@@ -1,8 +1,8 @@
 # Cashier SaaS
 
-> Backend POS multi-tenant untuk UMKM F&B: pesan lewat QR atau kasir, bayar dulu, dapur langsung tahu.
+> Backend POS multi-tenant untuk UMKM F&B: pesan lewat kasir, tahan pesanan, bayar, laporan penjualan.
 
-A multi-tenant POS backend for small food-and-beverage businesses. Customers order from a QR code on the table while cashiers key in walk-in orders; both feed **one** order model that follows a **Pay First** flow (order, pay, kitchen, complete, report). The backend is a Java 17 / Spring Boot modular monolith on PostgreSQL, with a realtime WebSocket channel for kitchen/cashier screens and a gRPC API used by a separate Python AI customer-service (Telegram + LLM) to look up menus and order status.
+A multi-tenant POS backend for small food-and-beverage businesses. Cashiers key in orders at the POS; a held bill is an `OPEN` order that is paid later. The flow is `menu -> POS order (held = OPEN) -> payment -> COMPLETED -> sales report`. The backend is a Java 17 / Spring Boot modular monolith on PostgreSQL; clients refresh order lists by polling REST. It also exposes a gRPC API used by a separate Python AI customer-service (Telegram + LLM) to look up menus and order status.
 
 ![Java 17](https://img.shields.io/badge/Java-17-orange)
 ![Spring Boot 4.1.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F)
@@ -16,16 +16,12 @@ Everything below exists in source (`src/main/java/org/lite/project/cashiersaas`)
 - **Staff invitations** - owners invite cashiers per outlet; invitation claim (`CashierInvitationController`, token stored as a SHA-256 digest).
 - **Catalog and options** - categories, products, options, and **reusable option groups**: groups are an outlet-level library attached to any number of products (replace-all, ordered), with required/min/max rules on the group and archive instead of delete (`FnbCatalogController`, `FnbCatalogService`; migration V5).
 - **Inventory and recipes** - per-outlet ingredients with one unit each, a stock balance, an append-only movement ledger (`RESTOCK`, `WASTE`, `ADJUSTMENT`, automatic `SALE`; reason and idempotency key required), and recipes per product and per add-on option. Stock is deducted when an order becomes paid (cash, manual non-cash and mock gateway) and the payment response carries `stockWarnings`; stock may go negative and a payment is never blocked (`FnbInventoryController`, `FnbInventoryService`, `FnbStockService`; migration V4).
-- **Tables and QR** - dining tables, per-table and per-outlet QR tokens with rotation (`FnbTableController`, `FnbOrderQrController`).
-- **Public QR ordering** - anonymous menu by QR token and order submission with an `Idempotency-Key`; order status by opaque order token (`PublicOrderController`).
-- **POS orders** - cashier checkout for dine-in/takeaway (`FnbStaffOrderController`, `FnbPosOrderService`).
+- **POS orders and hold bill** - cashier checkout for dine-in/takeaway with an `Idempotency-Key`; an unpaid order stays `OPEN` (held bill) and its items can be replaced with `PUT /api/v1/cashier/outlets/{outletId}/fnb/orders/{orderId}/items` while it is `OPEN` and unpaid (`FnbStaffOrderController`, `FnbPosOrderService`).
 - **Discounts** - owner-applied order discounts (`FnbDiscountController`).
 - **Cancellation with audit** - reason required, audit record written (`FnbOrderCancellationService`).
 - **Payments** - cash, manual non-cash and a **mock gateway** with explicit attempt resolution (`FnbPaymentService`, `MockFnbGatewayService`).
-- **Kitchen flow** - prepare / ready / complete transitions (`FnbKitchenController`).
 - **Receipts and sales report** - receipt per order; owner sales report with CSV export (`FnbReceiptController`, `FnbSalesReportController`).
 - **Owner settings and audit viewer** - business settings (tax, service charge, currency, logo URL) with before/after audit, plus a filtered, paginated audit log (`MerchantBusinessSettingsController`, `MerchantAuditController`).
-- **Realtime WebSocket** - order-change invalidation events for staff screens (`FnbRealtimeController`, `FnbRealtimeWebSocketHandler`).
 - **gRPC for the AI service** - `GetCatalogItem`, `GetOrderStatus` (`src/main/proto/cashier_service.proto`, port 9090).
 - **AI Telegram assistant** - separate Python service in `Ai-services/` (FastAPI, LangGraph, OpenRouter, aiogram) that calls the backend over gRPC.
 
@@ -33,15 +29,12 @@ Everything below exists in source (`src/main/java/org/lite/project/cashiersaas`)
 
 ```mermaid
 flowchart LR
-    Staff["Staff UI<br/>owner / cashier"] -->|Bearer JWT| Sec
-    Guest["Customer<br/>QR scan"] -->|public QR token| Sec
+    Staff["Staff UI<br/>owner / cashier"] -->|"Bearer JWT, REST polling"| Sec
     Sec["Spring Security<br/>JWT resource server"] --> Ctl["controllers<br/>ApiResponse DTOs"]
     Ctl --> Svc["services<br/>transactions + use cases"]
     Svc --> Guard["MerchantAccessGuard<br/>tenant / outlet checks"]
     Svc --> Repo["repositories<br/>JPA + Blaze-Persistence + QueryDSL"]
     Repo --> DB[("PostgreSQL<br/>Flyway migrations")]
-    Svc -. "AFTER_COMMIT event" .-> WS["WebSocket handler<br/>single JVM"]
-    WS -->|"invalidate, then REST resync"| Staff
     AI["Ai-services<br/>FastAPI + LangGraph"] -->|"gRPC :9090"| GRPC["gRPC handlers"]
     GRPC --> Repo
     Svc -. "staff sync after commit, HTTP PUT (in progress)" .-> AI
@@ -54,12 +47,10 @@ Order state machine (enforced in `SalesOrderEntity`; `OrderStatus` x `PaymentSta
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NEW_UNPAID: QR or POS checkout
-    NEW_UNPAID --> CONFIRMED_PAID: settlement (cash / manual / mock gateway)
-    NEW_UNPAID --> CANCELLED: cancel (reason + audit)
-    CONFIRMED_PAID --> PREPARING: kitchen prepare
-    PREPARING --> READY: kitchen ready
-    READY --> COMPLETED: complete
+    [*] --> OPEN_UNPAID: POS checkout (held bill)
+    OPEN_UNPAID --> OPEN_UNPAID: replace items
+    OPEN_UNPAID --> COMPLETED_PAID: settlement (cash / manual / mock gateway)
+    OPEN_UNPAID --> CANCELLED: cancel (reason + audit)
     COMPLETED --> [*]
     CANCELLED --> [*]
 ```
@@ -70,12 +61,10 @@ More detail: [docs/architecture.md](docs/architecture.md).
 
 | Decision | What and why | Trade-off | Where |
 |---|---|---|---|
-| **Idempotency key + SHA-256 request fingerprint** | Checkout requires an `Idempotency-Key` (16-128 chars). The canonical request (service type, table, customer label, items, sorted option ids) is hashed and stored on the order. Same key + same fingerprint replays the original order; same key + different request is a conflict (`OperationConflictException`). Option ids are sorted so ordering does not change the hash. | Replays are scoped per tenant + key. | `service/FnbPosOrderService.java`, `service/PublicOrderService.java`, `service/FnbPaymentService.java` |
-| **Tenant-row `PESSIMISTIC_WRITE` lock** | Checkout (and payment/kitchen coordination) first locks the tenant row (`lockTenant`), serializing concurrent writes so two requests with the same key cannot both insert and table/order state stays consistent. | It serializes **all mutations of one tenant**: simple and correct, but a throughput bottleneck for a very busy tenant. Per-outlet locks or unique-constraint-and-retry would scale better. Other tenants are unaffected. | `repository/FnbOrderRepository.java` (`lockTenant`) |
+| **Idempotency key + SHA-256 request fingerprint** | Checkout requires an `Idempotency-Key` (16-128 chars). The canonical request (service type, customer label, items, sorted option ids) is hashed and stored on the order. Same key + same fingerprint replays the original order; same key + different request is a conflict (`OperationConflictException`). Option ids are sorted so ordering does not change the hash. | Replays are scoped per tenant + key. | `service/FnbPosOrderService.java`, `service/FnbPaymentService.java` |
+| **Tenant-row `PESSIMISTIC_WRITE` lock** | Checkout, replace-items and payment first lock the tenant row (`lockTenant`), serializing concurrent writes so two requests with the same key cannot both insert and order state stays consistent. | It serializes **all mutations of one tenant**: simple and correct, but a throughput bottleneck for a very busy tenant. Per-outlet locks or unique-constraint-and-retry would scale better. Other tenants are unaffected. | `repository/FnbOrderRepository.java` (`lockTenant`) |
 | **Tenant isolation via principal, 404 instead of 403** | Tenant and outlet come from the validated JWT principal, never from the request body. `MerchantAccessGuard` re-checks membership/outlet access in the database; a record in another tenant yields `ResourceNotFoundException`, so existence is not leaked. | Each request pays a guard query. | `service/MerchantAccessGuard.java`, `component/TenantJwtAuthenticationConverter.java` |
 | **Refresh token digest + rotation** | Refresh tokens are random; only their SHA-256 digest is stored. Each refresh row-locks the session, consumes the old token and issues a new one. Presenting a used or expired token revokes the whole session (reuse detection). The cookie is `HttpOnly`, `SameSite=Strict`, scoped to `/api/v1/auth`, and refresh/logout are CSRF-protected. | Server-side session state exists despite stateless access tokens (access TTL 15 min, refresh 7 days). | `service/AuthSessionService.java`, `component/RefreshCookieService.java`, `configuration/SecurityConfiguration.java` |
-| **WebSocket single-use ticket via `Sec-WebSocket-Protocol`** | Browsers cannot send a Bearer header on a WebSocket upgrade, and URL tokens leak into logs. The client first calls an authenticated REST endpoint for a 32-byte random ticket (TTL max 30 s, stored as a digest in memory, consumed on use, capped per principal). It is then sent as the `ticket.<value>` subprotocol next to `cashier-fnb-v1`; handshakes with a query string are rejected. | The ticket store is in memory, so it is per-JVM. | `service/FnbRealtimeTicketService.java`, `component/FnbRealtimeHandshakeInterceptor.java` |
-| **AFTER_COMMIT events + REST resync** | Services publish a minimal invalidation event; a `@TransactionalEventListener(AFTER_COMMIT)` hands it to a bounded executor (queue 1000, abort policy). Clients never see uncommitted state, and a failed or dropped delivery never fails the business transaction. Clients re-fetch via REST and poll as a fallback. | Best-effort, single JVM, no replay or broker. | `component/FnbOrderChangedListener.java`, `configuration/FnbWebSocketConfiguration.java`, `service/FnbRealtimePublisher.java` |
 | **BigDecimal and price snapshots** | Totals, tax and service charge are computed server-side with `BigDecimal`. Order lines and chosen options store a snapshot of product name and price, and the tax/service rates in effect, so later menu or settings edits do not rewrite history. | More columns and copy logic. | `service/FnbOrderPricingService.java`, `entity/fnb/` |
 | **Negative stock allowed, with warnings** | A sale is never blocked by stock: there is no check constraint on `inventory_balances.quantity_on_hand`. Status is derived from `reorder_level` (OK, LOW at or below it, OUT at exactly zero, NEGATIVE below zero) and low/out/negative ingredients are returned as `stockWarnings` in the payment response. | The balance can be wrong in the physical sense until staff restock or adjust; the ledger makes the gap visible rather than refusing the sale. | `service/FnbStockService.java`, `entity/shared/inventory/InventoryBalanceEntity.java`, `db/migration/V4__fnb_inventory_recipe.sql` |
 | **Deduct stock on paid, in the payment transaction** | Both settle paths (`FnbPaymentService.settle`, `MockFnbGatewayService.settle`) call `FnbStockService.consumeForPaidOrder` after the payment row is flushed. It writes one `SALE` movement per (order, ingredient) with key `sale:{orderId}:{inventoryItemId}`, locking balances in ascending ingredient id after the tenant lock. A paid order cannot be cancelled, so no stock reversal exists. | Unpaid orders reserve nothing, so stock is only consumed at settlement. Deactivating an ingredient does not remove existing recipe lines, which keep deducting. | `service/FnbStockService.java`, `service/FnbPaymentService.java`, `service/MockFnbGatewayService.java`, `entity/fnb/SalesOrderEntity.java` |
@@ -86,7 +75,7 @@ More detail: [docs/architecture.md](docs/architecture.md).
 | Area | Technology |
 |---|---|
 | Language / runtime | Java 17 |
-| Framework | Spring Boot 4.1.1 (MVC, Security, OAuth2 resource server, WebSocket, Validation) |
+| Framework | Spring Boot 4.1.1 (MVC, Security, OAuth2 resource server, Validation) |
 | Persistence | PostgreSQL, Spring Data JPA / Hibernate, Blaze-Persistence, QueryDSL, Flyway |
 | Auth | HS256 JWT (ACCOUNT and MERCHANT scopes), BCrypt, rotating refresh tokens |
 | API docs | springdoc-openapi (Swagger UI) |
@@ -119,7 +108,7 @@ docker compose down -v                       # stop and delete data
 | PostgreSQL 17 | localhost:5432 (override: `POSTGRES_HOST_PORT`), user `cashier` / `cashier_demo`, dbs `cashier_saas` and `cashier_ai` |
 | AI service (profile `ai`) | http://localhost:8001 (override: `AI_HTTP_PORT`) |
 
-Demo data: tenant **Kopi Demo**, outlet **Kopi Demo - Pusat**; the seed also contains seven ingredients with recipes (Gula Aren starts below its reorder level so a LOW warning is visible). Accounts (password `Demo123!`): `owner@demo.local` (OWNERMERCHANT) and `cashier@demo.local` (CASHIER). Login with `POST /api/v1/auth/login`, then `POST /api/v1/auth/select-merchant` with `{tenantId, outletId}` to get an operational token. Full walkthrough with ids, QR tokens and a curl flow: [docs/demo.md](docs/demo.md).
+Demo data: tenant **Kopi Demo**, outlet **Kopi Demo - Pusat**; the seed also contains seven ingredients with recipes (Gula Aren starts below its reorder level so a LOW warning is visible). Accounts (password `Demo123!`): `owner@demo.local` (OWNERMERCHANT) and `cashier@demo.local` (CASHIER). Login with `POST /api/v1/auth/login`, then `POST /api/v1/auth/select-merchant` with `{tenantId, outletId}` to get an operational token. Full walkthrough with ids and a curl flow: [docs/demo.md](docs/demo.md).
 
 The Telegram assistant needs `TELEGRAM_BOT_TOKEN`, `OPENROUTER_API_KEY`, `AI_MODEL` and the shared `AI_INTERNAL_API_KEY` in `.env`; see `Ai-services/README.md` (Indonesian).
 
@@ -140,14 +129,14 @@ This flow is under active development and is not yet verified end to end. The co
 
 Unit tests run through surefire (`mvn test` stays database-free). Integration tests run through failsafe against a real PostgreSQL 17 container via Testcontainers, so Docker must be running. The last recorded run is `mvnw -B verify` on 2026-11-10 (run by the project orchestrator, PostgreSQL 17.11 via Testcontainers): 460 unit and 77 integration tests passed. The integration suite exercises the real security chain and transactions and covers:
 
-- the Pay First POS flow end to end (order NEW/UNPAID, kitchen blocked until paid, cash payment with change, kitchen to COMPLETED, sales report);
-- public QR ordering with idempotency (same key and body replays, same key and different body conflicts);
+- the Pay First POS flow end to end (held order OPEN/UNPAID, replace items, cash payment with change, order COMPLETED, sales report);
+- POS checkout idempotency (same key and body replays, same key and different body conflicts);
 - payment replay and conflict handling;
 - concurrent double-pay with different keys settles exactly once (one payment row);
 - cross-tenant access returns 404 and cannot pay another tenant's order;
 - application context, Flyway migrations and Hibernate schema validation on real PostgreSQL;
 - inventory flow (`FnbInventoryFlowIntegrationTest`, 13 tests): a paid order deducts product and add-on recipes with one `SALE` movement per ingredient, negative stock never blocks payment, LOW/OUT warnings, MOCK_GATEWAY deducts only when resolved `SUCCEEDED` and only once, a replayed payment key does not deduct twice, cancelling an unpaid order creates no movements, CASHIER may RESTOCK/WASTE while ADJUSTMENT, ingredient and recipe management stay owner-only, and cross-tenant access to ingredients fails;
-- reusable option groups (`FnbReusableOptionGroupIntegrationTest`, 6 tests): one shared option attached to two products deducts its recipe once per ordered unit, the public menu lists the shared group under each product, orders enforce required groups and reject options of groups not attached to the product, archiving an attached group conflicts until it is detached, attach replaces all links in request order, and a cashier can only read;
+- reusable option groups (`FnbReusableOptionGroupIntegrationTest`, 6 tests): one shared option attached to two products deducts its recipe once per ordered unit, orders enforce required groups and reject options of groups not attached to the product, archiving an attached group conflicts until it is detached, attach replaces all links in request order, and a cashier can only read;
 - stock concurrency (`FnbStockConcurrencyIntegrationTest`, 10 tests): parallel same-key movements apply once (and a sequential replay or conflicting payload afterwards behaves deterministically), parallel distinct-key restocks and wastes lose no update, parallel payments of different orders and of one order (same or different keys) deduct the shared ingredient exactly once per order, a mixed payment/restock/waste load finishes without deadlock with the ledger matching the balance, negative stock never blocks parallel payments, and a payment racing with a cancel or with a discount (15 rounds each) always ends in one consistent state with no server error.
 
 Mutation check of the concurrency tests (2026-11-10, six single-line mutants applied one at a time, only `FnbStockConcurrencyIntegrationTest` run, up to 3 runs per surviving mutant). First round (8 tests): removing the balance row lock in `recordMovement` (killed), removing the balance row lock in `FnbStockService` (killed), flipping the sale sign (killed), disabling the idempotency-fingerprint conflict check (killed only on the second of two runs: that scenario depended on the parallel requests overlapping), removing the per-(order, ingredient) sale guard in `FnbStockService` (survived the concurrency suite, killed by the unit test `FnbStockServiceTest`), and removing `lockTenant` from `FnbPaymentService.pay` (survived 3/3 runs). Second round after adding the payment-vs-cancel and payment-vs-discount races and deterministic replay/conflict checks (10 tests): removing `lockTenant` from `pay` is now killed on the first run, by both race tests with a `500` response (without the tenant lock a payment racing with a cancel or discount fails the order version check, and `GlobalExceptionHandler` reports it as a generic server error); the fingerprint mutant is killed on the first run, by the parallel assertion of the different-payload scenario (the requests overlapped in that run; the new sequential checks would fail it even without overlap, but that was not observed in isolation).
@@ -169,6 +158,7 @@ Requires JDK 17 and a local **PostgreSQL 17 or newer** (the V1 migration uses `S
 | `CASHIER_GRPC_SERVICE_KEY` | **required**, shared secret for gRPC callers (`x-internal-service-key` metadata), at least 16 characters | none |
 | `AI_SERVICE_BASE_URL` | base URL of Ai-services for staff sync (in progress); blank disables sync | blank |
 | `AI_INTERNAL_API_KEY` | shared secret for the Ai-services internal member API (`X-Internal-Service-Key`), at least 16 characters, different from `CASHIER_GRPC_SERVICE_KEY` (in progress) | none |
+| `CASHIER_CORS_ALLOWED_ORIGINS` | comma-separated browser origins allowed by CORS (property `app.cors.allowed-origins`); each must be an explicit `http`/`https` origin with no path, `*` is rejected and an invalid value fails startup | `http://localhost:5173,http://127.0.0.1:5173` |
 | `CASHIER_DB_POOL_MAX_SIZE` | Hikari pool size | `10` |
 
 A `.env` file in the working directory is also imported (`spring.config.import`). Then:
@@ -189,8 +179,8 @@ cashier-saas/
 |   |-- repository/      JPA / Blaze-Persistence / QueryDSL data access
 |   |-- entity/          fnb, shared (identity, merchant, catalog, audit...), laundry
 |   |-- dto/             request/response DTOs and explicit mappers
-|   |-- component/       JWT, principals, realtime handshake/handler, events
-|   |-- configuration/   security, JWT, OpenAPI, WebSocket
+|   |-- component/       JWT, principals, rate limiting
+|   |-- configuration/   security, JWT, OpenAPI
 |   |-- grpc/            gRPC service, handlers, mappers
 |   `-- enums/ exception/ shared/
 |-- src/main/proto/      cashier_service.proto
@@ -204,14 +194,14 @@ cashier-saas/
 ## Roadmap and known limitations
 
 - **Payments use a mock gateway.** No real payment provider is integrated.
-- **Realtime is single-JVM.** No message broker, replay or cross-node fan-out; clients must resync via REST.
+- **No real-time push.** The UI polls REST (every 15 s, plus refetch on window focus and after its own mutations); the PRD target of an order being visible within 5 seconds is not guaranteed.
 - **Tenant lock is a bottleneck** for a very busy single tenant (see trade-offs).
 - **gRPC is protected by a shared service key and a database tenant check.** Callers must send `CASHIER_GRPC_SERVICE_KEY`; a request tenant is served only when the tenant exists and is active (a missing and an inactive tenant get the same response). The env tenant allowlist was removed. `tenant_id` is still a request field. The demo compose file does not publish 9090 to the host; it is reachable only on the internal compose network. Token-bound tenant identity is a follow-up item.
 - **Staff sync to the AI service and Telegram identity verification are in progress** (see the section above). Until they are verified, do not rely on `AI_TENANT_ID` for tenant resolution.
 - **AI service container is built but not runtime-verified** (needs real Telegram/OpenRouter credentials).
 - **Test gaps:** MOCK_GATEWAY concurrency, concurrency over a real network, and a Postman run against a live server are not covered (see Running tests for the mutation check). CASHIER-role and MOCK_GATEWAY paths are covered for the inventory flows only.
 - **Optimistic lock:** a concurrent write that loses an optimistic-lock (`@Version`) race is reported as a retryable `409` ("Data baru saja diubah oleh proses lain..."); the tenant row lock normally prevents the race, which is what the payment-vs-cancel and payment-vs-discount tests rely on.
-- **Rate limiting:** the REST API is throttled by an in-memory token-bucket filter (HTTP `429` with `Retry-After`). Limits are tunable through `CASHIER_RATE_LIMIT_*` (see `.env.example`); the tests run with it disabled. Single instance only; behind a reverse proxy set `server.forward-headers-strategy=native`.
+- **Rate limiting:** the REST API is throttled by an in-memory token-bucket filter (HTTP `429` with `Retry-After`). Groups are `AUTH`, `AUTHENTICATED` and `ANONYMOUS_OTHER`. Limits are tunable through `CASHIER_RATE_LIMIT_*` (see `.env.example`); the tests run with it disabled. Single instance only; behind a reverse proxy set `server.forward-headers-strategy=native`.
 - **Frontend lives in a separate repository** (`cashier-saas-ui`); this repo is backend only.
 - **WhatsApp channel is deferred**; only Telegram is active in the AI service.
 - **Inventory and recipes are implemented for F&B** by explicit user decision, although `PRD-MVP.md` section 5 still lists them as post-MVP (see `.ai/DECISIONS.md`). Known limits:
@@ -222,7 +212,7 @@ cashier-saas/
   - `archiveGroup` takes no lock, the option-group response does not list its products, and attaching or detaching groups writes no audit row (recipe changes do);
   - no supplier or purchasing workflow (still post-MVP in the PRD).
 - Laundry entities exist in code but are outside the F&B MVP scope.
-- Roles are limited to `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER`. The PRD mentions Manager/Kitchen roles and pay-after-meal flows; they are not implemented.
+- Roles are limited to `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER`. The PRD mentions Manager/Kitchen roles and pay-after-meal flows; they are not implemented. Customer QR ordering, kitchen queue, dining tables and WebSocket real-time were removed in the cashier-first pivot (2026-11-12; see `.ai/DECISIONS.md`).
 
 ## License
 

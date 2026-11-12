@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Tag("unit")
 class SalesOrderEntityTest {
     @Test
-    void posFactoryCreatesNewUnpaidOrderWithImmutableCheckoutSnapshots() {
+    void posFactoryCreatesOpenUnpaidOrderWithImmutableCheckoutSnapshots() {
         TenantEntity tenant = new TenantEntity();
         OutletEntity outlet = OutletEntity.open(tenant, "Outlet", "Asia/Jakarta", null, null);
 
@@ -33,7 +33,7 @@ class SalesOrderEntityTest {
         assertEquals(outlet, order.getOutlet());
         assertEquals(OrderSource.POS, order.getSource());
         assertEquals(ServiceType.DINE_IN, order.getServiceType());
-        assertEquals(OrderStatus.NEW, order.getStatus());
+        assertEquals(OrderStatus.OPEN, order.getStatus());
         assertEquals(PaymentStatus.UNPAID, order.getPaymentStatus());
         assertEquals(new BigDecimal("100.00"), order.getSubtotal());
         assertEquals(new BigDecimal("11.00"), order.getTaxAmount());
@@ -56,5 +56,110 @@ class SalesOrderEntityTest {
         assertThrows(InvalidOperationException.class, () -> SalesOrderEntity.pos(tenant, outlet,
                 new SalesOrderEntity.PosDetails("checkout-key-0002", "fingerprint", "POS-ORDER-2",
                         null, "Customer"), charges));
+    }
+
+    private static SalesOrderEntity openOrder() {
+        TenantEntity tenant = new TenantEntity();
+        OutletEntity outlet = OutletEntity.open(tenant, "Outlet", "Asia/Jakarta", null, null);
+        SalesOrderEntity order = SalesOrderEntity.pos(tenant, outlet,
+                new SalesOrderEntity.PosDetails("checkout-key-0001", "fingerprint", "POS-ORDER-1",
+                        ServiceType.DINE_IN, "Customer"),
+                new SalesOrderEntity.Charges(new BigDecimal("100.00"), new BigDecimal("10.00"), new BigDecimal("5.00")));
+        order.snapshotRates(new BigDecimal("10"), new BigDecimal("5"));
+        return order;
+    }
+
+    private static SalesOrderEntity.Charges charges(String subtotal, String tax, String serviceCharge) {
+        return new SalesOrderEntity.Charges(new BigDecimal(subtotal), new BigDecimal(tax), new BigDecimal(serviceCharge));
+    }
+
+    @Test
+    void confirmPaidMovesOpenUnpaidOrderToCompletedAndPaid() {
+        SalesOrderEntity order = openOrder();
+
+        order.confirmPaid();
+
+        assertEquals(OrderStatus.COMPLETED, order.getStatus());
+        assertEquals(PaymentStatus.PAID, order.getPaymentStatus());
+        assertThrows(InvalidOperationException.class, order::confirmPaid);
+    }
+
+    @Test
+    void cancelOnlyOnOpenUnpaidOrderAndRequiresReason() {
+        SalesOrderEntity order = openOrder();
+        assertThrows(InvalidOperationException.class, () -> order.cancel(" "));
+        assertEquals(OrderStatus.OPEN, order.getStatus());
+
+        order.cancel(" Salah pesan ");
+
+        assertEquals(OrderStatus.CANCELLED, order.getStatus());
+        assertEquals("Salah pesan", order.getCancellationReason());
+        assertThrows(InvalidOperationException.class, () -> order.cancel("again"));
+
+        SalesOrderEntity paid = openOrder();
+        paid.confirmPaid();
+        assertThrows(InvalidOperationException.class, () -> paid.cancel("too late"));
+        assertEquals(OrderStatus.COMPLETED, paid.getStatus());
+    }
+
+    @Test
+    void discountOnlyOnOpenUnpaidOrder() {
+        SalesOrderEntity order = openOrder();
+
+        order.applyDiscount(new BigDecimal("10.00"));
+
+        assertEquals(new BigDecimal("10.00"), order.getDiscountAmount());
+        // (100 - 10) x 10% = 9.00 tax, 90 x 5% = 4.50 service charge.
+        assertEquals(new BigDecimal("103.50"), order.getTotal());
+
+        SalesOrderEntity paid = openOrder();
+        paid.confirmPaid();
+        assertThrows(InvalidOperationException.class, () -> paid.applyDiscount(BigDecimal.ONE));
+        SalesOrderEntity cancelled = openOrder();
+        cancelled.cancel("Batal");
+        assertThrows(InvalidOperationException.class, () -> cancelled.applyDiscount(BigDecimal.ONE));
+    }
+
+    @Test
+    void replaceLinesRecomputesTotalsOnOpenUnpaidOrder() {
+        SalesOrderEntity order = openOrder();
+
+        order.replaceLines(ServiceType.TAKEAWAY, "Budi", charges("200.00", "20.00", "10.00"));
+
+        assertEquals(ServiceType.TAKEAWAY, order.getServiceType());
+        assertEquals("Budi", order.getCustomerLabel());
+        assertEquals(new BigDecimal("200.00"), order.getSubtotal());
+        assertEquals(new BigDecimal("20.00"), order.getTaxAmount());
+        assertEquals(new BigDecimal("10.00"), order.getServiceChargeAmount());
+        assertEquals(new BigDecimal("230.00"), order.getTotal());
+        assertEquals(OrderStatus.OPEN, order.getStatus());
+        assertEquals(PaymentStatus.UNPAID, order.getPaymentStatus());
+        assertEquals("fingerprint", order.getRequestFingerprint());
+    }
+
+    @Test
+    void replaceLinesRejectsPaidCancelledDiscountedAndNullServiceType() {
+        SalesOrderEntity.Charges charges = charges("200.00", "20.00", "10.00");
+        SalesOrderEntity paid = openOrder();
+        paid.confirmPaid();
+        assertThrows(InvalidOperationException.class,
+                () -> paid.replaceLines(ServiceType.DINE_IN, "Budi", charges));
+        assertEquals(new BigDecimal("115.00"), paid.getTotal());
+
+        SalesOrderEntity cancelled = openOrder();
+        cancelled.cancel("Batal");
+        assertThrows(InvalidOperationException.class,
+                () -> cancelled.replaceLines(ServiceType.DINE_IN, "Budi", charges));
+
+        SalesOrderEntity discounted = openOrder();
+        discounted.applyDiscount(new BigDecimal("10.00"));
+        assertThrows(InvalidOperationException.class,
+                () -> discounted.replaceLines(ServiceType.DINE_IN, "Budi", charges));
+        assertEquals(new BigDecimal("100.00"), discounted.getSubtotal());
+
+        SalesOrderEntity open = openOrder();
+        assertThrows(InvalidOperationException.class, () -> open.replaceLines(null, "Budi", charges));
+        assertEquals(ServiceType.DINE_IN, open.getServiceType());
+        assertEquals(new BigDecimal("115.00"), open.getTotal());
     }
 }

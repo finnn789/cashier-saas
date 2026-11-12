@@ -1,9 +1,13 @@
 # Project memory
 
-Memory version: 68
-Updated: 2026-11-11 (Asia/Jakarta)
+Memory version: 70
+Updated: 2026-11-12 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- TASK-075 — VERIFIED, NOT COMMITTED (2026-11-12): pivot Wave B on `refactor/pivot-cashier-ai`: statuses OPEN/COMPLETED/CANCELLED + V6 (verified on PG17 incl. abort guard), server-side hold bill via `PUT .../fnb/orders/{orderId}/items`, CORS `app.cors.allowed-origins` with fail-fast validation, `GET /api/v1/public/plans` re-permitted, Telegram status labels, Postman/docs aligned. `mvnw -B verify` 385 unit + 80 IT green. UI pending in Antigravity (`prompts/refactore_feature_and_uui.md`). Canonical 69 -> 70.
+
+- TASK-074 — VERIFIED, NOT COMMITTED (2026-11-12): `mvnw -B verify` green 368 unit + 77 IT; diff reviewed vs `cf949ff` (95 files, -4138 lines), only reserved paths; coupling services lost only realtime/table calls; known regression fixed in TASK-075 A1: CORS origin fail-fast validation lost; pivot Wave A (remove QR, kitchen, tables, real-time) on `refactor/pivot-cashier-ai` @ `cf949ff`; see `.ai/DECISIONS.md` Pivot and `tasks/TASK-074.md`. Canonical 68 -> 69.
 
 - TASK-073 — DONE, REVIEWED, NOT COMMITTED, NOT EXECUTED (2026-11-11): Postman `KedaiMbo API` folders "08 - F&B Option Groups" and "09 - F&B Options" repointed to the V5 routes (`/fnb/option-groups[/{groupId}[/options[/{optionId}]]]`) by worker sonnet (packet tasks/TASK-073.md, report reports/TASK-073-W1.md); 3 new requests in folder 08 (Delete Option Group, Attach Option Groups To Product `{"groupIds":[...]}`, List Product Option Groups). Orchestrator diffed: only the URL lines changed in the six old files, new bodies match `FnbOptionGroupRequest`/`FnbOptionRequest`/`FnbProductOptionGroupsRequest`. The collection was NOT run against a live server. The user's other dirty Postman files were not touched. `FnbCatalogService.java` is still dirty with formatting-only noise (blank lines, wrapped `if` lines; no logic): awaiting the user's choice (revert recommended). Frontend prompt `prompts/PROMPT_FOR_FE_AGENT_FNB_API_INTEGRATION.md` updated (final 429 contract + no-rewrite/no-duplicate/no-tight-coupling rules), uncommitted; the user already handed it to the frontend agent. Pushed: commit `0f39c5f` (TASK-070/071/072) on `feature/fnb-stock-concurrency-tests`. Canonical 67 -> 68.
 

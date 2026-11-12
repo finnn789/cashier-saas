@@ -14,7 +14,7 @@ Package `entity` tidak lagi menjadi folder datar. Struktur ini membedakan data y
 | `entity.shared.inventory` | item, saldo, dan mutasi persediaan | Laundry sekarang; F&B dapat memakai kemudian |
 | `entity.shared.audit` | audit log serta outbox event setelah commit | Semua bisnis |
 | `entity.laundry` | layanan/tarif, order dan item laundry, riwayat proses, pickup/delivery | Produk pertama: Laundry |
-| `entity.fnb` | kategori, produk, opsi, meja/QR, order, item, pembayaran, diskon, riwayat status F&B | Coffee shop/F&B, tahap berikutnya |
+| `entity.fnb` | kategori, produk, opsi, order, item, pembayaran, diskon, riwayat status F&B | Coffee shop/F&B, tahap berikutnya |
 
 ## Entity yang ditambahkan untuk Laundry
 
@@ -32,7 +32,7 @@ Package `entity` tidak lagi menjadi folder datar. Struktur ini membedakan data y
 
 ## Perubahan F&B
 
-Entity F&B lama dipindahkan tanpa mengubah nama tabel legacy: `CategoryEntity`, `ProductEntity`, `OptionGroupEntity`, `ProductOptionEntity`, `DiningTableEntity`, `TableQrTokenEntity`, `SalesOrderEntity`, `OrderItemEntity`, `OrderItemOptionEntity`, `PaymentEntity`, dan `DiscountEntity`. `FnbOrderStatusHistoryEntity` ditambahkan agar transisi dapur dapat diaudit ketika modul F&B diimplementasikan.
+Entity F&B lama dipindahkan tanpa mengubah nama tabel legacy: `CategoryEntity`, `ProductEntity`, `OptionGroupEntity`, `ProductOptionEntity`, `SalesOrderEntity`, `OrderItemEntity`, `OrderItemOptionEntity`, `PaymentEntity`, dan `DiscountEntity`. `FnbOrderStatusHistoryEntity` ditambahkan agar transisi status order dapat diaudit. Setelah pivot kasir (12 November 2026), entity meja dan token QR (`DiningTableEntity`, `TableQrTokenEntity`) dihapus dari kode; tabel database-nya tetap ada dan tidak dipetakan.
 
 F&B tidak memakai entity Laundry. Sebaliknya, keduanya memakai tenant, outlet, identitas, pelanggan, audit, serta komponen yang benar-benar sama dari `shared`.
 

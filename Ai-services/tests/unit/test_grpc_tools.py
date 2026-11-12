@@ -189,6 +189,7 @@ class OrderStatusToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["order_number"], "ORD-20261022-001")
         self.assertEqual(result["status"], "PROCESSING")
+        self.assertEqual(result["status_label"], "PROCESSING")
         self.assertEqual(result["payment_status"], "PAID")
         self.assertEqual(result["total_amount"], 45000)
         self.assertEqual(result["created_at"], "2026-10-22T10:15:00Z")
@@ -197,6 +198,28 @@ class OrderStatusToolTests(unittest.IsolatedAsyncioTestCase):
         mock_client.get_order_status.assert_awaited_once_with(
             tenant_id="tenant-abc", order_number="ORD-20261022-001"
         )
+
+    async def test_execute_order_status_codes_mapped_to_text(self) -> None:
+        cases = (
+            ("OPEN", "Belum dibayar", "UNPAID"),
+            ("COMPLETED", "Selesai (sudah dibayar)", "PAID"),
+            ("CANCELLED", "Dibatalkan", "UNPAID"),
+        )
+        for code, label, payment in cases:
+            with self.subTest(code=code):
+                mock_client = Mock(spec=CashierGrpcClient)
+                mock_client.get_order_status = AsyncMock(return_value={
+                    "status": code,
+                    "payment_status": payment,
+                    "total_amount": 1000,
+                    "created_at": "2026-11-12T10:00:00Z",
+                })
+                result = await OrderStatusTool(client=mock_client).execute(
+                    tenant_id="tenant-abc", order_number="ORD-1"
+                )
+                self.assertEqual(result["status"], code)
+                self.assertEqual(result["status_label"], label)
+                self.assertIn(f"berstatus {label} ", result["message"])
 
     async def test_execute_order_not_found_or_offline(self) -> None:
         mock_client = Mock(spec=CashierGrpcClient)

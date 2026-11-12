@@ -58,6 +58,14 @@ class SecurityAuthorizationIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test
+    void publicPlanCatalogIsAnonymousGetOnlyWhileOtherPublicPathsStayProtected() throws Exception {
+        mockMvc.perform(get("/api/v1/public/plans"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/public/fnb/menu/x"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void cashierTokenCannotAccessPlatformEndpoint() throws Exception {
         mockMvc.perform(get("/api/v1/platform/probe")
                         .header(HttpHeaders.AUTHORIZATION, bearerTokenFor(Role.CASHIER)))

@@ -9,15 +9,15 @@ One deployable Spring Boot application (modular monolith). Layering is by top-le
 | Package | Responsibility |
 |---|---|
 | `controller` | HTTP adapters. Return `ApiResponse<T>`; errors are mapped centrally by `GlobalExceptionHandler`. |
-| `service` | Use cases and transaction boundaries. Identity/sessions (`LoginService`, `RegisterService`, `AuthSessionService`), merchant foundation (`FreeTierOnboardingService`, `CashierInvitationService`, `OutletService`), F&B operations (`Fnb*Service`, `PublicOrderService`, `MockFnbGatewayService`), settings and audit (`MerchantBusinessSettingsService`, `MerchantAuditService`). |
+| `service` | Use cases and transaction boundaries. Identity/sessions (`LoginService`, `RegisterService`, `AuthSessionService`), merchant foundation (`FreeTierOnboardingService`, `CashierInvitationService`, `OutletService`), F&B operations (`Fnb*Service`, `MockFnbGatewayService`), settings and audit (`MerchantBusinessSettingsService`, `MerchantAuditService`). |
 | `service/MerchantAccessGuard` | Reusable tenant/outlet authorization policy; resolves a `MerchantAccessContext` from the principal. |
 | `repository` | Persistence via `EntityManager`, Blaze-Persistence and QueryDSL typed paths. |
-| `entity` | `fnb` (orders, items, payments, discounts, tables, QR, gateway attempts), `shared` (identity, merchant, catalog, audit, billing...), `laundry`. Entities own named transitions (e.g. `SalesOrderEntity`). |
+| `entity` | `fnb` (orders, items, payments, discounts, gateway attempts), `shared` (identity, merchant, catalog, audit, billing...), `laundry`. Entities own named transitions (e.g. `SalesOrderEntity`). |
 | `dto` | Named request/response classes and explicit mappers; entities are never returned by controllers. |
-| `component`, `configuration` | JWT/principal infrastructure, realtime handshake/handler/events; security, JWT, OpenAPI, WebSocket wiring. |
+| `component`, `configuration` | JWT/principal infrastructure, rate limiting; security, JWT, OpenAPI wiring. |
 | `grpc` | gRPC service plus catalog/order handlers and mappers. |
 
-Dependency direction: controller -> service -> (guard, repository, mapper). Services publish realtime events through `FnbRealtimePublisher`.
+Dependency direction: controller -> service -> (guard, repository, mapper).
 
 The F&B module is the active MVP. Laundry and the older generic "cashier sale/catalog" entities exist in the codebase but are not part of the F&B flow described here. The shared `entity.shared.inventory` entities (item, balance, movement, plus the F&B-specific recipe line) are used by F&B for ingredient stock: see "Inventory and recipes" in section 4 (`FnbInventoryController`, `FnbInventoryService`, `FnbStockService`).
 
@@ -31,8 +31,7 @@ Exactly three: `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER` (`enums/Role`). URL poli
 |---|---|
 | `/api/v1/auth/login`, `/register`, `/refresh`, `/logout`, `GET /auth/csrf` | anonymous |
 | `/api/v1/auth/select-merchant`, `/auth/outlets`, `/api/v1/onboarding/**` | authority `SCOPE_ACCOUNT` |
-| `/api/v1/public/**`, Swagger (`/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**`) | anonymous (public QR routes are authorized by the QR token) |
-| `GET /api/v1/fnb/realtime` | anonymous at HTTP level; the handshake interceptor requires a one-time ticket |
+| Swagger (`/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**`) | anonymous |
 | `/api/v1/merchant/**` | `OWNERMERCHANT` |
 | `/api/v1/cashier/**` | `OWNERMERCHANT` or `CASHIER` |
 | `/api/v1/platform/**` | `SUPERADMIN` (the rule exists; no controller under this prefix was found in source) |
@@ -46,25 +45,27 @@ JWTs are HS256 with a mandatory Base64 secret (`CASHIER_JWT_SECRET_B64`, at leas
 
 ### Tenant isolation
 
-Services receive a `TenantPrincipal`; tenant and outlet are never read from a request body. `MerchantAccessGuard.requireOutlet` reloads membership and outlet access from the database. Repositories filter on tenant (and outlet) ids. A missing or foreign record raises `ResourceNotFoundException` (404), so a caller cannot distinguish "not yours" from "does not exist". Public QR routes derive tenant/outlet/table from the server-side QR token record.
+Services receive a `TenantPrincipal`; tenant and outlet are never read from a request body. `MerchantAccessGuard.requireOutlet` reloads membership and outlet access from the database. Repositories filter on tenant (and outlet) ids. A missing or foreign record raises `ResourceNotFoundException` (404), so a caller cannot distinguish "not yours" from "does not exist".
 
 ### Sessions
 
 `AuthSessionService` stores sessions and refresh-token digests (SHA-256). `refresh` locks the session row, requires an unused, unexpired token, consumes it and issues a replacement; a replayed token revokes the session. The refresh cookie is `HttpOnly`, `SameSite=Strict`, path `/api/v1/auth`; refresh and logout require a CSRF token (`/auth/csrf`).
 
+### CORS and rate limiting
+
+Allowed browser origins come from `app.cors.allowed-origins` (env `CASHIER_CORS_ALLOWED_ORIGINS`, default `http://localhost:5173,http://127.0.0.1:5173`); `SecurityConfiguration` validates each entry at startup (explicit http/https origin, no `*`, path, query or user info) and refuses to start otherwise. The in-memory rate limiter (`RateLimitFilter`) has three groups: `AUTH`, `AUTHENTICATED` and `ANONYMOUS_OTHER` (`CASHIER_RATE_LIMIT_*`).
+
 ## 3. Order lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NEW_UNPAID: QR or POS checkout
-    NEW_UNPAID --> CONFIRMED_PAID: payment settled
-    NEW_UNPAID --> CANCELLED: cancel with reason (audited)
-    CONFIRMED_PAID --> PREPARING
-    PREPARING --> READY
-    READY --> COMPLETED
+    [*] --> OPEN_UNPAID: POS checkout (held bill)
+    OPEN_UNPAID --> OPEN_UNPAID: replace items
+    OPEN_UNPAID --> COMPLETED_PAID: payment settled
+    OPEN_UNPAID --> CANCELLED: cancel with reason (audited)
 ```
 
-`OrderStatus` = NEW, CONFIRMED, PREPARING, READY, COMPLETED, CANCELLED. `PaymentStatus` = UNPAID, PAID, REFUNDED. `PaymentMethod` = CASH, MANUAL_NON_CASH, MOCK_GATEWAY. Discount and cancellation are only allowed while the order is NEW/UNPAID. `SalesOrderEntity` validates transitions.
+`OrderStatus` = OPEN, COMPLETED, CANCELLED. `PaymentStatus` = UNPAID, PAID, REFUNDED. `PaymentMethod` = CASH, MANUAL_NON_CASH, MOCK_GATEWAY. A held bill is an `OPEN`/`UNPAID` order. Discount, cancellation and item replacement are only allowed while the order is OPEN/UNPAID. Settlement moves it to COMPLETED/PAID in one step; there is no preparation stage. `SalesOrderEntity` validates transitions. V6 mapped pre-pivot rows (paid -> COMPLETED, unpaid -> OPEN).
 
 ## 4. Request flows
 
@@ -77,18 +78,15 @@ stateDiagram-v2
 3. `orders.lockTenant` (`PESSIMISTIC_WRITE` on the tenant row), then re-run the guard and check tenant/outlet are active and F&B-enabled.
 4. Look up an existing order by (tenant, key). If found: same source/outlet/fingerprint replays the stored order, otherwise `409`.
 5. Price server-side (`FnbOrderPricingService`): availability re-checked, `BigDecimal` subtotal, tax and service charge from tenant rates.
-6. Persist `SalesOrderEntity` (NEW/UNPAID) with item and option snapshots; mark a selected table as awaiting payment.
-7. `realtime.orderChanged("ORDER_CREATED", order)` - published as an event; delivered only after commit.
+6. Persist `SalesOrderEntity` (OPEN/UNPAID) with item and option snapshots.
 
-The public QR path (`POST /api/v1/public/fnb/menu/{qrToken}/orders`, `PublicOrderService`) follows the same structure, with the tenant/outlet/table resolved from the QR token and a status token returned for `GET /api/v1/public/fnb/orders/{orderToken}/status`.
+### Replace items of a held bill
+
+`PUT /api/v1/cashier/outlets/{outletId}/fnb/orders/{orderId}/items` (`FnbPosOrderService.replaceItems`), no `Idempotency-Key` (a full replacement is idempotent). Body is the same as checkout. In one transaction: guard, tenant lock, reload the order within tenant/outlet (missing or foreign -> 404), then reject with `409` unless it is an OPEN/UNPAID POS order without a pending gateway attempt or discount. The server re-prices the new lines with the order's snapshot tax and service-charge rates, replaces the lines and writes an audit entry (`FNB_ORDER_ITEMS_REPLACED`). Cancel a held bill with `POST .../{orderId}/cancel`; list held bills with `GET .../fnb/orders?status=OPEN&paymentStatus=UNPAID`.
 
 ### Payment
 
-`POST /api/v1/cashier/outlets/{outletId}/fnb/orders/{orderId}/payments` (`FnbPaymentService`): lock tenant, load the order within tenant/outlet, reject if already paid (conflict), and honor a payment idempotency/fingerprint check (a reused key is a conflict; replay returns the prior result). CASH and MANUAL_NON_CASH settle directly; MOCK_GATEWAY creates a gateway attempt (`FnbGatewayAttemptEntity`) that is later resolved with `POST .../mock-payments/{attemptId}/resolve` (`MockFnbGatewayService`, outcomes in `FnbGatewayOutcome`). Settlement sets the order CONFIRMED/PAID, records the payment, deducts ingredient stock (see "Inventory and recipes"), an audit entry and table reconciliation (`FnbTableReconciliationService`) in the same transaction.
-
-### Kitchen and completion
-
-`POST .../fnb/kitchen/orders/{orderId}/prepare|ready|complete` (`FnbKitchenService`), each locking the tenant and applying the entity transition. Kitchen transitions are not idempotent on retry.
+`POST /api/v1/cashier/outlets/{outletId}/fnb/orders/{orderId}/payments` (`FnbPaymentService`): lock tenant, load the order within tenant/outlet, reject if already paid (conflict), and honor a payment idempotency/fingerprint check (a reused key is a conflict; replay returns the prior result). CASH and MANUAL_NON_CASH settle directly; MOCK_GATEWAY creates a gateway attempt (`FnbGatewayAttemptEntity`) that is later resolved with `POST .../mock-payments/{attemptId}/resolve` (`MockFnbGatewayService`, outcomes in `FnbGatewayOutcome`). Settlement sets the order COMPLETED/PAID, records the payment, deducts ingredient stock (see "Inventory and recipes") and writes an audit entry in the same transaction.
 
 ### Reporting
 
@@ -119,7 +117,7 @@ Ingredient stock for F&B (`FnbInventoryService`, `FnbStockService`, `FnbInventor
 4. For each ingredient, skip it if key `sale:{orderId}:{inventoryItemId}` already exists, otherwise apply the negative delta and persist one `SALE` movement (reason "Penjualan {orderNumber}", actor = the paying membership).
 5. Return one warning string per ingredient whose resulting status is not `OK` (`NEGATIVE` -> "minus", `OUT` -> "habis", `LOW` -> "menipis"); `FnbPaymentResponse.stockWarnings` carries them.
 
-Status is derived in `InventoryBalanceEntity.status()`: below zero is `NEGATIVE`, exactly zero is `OUT`, at or below `reorder_level` is `LOW`, otherwise `OK`. The method never throws for stock reasons, so stock never blocks a payment. Stock is deducted only when an order becomes paid; a paid order cannot be cancelled (`SalesOrderEntity.cancel` requires NEW/UNPAID), so there is no stock reversal. A product or option without a recipe produces no movement.
+Status is derived in `InventoryBalanceEntity.status()`: below zero is `NEGATIVE`, exactly zero is `OUT`, at or below `reorder_level` is `LOW`, otherwise `OK`. The method never throws for stock reasons, so stock never blocks a payment. Stock is deducted only when an order becomes paid; a paid order cannot be cancelled (`SalesOrderEntity.cancel` requires OPEN/UNPAID), so there is no stock reversal. A product or option without a recipe produces no movement.
 
 Limits: a parallel same-key manual movement can answer `409` to the loser instead of a replay (the balance still changes once); deactivating an ingredient hides it from the list and from new recipes but existing recipe lines keep deducting it.
 
@@ -131,15 +129,10 @@ Option groups are an outlet-level library (`option_groups`, with an `archived` f
 - **Attach** is `PUT /merchant/outlets/{o}/fnb/products/{p}/option-groups` with an ordered `groupIds` list; it deletes the product's links and recreates them in request order (replace-all), rejecting duplicates. It writes no audit row. Option and option-recipe routes are under `.../option-groups/{groupId}/options/...`, and options belong to the group, so a recipe on a shared option applies to every product that has the group.
 - **Archive, never delete**: order lines keep `option_group_id` as a snapshot reference. `archiveGroup` returns `409` while any non-archived product is linked; archived groups drop out of the group lists and out of pricing. `archiveGroup` takes no lock (a known limit), and the group response does not list the products it is attached to.
 - **Pricing and selection validation** (`FnbOrderPricingService.selectedOptions`) iterate the groups attached to the ordered product (`catalog.groups`, non-archived, in link order), lock each group and its selected options, require the selected count to be within min/max, and reject any selected option that does not belong to those groups. The same shared option can therefore be ordered under any product it is attached to, and an option of an unattached group is rejected.
-- The public menu lists a shared group under each attached product once per product.
 
-## 5. Realtime design
+## 5. Order list refresh (polling)
 
-- **Ticket**: `POST /api/v1/cashier/outlets/{outletId}/fnb/realtime-ticket` (Bearer). `FnbRealtimeTicketService` verifies the presented JWT matches the current principal, checks live access, and returns a random 32-byte URL-safe ticket (TTL at most 30 s and never beyond JWT expiry; at most 4 outstanding per principal, 2000 total). Only the SHA-256 digest is kept, in memory.
-- **Handshake**: connect to `/api/v1/fnb/realtime` with subprotocols `cashier-fnb-v1` and `ticket.<value>`. `FnbRealtimeHandshakeInterceptor` rejects any query string, requires exactly one of each subprotocol, and consumes the ticket (single use). Allowed origins are configured explicitly.
-- **Authorization over time**: `FnbRealtimeAccessService` revalidates session/membership/outlet access; the handler runs periodic maintenance (`maintain()`) and connection lifetime is bounded by JWT expiry.
-- **Events**: services publish `FnbOrderChangedEvent` (minimal invalidation snapshot). `FnbOrderChangedListener` is a `@TransactionalEventListener(phase = AFTER_COMMIT)` that enqueues to the handler; enqueue failures are swallowed so the committed operation still succeeds. Delivery uses a bounded executor (core 1, max 2, queue 1000, `AbortPolicy`).
-- **Consistency contract**: events say "something changed"; clients re-read state over REST. Idempotent replays do not emit. There is no replay, persistence or broker, so a missed event is recovered by REST resync or polling. Scope is a single JVM.
+There is no WebSocket or other server push (removed in the cashier-first pivot). The UI polls the order list over REST every 15 seconds, refetches on window focus and after its own mutations. The PRD target of an order being visible within 5 seconds is therefore not guaranteed.
 
 ## 6. AI service integration (gRPC)
 
@@ -184,4 +177,4 @@ Status: under development and not yet verified end to end. Contract: `docs/contr
 
 ## 7. Persistence
 
-PostgreSQL 17+ (V1 uses `SET transaction_timeout`; PostgreSQL 16 rejects it) with Flyway migrations in `src/main/resources/db/migration` (`V1__initial_schema.sql`, `V2__drop_legacy_cashier_tables.sql`, `V3__staff_user_phone_number.sql`, `V4__fnb_inventory_recipe.sql`, `V5__reusable_option_groups.sql`). V4 adds `recipe_lines`, the movement-type check, the item-history and order indexes on `inventory_movements`, and the per-outlet unique ingredient name; V5 adds `option_groups.archived` and the `product_option_groups` join table, backfills it from the old `option_groups.product_id`, and drops that column. The demo profile additionally loads `db/demo/R__demo_seed.sql` (a repeatable migration). Hibernate runs with `ddl-auto=validate`; Liquibase is disabled at runtime (a Maven profile exists for schema-diff tooling only). `spring.jpa.open-in-view` is currently `true` in `application.properties`. Money is `BigDecimal`; order lines and options keep price/name snapshots.
+PostgreSQL 17+ (V1 uses `SET transaction_timeout`; PostgreSQL 16 rejects it) with Flyway migrations in `src/main/resources/db/migration` (`V1__initial_schema.sql`, `V2__drop_legacy_cashier_tables.sql`, `V3__staff_user_phone_number.sql`, `V4__fnb_inventory_recipe.sql`, `V5__reusable_option_groups.sql`, `V6__order_status_open_completed_cancelled.sql`). V4 adds `recipe_lines`, the movement-type check, the item-history and order indexes on `inventory_movements`, and the per-outlet unique ingredient name; V5 adds `option_groups.archived` and the `product_option_groups` join table, backfills it from the old `option_groups.product_id`, and drops that column; V6 relaxes then tightens `sales_orders_status_check` to `OPEN`/`COMPLETED`/`CANCELLED` and maps old rows. The dining-table and QR tables and columns remain in the schema but are no longer mapped by entities. The demo profile additionally loads `db/demo/R__demo_seed.sql` (a repeatable migration). Hibernate runs with `ddl-auto=validate`; Liquibase is disabled at runtime (a Maven profile exists for schema-diff tooling only). `spring.jpa.open-in-view` is currently `true` in `application.properties`. Money is `BigDecimal`; order lines and options keep price/name snapshots.

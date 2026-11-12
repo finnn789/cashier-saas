@@ -50,7 +50,7 @@ public class MockFnbGatewayService {
         if (keyedPayment != null) throw new OperationConflictException("Kunci pembayaran telah digunakan.");
         if (payments.byOrder(principal.getTenantId(), outletId, orderId).isPresent()) throw new OperationConflictException("Pesanan sudah dibayar.");
         if (attempts.pendingForOrder(principal.getTenantId(), outletId, orderId).isPresent()) throw new OperationConflictException("Gateway attempt masih tertunda.");
-        if (order.getStatus() != OrderStatus.NEW || order.getPaymentStatus() != PaymentStatus.UNPAID) throw new OperationConflictException("Mock gateway hanya dapat dimulai untuk pesanan baru yang belum dibayar.");
+        if (order.getStatus() != OrderStatus.OPEN || order.getPaymentStatus() != PaymentStatus.UNPAID) throw new OperationConflictException("Mock gateway hanya dapat dimulai untuk pesanan terbuka yang belum dibayar.");
         if (request.getAmountTendered().compareTo(order.getTotal()) != 0) throw new InvalidOperationException("Jumlah gateway harus sesuai total pesanan.");
         FnbGatewayAttemptEntity attempt = FnbGatewayAttemptEntity.pending(context.getTenant(), context.getOutlet(), order, context.getMembership().getUser(), order.getTotal(), request.getIdempotencyKey(), fingerprint, "MOCK-" + UUID.randomUUID());
         attempts.persist(attempt); orders.flush();

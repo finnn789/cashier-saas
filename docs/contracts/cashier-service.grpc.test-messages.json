@@ -70,7 +70,7 @@
     {
       "name": "existing order",
       "message": { "tenant_id": "<TENANT_ID>", "order_number": "<ORDER_NUMBER>" },
-      "expect": "OK with status, paymentStatus, totalAmount (string), createdAt (UTC ISO-8601)"
+      "expect": "OK with status (OPEN, COMPLETED or CANCELLED), paymentStatus, totalAmount (string), createdAt (UTC ISO-8601)"
     },
     {
       "name": "order number is trimmed",

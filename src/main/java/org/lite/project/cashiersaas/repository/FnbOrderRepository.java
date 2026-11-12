@@ -75,6 +75,15 @@ public class FnbOrderRepository {
                 .where(OPTION.orderItem.id.toString()).in(itemIds).orderByAsc(OPTION.createdAt.toString()).getResultList();
     }
 
+    // Options first so the foreign key from order_item_options never blocks the item delete.
+    public void deleteLines(UUID tenantId, UUID outletId, SalesOrderEntity order) {
+        List<OrderItemEntity> items = items(tenantId, outletId, List.of(order.getId()));
+        itemOptions(tenantId, outletId, items.stream().map(OrderItemEntity::getId).toList()).forEach(entityManager::remove);
+        entityManager.flush();
+        items.forEach(entityManager::remove);
+        entityManager.flush();
+    }
+
     public void refreshOrder(SalesOrderEntity order) {
         entityManager.refresh(order);
     }

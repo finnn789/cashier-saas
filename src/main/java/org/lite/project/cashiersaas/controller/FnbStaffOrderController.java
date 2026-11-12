@@ -19,6 +19,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,6 +43,13 @@ public class FnbStaffOrderController {
                                                        @RequestHeader(value = "Idempotency-Key", required = false) String key,
                                                        @Valid @RequestBody FnbPosOrderRequest request) {
         return ApiResponse.created("Pesanan POS dibuat.", posOrders.checkout(principal, outletId, key, request));
+    }
+
+    @PutMapping("/{orderId}/items")
+    public ApiResponse<FnbStaffOrderResponse> replaceItems(@AuthenticationPrincipal TenantPrincipal principal,
+                                                           @PathVariable UUID outletId, @PathVariable UUID orderId,
+                                                           @Valid @RequestBody FnbPosOrderRequest request) {
+        return ApiResponse.success("Item pesanan diperbarui.", posOrders.replaceItems(principal, outletId, orderId, request));
     }
 
     @GetMapping
