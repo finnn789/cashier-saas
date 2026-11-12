@@ -38,8 +38,6 @@ public class FnbPaymentService {
     private final FnbGatewayAttemptRepository attempts;
     private final AuditLogRepository audit;
     private final MockFnbGatewayService mockGateway;
-    private final FnbTableReconciliationService reconciliation;
-    private final FnbRealtimePublisher realtime;
     private final FnbStockService stock;
 
     @Transactional
@@ -76,8 +74,6 @@ public class FnbPaymentService {
         orders.flush();
         List<String> stockWarnings = stock.consumeForPaidOrder(context, order);
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_PAYMENT_RECORDED, order.getId(), null, "method=" + method + ";paymentId=" + payment.getId()));
-        reconciliation.reconcile(order);
-        realtime.orderChanged("PAYMENT_SETTLED", order);
         FnbPaymentResponse response = FnbPaymentMapper.payment(payment);
         response.setStockWarnings(stockWarnings);
         return response;

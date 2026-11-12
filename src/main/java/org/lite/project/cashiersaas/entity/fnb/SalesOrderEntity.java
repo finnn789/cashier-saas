@@ -14,7 +14,6 @@ import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.Instant;
 
 @Getter
 @Entity
@@ -29,9 +28,6 @@ public class SalesOrderEntity extends MutableBaseEntity {
     @JoinColumn(name = "outlet_id", nullable = false)
     private OutletEntity outlet;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "dining_table_id")
-    private DiningTableEntity diningTable;
     @Column(name = "order_number", nullable = false, length = 32)
     private String orderNumber;
     @Column(name = "idempotency_key", nullable = false, length = 128)
@@ -68,52 +64,19 @@ public class SalesOrderEntity extends MutableBaseEntity {
     private String cancellationReason;
     @Column(name = "request_fingerprint", length = 64)
     private String requestFingerprint;
-    @Column(name = "public_status_token_digest", length = 64, unique = true)
-    private String publicStatusTokenDigest;
-    @Column(name = "public_status_token_expires_at")
-    private Instant publicStatusTokenExpiresAt;
-
-    public record PublicQrDetails(DiningTableEntity table, String idempotencyKey, String fingerprint,
-                                  String orderNumber, String statusTokenDigest, Instant statusTokenExpiry,
-                                  String customerLabel) {
-    }
 
     public record Charges(BigDecimal subtotal, BigDecimal tax, BigDecimal serviceCharge) {
     }
 
-    public record PosDetails(DiningTableEntity table, String idempotencyKey, String fingerprint,
+    public record PosDetails(String idempotencyKey, String fingerprint,
                              String orderNumber, ServiceType serviceType, String customerLabel) {
     }
 
-    public static SalesOrderEntity publicQr(TenantEntity tenant, OutletEntity outlet,
-                                            PublicQrDetails details, Charges charges) {
-        SalesOrderEntity order = new SalesOrderEntity();
-        order.tenant = tenant;
-        order.outlet = outlet;
-        order.diningTable = details.table();
-        order.idempotencyKey = details.idempotencyKey();
-        order.requestFingerprint = details.fingerprint();
-        order.orderNumber = details.orderNumber();
-        order.publicStatusTokenDigest = details.statusTokenDigest();
-        order.publicStatusTokenExpiresAt = details.statusTokenExpiry();
-        order.source = OrderSource.QR;
-        order.serviceType = ServiceType.DINE_IN;
-        order.customerLabel = details.customerLabel();
-        order.subtotal = charges.subtotal();
-        order.taxAmount = charges.tax();
-        order.serviceChargeAmount = charges.serviceCharge();
-        order.total = charges.subtotal().add(charges.tax()).add(charges.serviceCharge());
-        return order;
-    }
-
     public static SalesOrderEntity pos(TenantEntity tenant, OutletEntity outlet, PosDetails details, Charges charges) {
-        if (details.serviceType() == null || (details.serviceType() == ServiceType.TAKEAWAY && details.table() != null)) {
-            throw new InvalidOperationException("Tipe layanan dan meja tidak valid.");
-        }
+        if (details.serviceType() == null) throw new InvalidOperationException("Tipe layanan tidak valid.");
         SalesOrderEntity order = new SalesOrderEntity();
         order.tenant = tenant;
         order.outlet = outlet;
-        order.diningTable = details.table();
         order.idempotencyKey = details.idempotencyKey();
         order.requestFingerprint = details.fingerprint();
         order.orderNumber = details.orderNumber();
@@ -137,31 +100,10 @@ public class SalesOrderEntity extends MutableBaseEntity {
         serviceChargeRateSnapshot = serviceChargeRate;
     }
 
-    public void selectPublicServiceType(ServiceType type) {
-        if (type == null || (diningTable != null && type != ServiceType.DINE_IN))
-            throw new InvalidOperationException("Tipe layanan tidak valid.");
-        serviceType = type;
-    }
-
     public void confirmPaid() {
         requireNewUnpaid();
         paymentStatus = PaymentStatus.PAID;
         status = OrderStatus.CONFIRMED;
-    }
-
-    public void startPreparing() {
-        requirePaidStatus(OrderStatus.CONFIRMED);
-        status = OrderStatus.PREPARING;
-    }
-
-    public void markReady() {
-        requirePaidStatus(OrderStatus.PREPARING);
-        status = OrderStatus.READY;
-    }
-
-    public void complete() {
-        requirePaidStatus(OrderStatus.READY);
-        status = OrderStatus.COMPLETED;
     }
 
     public void cancel(String reason) {
@@ -187,11 +129,6 @@ public class SalesOrderEntity extends MutableBaseEntity {
     private void requireNewUnpaid() {
         if (status != OrderStatus.NEW || paymentStatus != PaymentStatus.UNPAID)
             throw new InvalidOperationException("Perubahan hanya dapat dilakukan pada pesanan baru yang belum dibayar.");
-    }
-
-    private void requirePaidStatus(OrderStatus expected) {
-        if (paymentStatus != PaymentStatus.PAID || status != expected)
-            throw new InvalidOperationException("Transisi status pesanan tidak valid.");
     }
 
     private static void requireNonNegative(BigDecimal value, String message) {

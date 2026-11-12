@@ -25,7 +25,7 @@ import org.springframework.stereotype.Service;
 public class FnbStockService {
     private final FnbOrderRepository orders;
     private final FnbInventoryRepository inventory;
-    private final PublicOrderTokenService tokens;
+    private final DigestService tokens;
 
     // Runs inside the caller's payment transaction. Stock may go negative; this method never blocks a payment.
     public List<String> consumeForPaidOrder(MerchantAccessContext context, SalesOrderEntity order) {

@@ -31,7 +31,6 @@ public class FnbDiscountService {
     private final FnbGatewayAttemptRepository attempts;
     private final FnbDiscountRepository discounts;
     private final AuditLogRepository audit;
-    private final FnbRealtimePublisher realtime;
 
     @Transactional
     public FnbDiscountResponse grant(TenantPrincipal principal, UUID outletId, UUID orderId,
@@ -60,7 +59,6 @@ public class FnbDiscountService {
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
                 AuditLogEntity.Action.FNB_DISCOUNT_GRANTED, order.getId(), request.getReason().trim(),
                 "amount=" + amount.toPlainString()));
-        realtime.orderChanged("DISCOUNT_APPLIED", order);
         return FnbPaymentMapper.discount(discount);
     }
 }

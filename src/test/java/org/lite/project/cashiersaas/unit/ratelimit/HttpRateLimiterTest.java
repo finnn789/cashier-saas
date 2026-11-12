@@ -40,10 +40,6 @@ class HttpRateLimiterTest {
         HttpRateLimiter limiter = limiter();
 
         assertEquals(10, drain(limiter, Group.AUTH, "k", 50));
-        assertEquals(60, drain(limiter, Group.PUBLIC_READ, "k", 300));
-        assertEquals(10, drain(limiter, Group.PUBLIC_ORDER_WRITE, "k", 50));
-        assertEquals(120, drain(limiter, Group.QR_TOKEN, "k", 300));
-        assertEquals(5, drain(limiter, Group.REALTIME_TICKET, "k", 50));
         assertEquals(60, drain(limiter, Group.AUTHENTICATED, "k", 300));
         assertEquals(30, drain(limiter, Group.ANONYMOUS_OTHER, "k", 300));
     }
@@ -73,7 +69,7 @@ class HttpRateLimiterTest {
         HttpRateLimiter limiter = limiter();
         assertEquals(10, drain(limiter, Group.AUTH, "1.1.1.1", 20));
 
-        assertTrue(limiter.check(Group.PUBLIC_READ, "1.1.1.1").isAllowed());
+        assertTrue(limiter.check(Group.AUTHENTICATED, "1.1.1.1").isAllowed());
         assertTrue(limiter.check(Group.ANONYMOUS_OTHER, "1.1.1.1").isAllowed());
     }
 
@@ -88,10 +84,10 @@ class HttpRateLimiterTest {
         // 10 per minute = one token every 6 seconds (7 allowed for floating point rounding).
         assertTrue(decision.getRetryAfterSeconds() >= 6 && decision.getRetryAfterSeconds() <= 7);
 
-        properties.setRealtimeTicket(new RateLimitProperties.Limit(6000, 1));
+        properties.setAuthenticated(new RateLimitProperties.Limit(6000, 1));
         HttpRateLimiter fast = limiter();
-        fast.check(Group.REALTIME_TICKET, "k");
-        assertTrue(fast.check(Group.REALTIME_TICKET, "k").getRetryAfterSeconds() >= 1);
+        fast.check(Group.AUTHENTICATED, "k");
+        assertTrue(fast.check(Group.AUTHENTICATED, "k").getRetryAfterSeconds() >= 1);
     }
 
     @Test

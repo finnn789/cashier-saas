@@ -36,8 +36,6 @@ public class MockFnbGatewayService {
     private final FnbGatewayAttemptRepository attempts;
     private final FnbPaymentRepository payments;
     private final AuditLogRepository audit;
-    private final FnbTableReconciliationService reconciliation;
-    private final FnbRealtimePublisher realtime;
     private final FnbStockService stock;
 
     @Transactional
@@ -57,7 +55,6 @@ public class MockFnbGatewayService {
         FnbGatewayAttemptEntity attempt = FnbGatewayAttemptEntity.pending(context.getTenant(), context.getOutlet(), order, context.getMembership().getUser(), order.getTotal(), request.getIdempotencyKey(), fingerprint, "MOCK-" + UUID.randomUUID());
         attempts.persist(attempt); orders.flush();
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_GATEWAY_ATTEMPT_CREATED, attempt.getId(), null, "provider=MOCK"));
-        realtime.orderChanged("PAYMENT_PENDING", order);
         return FnbPaymentMapper.attempt(attempt);
     }
 
@@ -77,7 +74,6 @@ public class MockFnbGatewayService {
         attempt.resolve(request.getOutcome(), context.getMembership().getUser());
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_GATEWAY_ATTEMPT_RESOLVED, attempt.getId(), null, "outcome=" + request.getOutcome()));
         if (request.getOutcome() == FnbGatewayOutcome.SUCCEEDED) return settle(context, order, attempt);
-        realtime.orderChanged("PAYMENT_FAILED", order);
         return FnbPaymentMapper.attempt(attempt);
     }
 
@@ -107,8 +103,6 @@ public class MockFnbGatewayService {
         payments.persist(payment); orders.flush();
         List<String> stockWarnings = stock.consumeForPaidOrder(context, order);
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_PAYMENT_RECORDED, order.getId(), null, "method=MOCK_GATEWAY;paymentId=" + payment.getId()));
-        reconciliation.reconcile(order);
-        realtime.orderChanged("PAYMENT_SETTLED", order);
         FnbPaymentResponse response = FnbPaymentMapper.mockPayment(payment, attempt);
         response.setStockWarnings(stockWarnings);
         return response;

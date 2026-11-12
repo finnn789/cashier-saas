@@ -260,7 +260,7 @@ class MerchantBusinessSettingsServiceTest {
     void updatingFutureRatesPreservesExistingOrderSnapshotsAndTotals() {
         Fixture fixture = fixture();
         SalesOrderEntity existingOrder = SalesOrderEntity.pos(fixture.tenant(), fixture.outlet(),
-                new SalesOrderEntity.PosDetails(null, "existing-order", "fingerprint", "POS-001",
+                new SalesOrderEntity.PosDetails("existing-order", "fingerprint", "POS-001",
                         ServiceType.TAKEAWAY, "Customer"),
                 new SalesOrderEntity.Charges(new BigDecimal("100.00"), new BigDecimal("10.00"),
                         new BigDecimal("5.00")));

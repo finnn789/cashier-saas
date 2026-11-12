@@ -16,7 +16,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
@@ -32,13 +31,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private static final String PUBLIC_PREFIX = "/api/v1/public/";
     private static final Set<String> AUTH_PATHS = Set.of(
             "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh");
-    private static final String REALTIME_TICKET_PATTERN = "/api/v1/cashier/outlets/*/fnb/realtime-ticket";
-    private static final String QR_MENU_PREFIX = "/api/v1/public/fnb/menu/";
-    private static final String QR_ORDERS_SUFFIX = "/orders";
-    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
     private final HttpRateLimiter rateLimiter;
     private final ObjectMapper objectMapper;
@@ -54,7 +48,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String path = path(request);
-        boolean get = HttpMethod.GET.matches(request.getMethod());
         boolean post = HttpMethod.POST.matches(request.getMethod());
         String ip = request.getRemoteAddr();
         Authentication authentication = authenticatedUser();
@@ -64,20 +57,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (post && AUTH_PATHS.contains(path)) {
             group = Group.AUTH;
             decision = rateLimiter.check(group, ip);
-        } else if (path.startsWith(PUBLIC_PREFIX)) {
-            group = get ? Group.PUBLIC_READ : Group.PUBLIC_ORDER_WRITE;
-            decision = rateLimiter.check(group, ip);
-            String qrToken = decision.isAllowed() ? qrToken(path) : null;
-            if (qrToken != null) {
-                Decision qrDecision = rateLimiter.check(Group.QR_TOKEN, qrToken);
-                if (!qrDecision.isAllowed()) {
-                    group = Group.QR_TOKEN;
-                    decision = qrDecision;
-                }
-            }
-        } else if (authentication != null && post && PATH_MATCHER.match(REALTIME_TICKET_PATTERN, path)) {
-            group = Group.REALTIME_TICKET;
-            decision = rateLimiter.check(group, userKey(authentication));
         } else if (authentication != null) {
             group = Group.AUTHENTICATED;
             decision = rateLimiter.check(group, userKey(authentication));
@@ -97,18 +76,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static String path(HttpServletRequest request) {
         String pathInfo = request.getPathInfo();
         return request.getServletPath() + (pathInfo == null ? "" : pathInfo);
-    }
-
-    /** The QR token segment of the two public QR paths, or null for any other path. */
-    private static String qrToken(String path) {
-        if (!path.startsWith(QR_MENU_PREFIX)) {
-            return null;
-        }
-        String rest = path.substring(QR_MENU_PREFIX.length());
-        if (rest.endsWith(QR_ORDERS_SUFFIX)) {
-            rest = rest.substring(0, rest.length() - QR_ORDERS_SUFFIX.length());
-        }
-        return rest.isEmpty() || rest.indexOf('/') >= 0 ? null : rest;
     }
 
     private static Authentication authenticatedUser() {

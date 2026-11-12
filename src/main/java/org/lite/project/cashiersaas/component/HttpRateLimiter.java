@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
- * In-memory token buckets for the REST API, one bucket per group and key (IP, user or QR token).
+ * In-memory token buckets for the REST API, one bucket per group and key (IP or user).
  * // shortcut: in-memory buckets are per instance, move to Bucket4j + Redis when more than one instance runs.
  */
 @Slf4j
@@ -22,7 +22,7 @@ import java.util.function.LongSupplier;
 public class HttpRateLimiter {
 
     public enum Group {
-        AUTH, PUBLIC_READ, PUBLIC_ORDER_WRITE, QR_TOKEN, REALTIME_TICKET, AUTHENTICATED, ANONYMOUS_OTHER
+        AUTH, AUTHENTICATED, ANONYMOUS_OTHER
     }
 
     @Getter
@@ -110,10 +110,6 @@ public class HttpRateLimiter {
     private RateLimitProperties.Limit limitOf(Group group) {
         return switch (group) {
             case AUTH -> properties.getAuth();
-            case PUBLIC_READ -> properties.getPublicRead();
-            case PUBLIC_ORDER_WRITE -> properties.getPublicOrderWrite();
-            case QR_TOKEN -> properties.getQrToken();
-            case REALTIME_TICKET -> properties.getRealtimeTicket();
             case AUTHENTICATED -> properties.getAuthenticated();
             case ANONYMOUS_OTHER -> properties.getAnonymousOther();
         };

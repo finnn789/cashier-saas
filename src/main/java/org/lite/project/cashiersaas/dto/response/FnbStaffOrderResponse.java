@@ -21,8 +21,6 @@ public class FnbStaffOrderResponse {
     private String orderNumber;
     private OrderSource source;
     private ServiceType serviceType;
-    private UUID tableId;
-    private String tableName;
     private String customerLabel;
     private OrderStatus status;
     private PaymentStatus paymentStatus;

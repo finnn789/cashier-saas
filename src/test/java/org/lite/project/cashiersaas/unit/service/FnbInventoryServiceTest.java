@@ -22,7 +22,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.service.FnbInventoryService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
-import org.lite.project.cashiersaas.service.PublicOrderTokenService;
+import org.lite.project.cashiersaas.service.DigestService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -57,7 +57,7 @@ import static org.mockito.Mockito.when;
 class FnbInventoryServiceTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbInventoryRepository inventory;
-    @Mock private PublicOrderTokenService tokens;
+    @Mock private DigestService tokens;
     @InjectMocks private FnbInventoryService service;
 
     private final UUID tenantId = UUID.randomUUID();

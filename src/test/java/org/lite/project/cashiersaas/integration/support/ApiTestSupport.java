@@ -107,14 +107,6 @@ public final class ApiTestSupport {
                         + "\"price\":" + price + ",\"available\":true,\"displayOrder\":1}"), 200, 201), "$.data.id");
     }
 
-    /** Creates a table and returns {tableId, qrToken}. */
-    public String[] createTable(MerchantFixture merchant, String name) throws Exception {
-        MvcResult result = send(post("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/tables")
-                .header(HttpHeaders.AUTHORIZATION, merchant.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"" + name + "\",\"active\":true}"), 200, 201);
-        return new String[] {read(result, "$.data.id"), read(result, "$.data.qrToken")};
-    }
-
     /** Performs the request and fails with the response body unless the status is one of the expected ones. */
     public MvcResult send(MockHttpServletRequestBuilder request, int... expectedStatuses) throws Exception {
         MvcResult result = mockMvc.perform(request).andReturn();

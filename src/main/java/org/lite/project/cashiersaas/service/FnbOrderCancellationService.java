@@ -24,8 +24,6 @@ public class FnbOrderCancellationService {
     private final FnbOrderRepository orders;
     private final FnbGatewayAttemptRepository attempts;
     private final AuditLogRepository audit;
-    private final FnbTableReconciliationService reconciliation;
-    private final FnbRealtimePublisher realtime;
 
     @Transactional
     public FnbCancellationResponse cancel(TenantPrincipal principal, UUID outletId, UUID orderId,
@@ -42,8 +40,6 @@ public class FnbOrderCancellationService {
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
                 AuditLogEntity.Action.FNB_ORDER_CANCELLED, order.getId(), order.getCancellationReason(), null));
         orders.flush();
-        reconciliation.reconcile(order);
-        realtime.orderChanged("ORDER_CANCELLED", order);
         return FnbPaymentMapper.cancellation(order);
     }
 }

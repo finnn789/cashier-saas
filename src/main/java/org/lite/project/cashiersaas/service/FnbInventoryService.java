@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 public class FnbInventoryService {
     private final MerchantAccessGuard guard;
     private final FnbInventoryRepository inventory;
-    private final PublicOrderTokenService tokens;
+    private final DigestService tokens;
 
     @Transactional
     public FnbInventoryItemResponse createItem(TenantPrincipal principal, UUID outletId, FnbInventoryItemRequest request) {

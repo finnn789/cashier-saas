@@ -10,7 +10,6 @@ import org.lite.project.cashiersaas.entity.fnb.QOrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.QSalesOrderEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
-import org.lite.project.cashiersaas.entity.fnb.TableQrTokenEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.OrderStatus;
@@ -31,7 +30,7 @@ public class FnbOrderRepository {
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
-    // A tenant row lock serializes checkout with the same idempotency key even across QR tables.
+    // A tenant row lock serializes checkout with the same idempotency key.
     public void lockTenant(UUID tenantId) {
         TenantEntity tenant = criteriaBuilderFactory.create(entityManager, TenantEntity.class, "tenant")
                 .where("tenant.id").eq(tenantId).setMaxResults(1).getResultList().stream()
@@ -39,21 +38,9 @@ public class FnbOrderRepository {
         entityManager.refresh(tenant, LockModeType.PESSIMISTIC_WRITE);
     }
 
-    public void refreshQr(TableQrTokenEntity qr) {
-        entityManager.refresh(qr);
-        entityManager.refresh(qr.getOutlet());
-        if (qr.getDiningTable() != null) entityManager.refresh(qr.getDiningTable());
-    }
-
     public Optional<SalesOrderEntity> byIdempotency(UUID tenant, String key) {
         return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
                 .where(ORDER.tenant.id.toString()).eq(tenant).where(ORDER.idempotencyKey.toString()).eq(key)
-                .setMaxResults(1).getResultList().stream().findFirst();
-    }
-
-    public Optional<SalesOrderEntity> byStatusDigest(String digest) {
-        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
-                .where(ORDER.publicStatusTokenDigest.toString()).eq(digest)
                 .setMaxResults(1).getResultList().stream().findFirst();
     }
 
@@ -86,15 +73,6 @@ public class FnbOrderRepository {
         return criteriaBuilderFactory.create(entityManager, OrderItemOptionEntity.class, OPTION.getMetadata().getName())
                 .where(OPTION.tenant.id.toString()).eq(tenantId).where(OPTION.outlet.id.toString()).eq(outletId)
                 .where(OPTION.orderItem.id.toString()).in(itemIds).orderByAsc(OPTION.createdAt.toString()).getResultList();
-    }
-
-    public List<SalesOrderEntity> activeForTable(UUID tenantId, UUID outletId, UUID tableId) {
-        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
-                .where(ORDER.tenant.id.toString()).eq(tenantId)
-                .where(ORDER.outlet.id.toString()).eq(outletId)
-                .where(ORDER.diningTable.id.toString()).eq(tableId)
-                .where(ORDER.status.toString()).notEq(OrderStatus.CANCELLED)
-                .where(ORDER.status.toString()).notEq(OrderStatus.COMPLETED).getResultList();
     }
 
     public void refreshOrder(SalesOrderEntity order) {

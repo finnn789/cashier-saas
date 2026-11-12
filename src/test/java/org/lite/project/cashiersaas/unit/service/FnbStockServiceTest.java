@@ -19,7 +19,7 @@ import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.lite.project.cashiersaas.service.FnbStockService;
-import org.lite.project.cashiersaas.service.PublicOrderTokenService;
+import org.lite.project.cashiersaas.service.DigestService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -49,7 +49,7 @@ import static org.mockito.Mockito.when;
 class FnbStockServiceTest {
     @Mock private FnbOrderRepository orders;
     @Mock private FnbInventoryRepository inventory;
-    @Mock private PublicOrderTokenService tokens;
+    @Mock private DigestService tokens;
     @InjectMocks private FnbStockService service;
 
     private final UUID tenantId = UUID.randomUUID();

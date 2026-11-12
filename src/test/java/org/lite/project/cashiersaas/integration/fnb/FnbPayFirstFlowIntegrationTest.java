@@ -59,15 +59,10 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private static final String PRICE = "25000";
 
-    private static String posOrderJson(String tableId, String productId, int quantity) {
-        return "{\"serviceType\":\"DINE_IN\",\"tableId\":\"" + tableId + "\",\"customerLabel\":\"Budi\","
+    private static String posOrderJson(String productId, int quantity) {
+        return "{\"serviceType\":\"DINE_IN\",\"customerLabel\":\"Budi\","
                 + "\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":" + quantity
                 + ",\"note\":\"less ice\",\"optionIds\":[]}]}";
-    }
-
-    private static String publicOrderJson(String productId, int quantity) {
-        return "{\"serviceType\":\"DINE_IN\",\"customerLabel\":\"Siti\",\"items\":[{\"productId\":\"" + productId
-                + "\",\"quantity\":" + quantity + ",\"optionIds\":[]}]}";
     }
 
     private static String paymentJson(String method, String tendered, String key) {
@@ -78,11 +73,11 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
     }
 
-    private String createPosOrder(MerchantFixture merchant, String tableId, String productId, int quantity)
+    private String createPosOrder(MerchantFixture merchant, String productId, int quantity)
             throws Exception {
         MvcResult created = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
                 .header("Idempotency-Key", "pos-" + UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
-                .content(posOrderJson(tableId, productId, quantity)), 201);
+                .content(posOrderJson(productId, quantity)), 201);
         assertEquals("NEW", ApiTestSupport.read(created, "$.data.status"));
         assertEquals("UNPAID", ApiTestSupport.read(created, "$.data.paymentStatus"));
         assertEquals("POS", ApiTestSupport.read(created, "$.data.source"));
@@ -104,21 +99,14 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void posOrderCashPaymentKitchenLifecycleAndSalesReport() throws Exception {
+    void posOrderCashPaymentAndSalesReport() throws Exception {
         MerchantFixture merchant = api.onboardOwner("pos");
         String categoryId = api.createCategory(merchant, "Minuman");
         String productId = api.createProduct(merchant, categoryId, "Es Teh", PRICE);
-        String tableId = api.createTable(merchant, "T-1")[0];
 
-        String orderId = createPosOrder(merchant, tableId, productId, 2);
+        String orderId = createPosOrder(merchant, productId, 2);
         BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
         assertTrue(total.compareTo(new BigDecimal("50000")) >= 0, "total includes subtotal 2 x " + PRICE);
-
-        // Kitchen must not be able to start an unpaid order.
-        MvcResult early = api.call(post("/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/kitchen/orders/"
-                + orderId + "/prepare").header(HttpHeaders.AUTHORIZATION, merchant.bearer()));
-        assertTrue(early.getResponse().getStatus() >= 400 && early.getResponse().getStatus() < 500,
-                "unpaid order cannot be prepared, was " + early.getResponse().getStatus());
 
         BigDecimal tendered = total.add(new BigDecimal("5000"));
         MvcResult paid = api.send(post(orders(merchant) + "/" + orderId + "/payments")
@@ -131,16 +119,6 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult afterPay = getOrder(merchant, orderId);
         assertEquals("CONFIRMED", ApiTestSupport.read(afterPay, "$.data.status"));
         assertEquals("PAID", ApiTestSupport.read(afterPay, "$.data.paymentStatus"));
-
-        String kitchen = "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/kitchen/orders/" + orderId;
-        api.send(post(kitchen + "/prepare").header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
-        assertEquals("PREPARING", ApiTestSupport.read(getOrder(merchant, orderId), "$.data.status"));
-        api.send(post(kitchen + "/ready").header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
-        assertEquals("READY", ApiTestSupport.read(getOrder(merchant, orderId), "$.data.status"));
-        api.send(post(kitchen + "/complete").header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
-        MvcResult completed = getOrder(merchant, orderId);
-        assertEquals("COMPLETED", ApiTestSupport.read(completed, "$.data.status"));
-        assertEquals("PAID", ApiTestSupport.read(completed, "$.data.paymentStatus"));
 
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Jakarta"));
         MvcResult report = api.send(get("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/reports/sales")
@@ -158,25 +136,22 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void publicQrOrderWithIdempotencyKeyThenCashPayment() throws Exception {
-        MerchantFixture merchant = api.onboardOwner("qr");
+    void posOrderWithIdempotencyKeyThenCashPayment() throws Exception {
+        MerchantFixture merchant = api.onboardOwner("idemorder");
         String categoryId = api.createCategory(merchant, "Makanan");
         String productId = api.createProduct(merchant, categoryId, "Nasi Goreng", PRICE);
-        String qrToken = api.createTable(merchant, "T-QR")[1];
 
-        api.send(get("/api/v1/public/fnb/menu/" + qrToken), 200);
-
-        String key = "qr-" + UUID.randomUUID();
-        String body = publicOrderJson(productId, 1);
-        MvcResult first = api.send(post("/api/v1/public/fnb/menu/" + qrToken + "/orders")
+        String key = "pos-" + UUID.randomUUID();
+        String body = posOrderJson(productId, 1);
+        MvcResult first = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
                 .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body), 201);
         assertEquals("NEW", ApiTestSupport.read(first, "$.data.status"));
         assertEquals("UNPAID", ApiTestSupport.read(first, "$.data.paymentStatus"));
         String orderNumber = ApiTestSupport.read(first, "$.data.orderNumber");
-        String orderToken = ApiTestSupport.read(first, "$.data.orderToken");
+        String orderId = ApiTestSupport.read(first, "$.data.orderId");
 
         // Same key + same body: same order, no duplicate.
-        MvcResult retry = api.send(post("/api/v1/public/fnb/menu/" + qrToken + "/orders")
+        MvcResult retry = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
                 .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body), 200, 201);
         assertEquals(orderNumber, ApiTestSupport.read(retry, "$.data.orderNumber"));
         Integer orderRows = api.jdbc().queryForObject(
@@ -184,19 +159,19 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(1, orderRows, "idempotent retry must not create a second order");
 
         // Same key + different body: conflict.
-        MvcResult changed = api.call(post("/api/v1/public/fnb/menu/" + qrToken + "/orders")
+        MvcResult changed = api.call(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
                 .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
-                .content(publicOrderJson(productId, 3)));
+                .content(posOrderJson(productId, 3)));
         assertEquals(409, changed.getResponse().getStatus());
 
-        // Status endpoint reflects the unpaid order.
-        MvcResult status = api.send(get("/api/v1/public/fnb/orders/" + orderToken + "/status"), 200);
-        assertEquals("UNPAID", ApiTestSupport.read(status, "$.data.paymentStatus"));
+        MvcResult unpaid = getOrder(merchant, orderId);
+        assertEquals("UNPAID", ApiTestSupport.read(unpaid, "$.data.paymentStatus"));
+        assertEquals("NEW", ApiTestSupport.read(unpaid, "$.data.status"));
 
-        MvcResult list = api.send(get(orders(merchant)).param("source", "QR")
+        MvcResult list = api.send(get(orders(merchant)).param("source", "POS")
                 .header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
         assertEquals(orderNumber, ApiTestSupport.read(list, "$.data.orders[0].orderNumber"));
-        String orderId = ApiTestSupport.read(list, "$.data.orders[0].orderId");
+        assertEquals(orderId, ApiTestSupport.read(list, "$.data.orders[0].orderId"));
         BigDecimal total = money(list, "$.data.orders[0].total");
 
         MvcResult paid = api.send(post(orders(merchant) + "/" + orderId + "/payments")
@@ -205,17 +180,16 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                         "pay-" + UUID.randomUUID())), 200, 201);
         assertEquals(0, new BigDecimal("1000").compareTo(money(paid, "$.data.changeAmount")));
 
-        MvcResult publicStatus = api.send(get("/api/v1/public/fnb/orders/" + orderToken + "/status"), 200);
-        assertEquals("PAID", ApiTestSupport.read(publicStatus, "$.data.paymentStatus"));
-        assertEquals("CONFIRMED", ApiTestSupport.read(publicStatus, "$.data.status"));
+        MvcResult afterPay = getOrder(merchant, orderId);
+        assertEquals("PAID", ApiTestSupport.read(afterPay, "$.data.paymentStatus"));
+        assertEquals("CONFIRMED", ApiTestSupport.read(afterPay, "$.data.status"));
     }
 
     @Test
     void paymentIdempotencyReplaysSameRequestAndRejectsDifferentBody() throws Exception {
         MerchantFixture merchant = api.onboardOwner("idem");
         String productId = api.createProduct(merchant, api.createCategory(merchant, "Kopi"), "Latte", PRICE);
-        String tableId = api.createTable(merchant, "T-I")[0];
-        String orderId = createPosOrder(merchant, tableId, productId, 1);
+        String orderId = createPosOrder(merchant, productId, 1);
         BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
         BigDecimal tendered = total.add(new BigDecimal("2000"));
         String key = "pay-" + UUID.randomUUID();
@@ -246,8 +220,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     void concurrentPaymentsWithDifferentKeysSettleExactlyOnce() throws Exception {
         MerchantFixture merchant = api.onboardOwner("race");
         String productId = api.createProduct(merchant, api.createCategory(merchant, "Snack"), "Roti", PRICE);
-        String tableId = api.createTable(merchant, "T-R")[0];
-        String orderId = createPosOrder(merchant, tableId, productId, 1);
+        String orderId = createPosOrder(merchant, productId, 1);
         BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
 
         int threads = 4;
@@ -294,8 +267,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MerchantFixture tenantA = api.onboardOwner("tenantA");
         MerchantFixture tenantB = api.onboardOwner("tenantB");
         String productId = api.createProduct(tenantA, api.createCategory(tenantA, "Menu"), "Mie", PRICE);
-        String tableId = api.createTable(tenantA, "T-A")[0];
-        String orderId = createPosOrder(tenantA, tableId, productId, 1);
+        String orderId = createPosOrder(tenantA, productId, 1);
 
         // Tenant B principal against its own outlet but tenant A's order id.
         assertEquals(404, api.call(get(orders(tenantB) + "/" + orderId)

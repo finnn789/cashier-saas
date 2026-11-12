@@ -35,7 +35,6 @@ class RateLimitFilterTest {
 
     private static final String LOGIN = "/api/v1/auth/login";
     private static final String MENU = "/api/v1/public/fnb/menu/";
-    private static final String TICKET = "/api/v1/cashier/outlets/o1/fnb/realtime-ticket";
 
     private final AtomicLong clock = new AtomicLong(1_000L);
     private final RateLimitProperties properties = RateLimitTestProperties.defaults();
@@ -103,67 +102,14 @@ class RateLimitFilterTest {
     }
 
     @Test
-    void publicMenuConsumesBothThePublicGroupAndTheQrTokenGroup() throws Exception {
-        properties.setPublicRead(limit(2));
-        properties.setQrToken(limit(100));
+    void formerPublicPathsAreClassifiedAsAnonymousOther() throws Exception {
+        properties.setAnonymousOther(limit(2));
         RateLimitFilter filter = filter();
 
-        assertEquals(200, statusOf(filter, "GET", MENU + "tokA", "1.1.1.1"));
-        assertEquals(200, statusOf(filter, "GET", MENU + "tokB", "1.1.1.1"));
-        assertEquals(429, statusOf(filter, "GET", MENU + "tokC", "1.1.1.1"), "PUBLIC_READ per IP was consumed");
-
-        properties.setPublicRead(limit(100));
-        properties.setQrToken(limit(2));
-        RateLimitFilter second = filter();
-
-        assertEquals(200, statusOf(second, "GET", MENU + "tokX", "1.1.1.1"));
-        assertEquals(200, statusOf(second, "GET", MENU + "tokX", "2.2.2.2"));
-        assertEquals(429, statusOf(second, "GET", MENU + "tokX", "3.3.3.3"), "QR_TOKEN is shared across IPs");
-        assertEquals(200, statusOf(second, "GET", MENU + "tokY", "3.3.3.3"), "another token is independent");
-    }
-
-    @Test
-    void publicOrderWritesUseTheirOwnGroupAndTheQrTokenOfTheOrdersPath() throws Exception {
-        properties.setPublicOrderWrite(limit(100));
-        properties.setPublicRead(limit(100));
-        properties.setQrToken(limit(2));
-        RateLimitFilter filter = filter();
-
-        assertEquals(200, statusOf(filter, "POST", MENU + "tok/orders", "1.1.1.1"));
-        assertEquals(200, statusOf(filter, "POST", MENU + "tok/orders", "2.2.2.2"));
-        assertEquals(429, statusOf(filter, "POST", MENU + "tok/orders", "3.3.3.3"));
-        assertEquals(429, statusOf(filter, "GET", MENU + "tok", "4.4.4.4"), "menu and orders share the token bucket");
-
-        properties.setPublicOrderWrite(limit(1));
-        RateLimitFilter strict = filter();
-        assertEquals(200, statusOf(strict, "POST", MENU + "t1/orders", "5.5.5.5"));
-        assertEquals(429, statusOf(strict, "POST", MENU + "t2/orders", "5.5.5.5"), "PUBLIC_ORDER_WRITE per IP");
-        assertEquals(200, statusOf(strict, "GET", MENU + "t3", "5.5.5.5"), "reads use PUBLIC_READ");
-    }
-
-    @Test
-    void otherPublicPathsAreNotQrTokenLimited() throws Exception {
-        properties.setQrToken(limit(1));
-        RateLimitFilter filter = filter();
-
-        for (int index = 0; index < 5; index++) {
-            assertEquals(200, statusOf(filter, "GET", "/api/v1/public/fnb/orders/abc/status", "1.1.1.1"));
-        }
-    }
-
-    @Test
-    void realtimeTicketIsLimitedPerAuthenticatedUser() throws Exception {
-        properties.setRealtimeTicket(limit(1));
-        properties.setAuthenticated(limit(100));
-        RateLimitFilter filter = filter();
-
-        authenticateAs("user-1");
-        assertEquals(200, statusOf(filter, "POST", TICKET, "1.1.1.1"));
-        assertEquals(429, statusOf(filter, "POST", TICKET, "2.2.2.2"), "the key is the user, not the IP");
-        assertEquals(200, statusOf(filter, "GET", "/api/v1/cashier/outlets/o1/fnb/orders", "1.1.1.1"));
-
-        authenticateAs("user-2");
-        assertEquals(200, statusOf(filter, "POST", TICKET, "1.1.1.1"));
+        assertEquals(200, statusOf(filter, "GET", MENU + "abc", "1.1.1.1"));
+        assertEquals(200, statusOf(filter, "GET", "/api/v1/auth/csrf", "1.1.1.1"));
+        assertEquals(429, statusOf(filter, "GET", MENU + "abc", "1.1.1.1"), "shares the ANONYMOUS_OTHER bucket per IP");
+        assertEquals(200, statusOf(filter, "GET", MENU + "abc", "2.2.2.2"));
     }
 
     @Test
@@ -203,8 +149,8 @@ class RateLimitFilterTest {
 
         assertEquals(200, statusOf(filter, "POST", "/api/v1/auth/logout", "1.1.1.1"));
         assertEquals(200, statusOf(filter, "GET", "/api/v1/auth/csrf", "1.1.1.1"));
-        assertEquals(429, statusOf(filter, "GET", "/api/v1/fnb/realtime", "1.1.1.1"));
-        assertEquals(200, statusOf(filter, "GET", "/api/v1/fnb/realtime", "2.2.2.2"));
+        assertEquals(429, statusOf(filter, "GET", "/api/v1/cashier/products", "1.1.1.1"));
+        assertEquals(200, statusOf(filter, "GET", "/api/v1/cashier/products", "2.2.2.2"));
 
         authenticateAs("user-1");
         assertEquals(200, statusOf(filter, "GET", "/api/v1/cashier/products", "1.1.1.1"),

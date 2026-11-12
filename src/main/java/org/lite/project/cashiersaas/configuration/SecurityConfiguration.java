@@ -26,13 +26,15 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.beans.factory.annotation.Value;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfiguration {
+    // Property key kept as-is so existing deployments keep their CORS origins.
     @Value("${app.fnb.realtime.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
-    private String realtimeAllowedOrigins;
+    private String allowedOrigins;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -58,9 +60,7 @@ public class SecurityConfiguration {
                                 .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
                                 .requestMatchers("/api/v1/auth/select-merchant", "/api/v1/auth/outlets").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/api/v1/onboarding/**").hasAuthority("SCOPE_ACCOUNT")
-                                .requestMatchers("/api/v1/public/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                                // The native upgrade cannot carry a Bearer header. The handshake interceptor consumes a one-time ticket.
-                                .requestMatchers(HttpMethod.GET, "/api/v1/fnb/realtime").permitAll()
+                                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                                 .requestMatchers("/api/v1/platform/**").hasRole(Role.SUPERADMIN.name())
                                 .requestMatchers("/api/v1/merchant/**").hasRole(Role.OWNERMERCHANT.name())
                                 .requestMatchers("/api/v1/cashier/**").hasAnyRole(Role.OWNERMERCHANT.name(),
@@ -79,7 +79,7 @@ public class SecurityConfiguration {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(FnbWebSocketConfiguration.allowedOrigins(realtimeAllowedOrigins));
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(origin -> !origin.isEmpty()).toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("X-XSRF-TOKEN", RateLimitConstants.RETRY_AFTER_HEADER));

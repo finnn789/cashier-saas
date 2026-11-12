@@ -18,7 +18,6 @@ import java.util.UUID;
 @Setter
 public class FnbPosOrderRequest {
     @NotNull private ServiceType serviceType;
-    private UUID tableId;
     @NotBlank @Size(max = 80) private String customerLabel;
     @NotEmpty @Size(max = 50) private List<@NotNull @Valid Item> items;
 

@@ -24,3 +24,15 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - Groups are archived, never deleted (order snapshots reference them); archiving a group attached to a non-archived product returns 409.
 - Old product-scoped group/option/option-recipe endpoints are replaced, no compatibility routes. Migration V5 backfills and drops `option_groups.product_id`.
 - The inventory PR is not merged; Phase 2 is a stacked branch on `feature/fnb-inventory-recipe` (user decision, merge skipped).
+
+## Pivot: cashier-first POS + owner AI assistant — 2026-11-12
+
+- Explicit user decision: the product becomes a plain cashier (POS) for small F&B; the AI assistant for the owner (and later a web chat for cashiers) is the differentiator. The AI feature itself is NOT part of the refactor.
+- Removed by deleting code (git history is the way back): customer QR ordering and every `/api/v1/public/**` route, kitchen queue/KDS, dining tables, WebSocket real-time (TASK-032). DB tables/columns stay; applied migrations V1..V5 are never edited.
+- Kept: hold bill, receipts, discounts, owner audit viewer, settings, catalog, inventory/recipes, option groups, sales report, onboarding/invitations, Telegram bot and AI service.
+- Order status becomes `OPEN` (held/unpaid), `COMPLETED` (paid), `CANCELLED`; V6 relaxes `sales_orders_status_check`, maps old rows (paid -> COMPLETED, unpaid -> OPEN), then tightens.
+- Hold bill moves server-side: a held bill is an OPEN/UNPAID POS order (localStorage hold is removed in the UI). A new endpoint replaces the items of an OPEN, UNPAID POS order (`PUT .../fnb/orders/{orderId}/items`), totals recomputed by the server (TASK-075).
+- Telegram bot order-status text: OPEN = "Belum dibayar", COMPLETED = "Selesai (sudah dibayar)", CANCELLED = "Dibatalkan".
+- Without WebSocket the UI refreshes order lists by polling every 15 s plus refetch on window focus and after its own mutations; the PRD "visible within 5 seconds" target is not guaranteed any more.
+- The UI repository `E:\Java\cashier-saas-ui` is not under git yet (user keeps it that way for now); its refactor is done by an external Antigravity/Gemini agent team from `prompts/refactore_feature_and_uui.md`.
+- Backend branch: `refactor/pivot-cashier-ai` from main `cf949ff`.
