@@ -43,3 +43,11 @@ build/
 .claude-flow/
 .swarm/
 .claude/
+
+# Generated worker artifacts and DB dumps (kept in git history only)
+reports/artifacts/
+Ai-services/reports/artifacts/
+Ai-services/docs/progress/*-before/
+Ai-services/docs/progress/*-stage*/
+*.dump
+*.log

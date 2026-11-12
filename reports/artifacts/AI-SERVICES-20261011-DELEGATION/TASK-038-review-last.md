@@ -1,3 +1,0 @@
-Those source-review corrections were already applied in the preceding implementation pass and documented in [TASK-038 report](E:/Java/cashier-saas/Ai-services/reports/TASK-038.md).
-
-The reserved files now include frozen/sanitized settings, constructor-side runtime snapshot validation, and deterministic terminal rejection of malformed, unknown, extra-argument, or multiple tool calls before any subsequent provider turn. No prohibited commands or external operations were run.
