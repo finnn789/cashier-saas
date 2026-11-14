@@ -17,6 +17,7 @@ import org.lite.project.cashiersaas.grpc.mapper.GrpcOrderMapper;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,6 +47,7 @@ public class CashierOrderGrpcHandler extends CashierServiceGrpc.CashierServiceIm
             }
 
             UUID tenantUuid = tenantAccessPolicy.requireAllowedTenant(request.getTenantId());
+            List<UUID> outletIds = tenantAccessPolicy.requireMemberOutlets(tenantUuid, request.getUserId());
 
             String orderNumber = request.getOrderNumber();
             if (orderNumber == null || orderNumber.isBlank()) {
@@ -59,6 +61,7 @@ public class CashierOrderGrpcHandler extends CashierServiceGrpc.CashierServiceIm
             Optional<SalesOrderEntity> orderOpt = criteriaBuilderFactory
                     .create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
                     .where(ORDER.tenant.id.toString()).eq(tenantUuid)
+                    .where(ORDER.outlet.id.toString()).in(outletIds)
                     .where(ORDER.orderNumber.toString()).eq(orderNumber)
                     .setMaxResults(1)
                     .getResultList()

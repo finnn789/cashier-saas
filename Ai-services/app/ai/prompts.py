@@ -1,6 +1,7 @@
 """Conservative context construction, keeping profile data untrusted."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 SYSTEM = (
     "Anda adalah Bot Makadai, asisten layanan pelanggan resmi untuk ekosistem Cashier SaaS. "
@@ -16,10 +17,21 @@ SYSTEM = (
     "- Garis Bawah (Underline): Gunakan __garis bawah__ jika diperlukan penegasan khusus.\n"
     "- Monospace / Kode: Gunakan `kode pendek` untuk nomor pesanan, kode transaksi, atau perintah.\n"
     "- Spoiler (Sensor): Gunakan ||teks disensor|| untuk menyensor informasi sensitif.\n"
-    "- Hyperlink: Gunakan [Teks Tautan](URL) untuk menyertakan tautan web aktif."
+    "- Hyperlink: Gunakan [Teks Tautan](URL) untuk menyertakan tautan web aktif.\n\n"
+    "Tools analitik bisnis (sales_summary, restock_suggestions, cashier_anomalies) bersifat "
+    "hanya-baca dan khusus owner. Jika tool menjawab data tidak tersedia, sampaikan bahwa fitur "
+    "ini hanya untuk owner. Anda tidak dapat mengubah data apa pun. Gunakan tanggal hari ini di "
+    "bawah untuk istilah seperti hari ini, kemarin, atau minggu ini."
 )
 MAX_INPUT_CHARS = 4000
 MAX_PROMPT_BYTES = 21000
+_JAKARTA = timezone(timedelta(hours=7))  # WIB has no DST; avoids a tzdata dependency
+
+
+def system_prompt(now: datetime | None = None) -> str:
+    """SYSTEM plus today's date in Asia/Jakarta (ISO), so relative dates resolve correctly."""
+    today = (now or datetime.now(timezone.utc)).astimezone(_JAKARTA).date().isoformat()
+    return f"{SYSTEM}\nTanggal hari ini (Asia/Jakarta): {today}."
 
 
 def build_prompt(
@@ -37,8 +49,9 @@ def build_prompt(
         },
         ensure_ascii=True,
     )
+    system = system_prompt()
     overhead = (
-        len(SYSTEM.encode("utf-8"))
+        len(system.encode("utf-8"))
         + len(profile.encode("utf-8"))
         + len(current.encode("utf-8"))
         + 512
@@ -51,7 +64,7 @@ def build_prompt(
         selected.append((user_text, answer))
         overhead += size
     messages = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": profile},
     ]
     for user_text, answer in reversed(selected):

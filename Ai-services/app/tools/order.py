@@ -6,6 +6,12 @@ from app.integrations.grpc.client import CashierGrpcClient
 from app.integrations.grpc.config import load_grpc_settings
 from app.tools.base import BaseTool
 
+_STATUS_LABELS = {
+    "OPEN": "Belum dibayar",
+    "COMPLETED": "Selesai (sudah dibayar)",
+    "CANCELLED": "Dibatalkan",
+}
+
 
 class OrderStatusTool(BaseTool):
     """Tool for checking cashier order status and details by order number."""
@@ -34,9 +40,11 @@ class OrderStatusTool(BaseTool):
             "required": ["order_number"],
         }
 
-    async def execute(self, *, tenant_id: str, order_number: str = "", **kwargs: Any) -> Any:
+    async def execute(
+        self, *, tenant_id: str, user_id: str | None = None, order_number: str = "", **kwargs: Any
+    ) -> Any:
         clean_order_number = order_number.strip()
-        if not clean_order_number:
+        if not clean_order_number or not user_id:
             return {
                 "order_number": order_number,
                 "status": "not_found_or_unavailable",
@@ -48,7 +56,9 @@ class OrderStatusTool(BaseTool):
             client = CashierGrpcClient(load_grpc_settings())
             self._client = client
 
-        status = await client.get_order_status(tenant_id=tenant_id, order_number=clean_order_number)
+        status = await client.get_order_status(
+            tenant_id=tenant_id, user_id=user_id, order_number=clean_order_number
+        )
         if status is None:
             return {
                 "order_number": clean_order_number,
@@ -58,17 +68,19 @@ class OrderStatusTool(BaseTool):
 
         order_status = status.get("status", "UNKNOWN")
         payment_status = status.get("payment_status", "UNKNOWN")
-        total_amount = status.get("total_amount", 0)
+        total_amount = str(status.get("total_amount", "0"))
         created_at = status.get("created_at", "")
+        status_label = _STATUS_LABELS.get(order_status, order_status)
 
         return {
             "order_number": clean_order_number,
             "status": order_status,
+            "status_label": status_label,
             "payment_status": payment_status,
             "total_amount": total_amount,
             "created_at": created_at,
             "message": (
-                f"Pesanan '{clean_order_number}' berstatus {order_status} "
+                f"Pesanan '{clean_order_number}' berstatus {status_label} "
                 f"dengan status pembayaran {payment_status}."
             ),
         }

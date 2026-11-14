@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/shifts"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "openingCash": 100000.00
+    }
+scripts:
+  - type: http:afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+       const r = pm.response.json();
+       if (r.success && r.data && r.data.id) pm.collectionVariables.set("shiftId", r.data.id);
+      }
+    language: text/javascript
+order: 1000

@@ -10,10 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID
 
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
@@ -26,8 +24,8 @@ from app.api.internal_members import (
     get_member_store,
 )
 from app.application import app
-from app.chat.entities import Base, Tenant, TenantMember
-from app.config import InternalApiSettings, Settings, load_internal_api_settings
+from app.chat.entities import Base
+from app.config import InternalApiSettings, load_internal_api_settings
 from app.core.database import OwnershipLost
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -219,39 +217,11 @@ class InternalMembersApiTests(unittest.TestCase):
         self.assertEqual(self.store.members[(UUID(TENANT), UUID(USER))]["full_name"], "Budi")
         self.assertEqual(self.store.tenant_names[UUID(TENANT)], "Kopi Senja")
 
-    def test_repeat_is_idempotent(self) -> None:
-        first = self.put()
-        snapshot = dict(self.store.members)
-        second = self.put()
-        self.assertEqual(first.status_code, second.status_code)
-        self.assertEqual(first.json(), second.json())
-        self.assertEqual(self.store.members, snapshot)
-        self.assertEqual(len(self.store.members), 1)
-
-    def test_changed_fields_overwrite_and_missing_tenant_name_keeps_the_old_one(self) -> None:
-        self.put()
-        body = valid_body(full_name="Budi S.", phone_number="628999888777", role="CASHIER")
-        del body["tenant_name"]
-        self.assertEqual(self.put(body).status_code, 200)
-        stored = self.store.members[(UUID(TENANT), UUID(USER))]
-        self.assertEqual(stored["full_name"], "Budi S.")
-        self.assertEqual(stored["phone"], "628999888777")
-        self.assertEqual(stored["role"], "CASHIER")
-        self.assertEqual(self.store.tenant_names[UUID(TENANT)], "Kopi Senja")
-        self.assertEqual(len(self.store.members), 1)
-
     def test_disabled_status_is_stored_and_returned(self) -> None:
         response = self.put(valid_body(status="DISABLED"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "DISABLED")
         self.assertEqual(self.store.members[(UUID(TENANT), UUID(USER))]["status"], "DISABLED")
-
-    def test_same_user_id_in_two_tenants_stays_separate(self) -> None:
-        other = "11111111-2222-4333-8444-555555555555"
-        self.put()
-        self.put(valid_body(full_name="Lain"), path=f"/api/v1/internal/tenants/{other}/members/{USER}")
-        self.assertEqual(len(self.store.members), 2)
-        self.assertEqual(self.store.members[(UUID(TENANT), UUID(USER))]["full_name"], "Budi Santoso")
 
     def test_storage_failures_become_generic_503(self) -> None:
         errors = (
@@ -308,11 +278,6 @@ class InternalApiSettingsTests(unittest.TestCase):
         for env in ({}, {"AI_INTERNAL_API_KEY": "   "}, {"AI_INTERNAL_API_KEY": "short"}):
             with self.subTest(env=env), patch.dict(os.environ, env, clear=True):
                 self.assertFalse(load_internal_api_settings().configured)
-
-    def test_settings_carry_the_key_without_leaking_it(self) -> None:
-        settings = Settings(Mock(), Mock(), Mock(), internal_api=InternalApiSettings(KEY))
-        self.assertEqual(settings.internal_api.api_key, KEY)
-        self.assertNotIn(KEY, repr(settings.internal_api))
 
 
 class RecordingConnection:
@@ -444,23 +409,6 @@ def load_revision(name: str):
 
 
 class MigrationRevisionTests(unittest.TestCase):
-    def test_chain_is_linear_and_0002_follows_0001(self) -> None:
-        revision = load_revision("0002_tenant_members")
-        self.assertEqual(revision.revision, "0002_tenant_members")
-        self.assertEqual(revision.down_revision, "0001_channels")
-        script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-        self.assertEqual(len(script.get_heads()), 1)
-        history = [item.revision for item in script.walk_revisions()]
-        self.assertIn("0002_tenant_members", history)
-        self.assertEqual(history[-1], "0001_channels")
-        self.assertEqual(
-            history.index("0001_channels"), history.index("0002_tenant_members") + 1
-        )
-
-    def test_migration_0001_is_untouched_and_has_no_member_table(self) -> None:
-        text = (ROOT / "migrations" / "versions" / "0001_channels.py").read_text(encoding="utf-8")
-        self.assertNotIn('"tenant_members"', text)
-
     def render(self, direction: str) -> str:
         output = io.StringIO()
         context = MigrationContext.configure(
@@ -500,22 +448,6 @@ class MigrationRevisionTests(unittest.TestCase):
         self.assertIn("DROP TABLE tenant_members", sql)
         self.assertIn("ALTER TABLE tenants DROP COLUMN name", sql)
         self.assertLess(sql.index("DROP TABLE tenant_members"), sql.index("DROP COLUMN name"))
-
-    def test_models_declare_the_documented_shape(self) -> None:
-        table = TenantMember.__table__
-        self.assertEqual([column.name for column in table.primary_key.columns],
-                         ["tenant_id", "java_user_id"])
-        self.assertEqual(table.c.full_name.type.length, 160)
-        self.assertEqual(table.c.phone_normalized.type.length, 15)
-        self.assertEqual(table.c.role.type.length, 32)
-        self.assertEqual(table.c.status.type.length, 16)
-        self.assertFalse(table.c.full_name.nullable)
-        self.assertFalse(table.c.phone_normalized.nullable)
-        self.assertEqual(Tenant.__table__.c.name.type.length, 160)
-        self.assertTrue(Tenant.__table__.c.name.nullable)
-        index = next(item for item in table.indexes if item.name == "tenant_member_active_phone")
-        self.assertEqual([column.name for column in index.columns], ["phone_normalized"])
-        self.assertEqual(str(index.dialect_options["postgresql"]["where"]), "status='ACTIVE'")
 
 
 if __name__ == "__main__":

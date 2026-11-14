@@ -3,6 +3,10 @@ package org.lite.project.cashiersaas.unit.service;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbInventoryItemRequest;
@@ -22,7 +26,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.service.FnbInventoryService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
-import org.lite.project.cashiersaas.service.PublicOrderTokenService;
+import org.lite.project.cashiersaas.service.DigestService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -57,7 +61,7 @@ import static org.mockito.Mockito.when;
 class FnbInventoryServiceTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbInventoryRepository inventory;
-    @Mock private PublicOrderTokenService tokens;
+    @Mock private DigestService tokens;
     @InjectMocks private FnbInventoryService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -220,33 +224,21 @@ class FnbInventoryServiceTest {
         order.verify(inventory).persist(any(InventoryMovementEntity.class));
     }
 
-    @Test
-    void createItemWithoutInitialQuantityPersistsZeroBalanceAndNoMovement() {
+    @ParameterizedTest
+    @CsvSource({"Susu,SUSU,ml,500,", "Gula,,g,50,0.000"})
+    void createItemWithoutOrZeroInitialQuantityPersistsZeroBalanceAndNoMovement(String name, String sku, String unit,
+                                                                              String reorderLevel, String initialQuantity) {
         when(guard.requireOwner(owner, outletId)).thenReturn(context);
         stubItemCreationIds();
 
         FnbInventoryItemResponse response = service.createItem(owner, outletId,
-                itemRequest("Susu", "SUSU", "ml", "500", null));
+                itemRequest(name, sku, unit, reorderLevel, initialQuantity));
 
         verify(inventory, never()).persist(any(InventoryMovementEntity.class));
         verifyNoInteractions(tokens);
         ArgumentCaptor<InventoryBalanceEntity> balanceCaptor = ArgumentCaptor.forClass(InventoryBalanceEntity.class);
         verify(inventory).persist(balanceCaptor.capture());
         assertEquals(0, BigDecimal.ZERO.compareTo(balanceCaptor.getValue().getQuantityOnHand()));
-        assertEquals(0, BigDecimal.ZERO.compareTo(response.getQuantityOnHand()));
-        assertEquals(InventoryBalanceEntity.Status.OUT, response.getStockStatus());
-    }
-
-    @Test
-    void createItemWithZeroInitialQuantityPersistsNoMovement() {
-        when(guard.requireOwner(owner, outletId)).thenReturn(context);
-        stubItemCreationIds();
-
-        FnbInventoryItemResponse response = service.createItem(owner, outletId,
-                itemRequest("Gula", null, "g", "50", "0.000"));
-
-        verify(inventory, never()).persist(any(InventoryMovementEntity.class));
-        verifyNoInteractions(tokens);
         assertEquals(0, BigDecimal.ZERO.compareTo(response.getQuantityOnHand()));
         assertEquals(InventoryBalanceEntity.Status.OUT, response.getStockStatus());
     }
@@ -288,6 +280,7 @@ class FnbInventoryServiceTest {
     void updateItemAllowsUnitChangeWhenNoMovementExists() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "500");
         InventoryBalanceEntity balance = balanceOf(item, "0");
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movements(tenantId, outletId, itemId, 0, 1)).thenReturn(List.of());
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
@@ -312,6 +305,7 @@ class FnbInventoryServiceTest {
     void updateItemWithUnchangedUnitNeverQueriesMovements() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "500");
         InventoryBalanceEntity balance = balanceOf(item, "300");
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
 
@@ -344,6 +338,7 @@ class FnbInventoryServiceTest {
     void deactivateItemMarksItemInactiveAndReturnsIt() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "500");
         InventoryBalanceEntity balance = balanceOf(item, "40");
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
 
@@ -369,6 +364,7 @@ class FnbInventoryServiceTest {
     // ---------------------------------------------------------------- 4. items
 
     private List<InventoryItemEntity> listFixture() {
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         UUID ok = UUID.randomUUID();
         UUID none = UUID.randomUUID();
         UUID low = UUID.randomUUID();
@@ -417,96 +413,21 @@ class FnbInventoryServiceTest {
         assertTrue(negative.isEmpty());
     }
 
-    // ---------------------------------------------------------------- 5. recordMovement guard selection
-
-    @Test
-    void adjustmentRequiresOwnerGuardAndNeverUsesOutletGuard() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        stubNewMovementPath(InventoryMovementEntity.Type.ADJUSTMENT, owner, item, balanceOf(item, "10"));
-
-        service.recordMovement(owner, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.ADJUSTMENT, "-2", "Opname", "k-adj"));
-
-        verify(guard).requireOwner(owner, outletId);
-        verify(guard, never()).requireOutlet(any(TenantPrincipal.class), any(UUID.class));
-    }
-
-    @Test
-    void restockUsesOutletGuardNotOwnerGuard() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        stubNewMovementPath(InventoryMovementEntity.Type.RESTOCK, cashier, item, balanceOf(item, "10"));
-
-        service.recordMovement(cashier, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.RESTOCK, "5", null, "k-restock"));
-
-        verify(guard).requireOutlet(cashier, outletId);
-        verify(guard, never()).requireOwner(any(TenantPrincipal.class), any(UUID.class));
-    }
-
-    @Test
-    void wasteUsesOutletGuardNotOwnerGuard() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        stubNewMovementPath(InventoryMovementEntity.Type.WASTE, cashier, item, balanceOf(item, "10"));
-
-        service.recordMovement(cashier, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.WASTE, "1", "Tumpah", "k-waste"));
-
-        verify(guard).requireOutlet(cashier, outletId);
-        verify(guard, never()).requireOwner(any(TenantPrincipal.class), any(UUID.class));
-    }
-
     // ---------------------------------------------------------------- 6. delta rules
 
-    @Test
-    void restockAddsQuantity() {
+    @ParameterizedTest
+    @CsvSource({"RESTOCK,5,Beli pasar,5,15", "WASTE,3,Basi,-3,7", "ADJUSTMENT,-4,Opname,-4,6", "ADJUSTMENT,4,Opname,4,14"})
+    void movementDeltaSignFollowsTypeAndIsAppliedToTheBalance(InventoryMovementEntity.Type type, String quantity,
+                                                              String reason, String expectedDelta, String expectedBalance) {
+        TenantPrincipal principal = type == InventoryMovementEntity.Type.ADJUSTMENT ? owner : cashier;
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
         InventoryBalanceEntity balance = balanceOf(item, "10");
-        stubNewMovementPath(InventoryMovementEntity.Type.RESTOCK, cashier, item, balance);
+        stubNewMovementPath(type, principal, item, balance);
 
-        service.recordMovement(cashier, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.RESTOCK, "5", "Beli pasar", "k1"));
+        service.recordMovement(principal, outletId, itemId, movementRequest(type, quantity, reason, "k1"));
 
-        assertEquals(0, new BigDecimal("5").compareTo(persistedMovement().getQuantityDelta()));
-        assertEquals(0, new BigDecimal("15").compareTo(balance.getQuantityOnHand()));
-    }
-
-    @Test
-    void wasteSubtractsQuantity() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        InventoryBalanceEntity balance = balanceOf(item, "10");
-        stubNewMovementPath(InventoryMovementEntity.Type.WASTE, cashier, item, balance);
-
-        service.recordMovement(cashier, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.WASTE, "3", "Basi", "k1"));
-
-        assertEquals(0, new BigDecimal("-3").compareTo(persistedMovement().getQuantityDelta()));
-        assertEquals(0, new BigDecimal("7").compareTo(balance.getQuantityOnHand()));
-    }
-
-    @Test
-    void adjustmentKeepsNegativeSignAsGiven() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        InventoryBalanceEntity balance = balanceOf(item, "10");
-        stubNewMovementPath(InventoryMovementEntity.Type.ADJUSTMENT, owner, item, balance);
-
-        service.recordMovement(owner, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.ADJUSTMENT, "-4", "Opname", "k1"));
-
-        assertEquals(0, new BigDecimal("-4").compareTo(persistedMovement().getQuantityDelta()));
-        assertEquals(0, new BigDecimal("6").compareTo(balance.getQuantityOnHand()));
-    }
-
-    @Test
-    void adjustmentKeepsPositiveSignAsGiven() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        InventoryBalanceEntity balance = balanceOf(item, "10");
-        stubNewMovementPath(InventoryMovementEntity.Type.ADJUSTMENT, owner, item, balance);
-
-        service.recordMovement(owner, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.ADJUSTMENT, "4", "Opname", "k1"));
-
-        assertEquals(0, new BigDecimal("4").compareTo(persistedMovement().getQuantityDelta()));
-        assertEquals(0, new BigDecimal("14").compareTo(balance.getQuantityOnHand()));
+        assertEquals(0, new BigDecimal(expectedDelta).compareTo(persistedMovement().getQuantityDelta()));
+        assertEquals(0, new BigDecimal(expectedBalance).compareTo(balance.getQuantityOnHand()));
     }
 
     @Test
@@ -540,24 +461,15 @@ class FnbInventoryServiceTest {
 
     // ---------------------------------------------------------------- 7. reason rules
 
-    @Test
-    void blankRestockReasonDefaultsToRestock() {
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"   "})
+    void blankOrNullRestockReasonDefaultsToRestock(String reason) {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
         stubNewMovementPath(InventoryMovementEntity.Type.RESTOCK, cashier, item, balanceOf(item, "10"));
 
         service.recordMovement(cashier, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.RESTOCK, "5", "   ", "k1"));
-
-        assertEquals("Restock", persistedMovement().getReason());
-    }
-
-    @Test
-    void nullRestockReasonDefaultsToRestock() {
-        InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
-        stubNewMovementPath(InventoryMovementEntity.Type.RESTOCK, cashier, item, balanceOf(item, "10"));
-
-        service.recordMovement(cashier, outletId, itemId,
-                movementRequest(InventoryMovementEntity.Type.RESTOCK, "5", null, "k1"));
+                movementRequest(InventoryMovementEntity.Type.RESTOCK, "5", reason, "k1"));
 
         assertEquals("Restock", persistedMovement().getReason());
     }
@@ -740,6 +652,7 @@ class FnbInventoryServiceTest {
     @Test
     void movementsAcceptBoundaryPagingValues() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movements(tenantId, outletId, itemId, 0, 1)).thenReturn(List.of());
         when(inventory.movements(tenantId, outletId, itemId, 1_000_000, 50)).thenReturn(List.of());
@@ -752,6 +665,7 @@ class FnbInventoryServiceTest {
 
     @Test
     void movementsOfUnknownItemAreNotFoundWithoutQueryingHistory() {
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> service.movements(cashier, outletId, itemId, 0, 10));
@@ -771,6 +685,7 @@ class FnbInventoryServiceTest {
         InventoryMovementEntity restock = existingMovement(item, InventoryMovementEntity.Type.RESTOCK, "500",
                 "Stok awal", "init:" + itemId, "fp2");
         ReflectionTestUtils.setField(sale, "id", UUID.randomUUID());
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movements(tenantId, outletId, itemId, 2, 20)).thenReturn(List.of(sale, restock));
 

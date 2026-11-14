@@ -21,6 +21,7 @@ public final class MerchantBusinessSettingsMapper {
         response.setOutletAddress(outlet.getAddress());
         response.setOutletPhoneNumber(outlet.getPhoneNumber());
         response.setTimeZone(outlet.getTimeZone());
+        response.setReceiptFooter(tenant.getReceiptFooter());
         return response;
     }
 }

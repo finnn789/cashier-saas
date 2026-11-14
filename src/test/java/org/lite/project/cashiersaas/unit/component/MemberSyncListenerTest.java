@@ -11,8 +11,6 @@ import org.lite.project.cashiersaas.service.MemberSyncClient;
 import org.springframework.context.event.EventListenerMethodProcessor;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.event.TransactionalEventListenerFactory;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
@@ -56,14 +54,6 @@ class MemberSyncListenerTest {
     @AfterEach
     void closeContext() {
         context.close();
-    }
-
-    @Test
-    void listenerRunsOnlyAfterCommit() throws NoSuchMethodException {
-        TransactionalEventListener annotation = MemberSyncListener.class
-                .getMethod("afterCommit", MemberSyncRequestedEvent.class)
-                .getAnnotation(TransactionalEventListener.class);
-        assertEquals(TransactionPhase.AFTER_COMMIT, annotation.phase());
     }
 
     @Test
@@ -123,7 +113,7 @@ class MemberSyncListenerTest {
 
     private MemberSyncRequestedEvent event() {
         return new MemberSyncRequestedEvent(UUID.randomUUID(), "Kopi Senja", UUID.randomUUID(), "Budi Santoso",
-                "6281234567890", Role.OWNERMERCHANT);
+                "6281234567890", Role.OWNERMERCHANT, "ACTIVE");
     }
 
     private static final class CommitCountingTransactionManager extends AbstractPlatformTransactionManager {

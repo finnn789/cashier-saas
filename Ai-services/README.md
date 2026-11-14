@@ -90,9 +90,15 @@ Status: belum terverifikasi end-to-end. Kontrak lengkap ada di [docs/contracts/m
 - **[`BaseTool`](app/tools/base.py)**: Interface kelas dasar untuk mendefinisikan nama, deskripsi, parameter JSON Schema, dan method async `execute(*, tenant_id, **kwargs)`.
 - **[`ToolRegistry`](app/tools/registry.py)**: Registry untuk mendaftarkan dan mengeksekusi tool lokal.
 - **Built-in Tools**:
-  - [`CpuUsageTool`](app/tools/cpu.py) (`check_laptop_cpu_usage`): Mengambil persentase pemakaian CPU, beban RAM, dan status kinerja laptop server secara langsung via API Windows Kernel (`ctypes`).
   - [`CatalogSearchTool`](app/tools/catalog.py) (`search_catalog_menu`): Pencarian menu dan ketersediaan stok produk kasir via gRPC (`GetCatalogItem`).
   - [`OrderStatusTool`](app/tools/order.py) (`check_order_status`): Pengecekan status dan rincian pesanan kasir berdasarkan nomor order via gRPC (`GetOrderStatus`).
+  - [`SalesSummaryTool`](app/tools/insights.py) (`sales_summary`, parameter `start_date` dan `end_date` ISO, zona waktu outlet): ringkasan penjualan, HPP dan laba kotor, refund, pembatalan, kas, menu terlaris via gRPC (`GetSalesSummary`). Panggil dua kali untuk membandingkan dua periode.
+  - [`RestockSuggestionsTool`](app/tools/insights.py) (`restock_suggestions`): saran belanja bahan dari pemakaian 14 hari terakhir via gRPC (`GetRestockSuggestions`).
+  - [`CashierAnomaliesTool`](app/tools/insights.py) (`cashier_anomalies`, parameter `date`): kasir dengan pembatalan, diskon, atau selisih kas di atas 2x rata-rata 30 hari via gRPC (`GetAnomalies`).
+  - Ketiga tool insight bersifat **baca saja dan hanya untuk owner** (role `OWNERMERCHANT`): `user_id` diambil dari keanggotaan terverifikasi, bukan dari model. Untuk kasir atau jika backend menolak, tool menjawab "Data tidak tersedia; fitur ini hanya untuk owner". System prompt memuat tanggal hari ini (Asia/Jakarta).
+
+### 2.5. Ringkasan Harian Owner (M7)
+Backend memanggil **`POST /api/v1/internal/daily-summaries`** (header `X-Internal-Service-Key` = `AI_INTERNAL_API_KEY`, body `tenant_id`, `outlet_id`, `business_date`) saat shift terakhir outlet ditutup, atau pada fallback pukul 23:00 waktu outlet; satu kali per outlet per hari. Layanan ini mengirim ringkasan ke setiap owner (`OWNERMERCHANT`, `ACTIVE`, akun Telegram terverifikasi) di tenant tersebut: teks template deterministik dengan angka persis dari gRPC (`GetSalesSummary`, `GetRestockSuggestions`, `GetAnomalies`) ditambah satu kalimat insight dari LLM (batas 8 detik; jika gagal, dikirim tanpa kalimat itu). Respons: `200 {"delivered": n, "skipped": m}`, `401` kunci salah, `422` body tidak valid, `503` kunci belum dikonfigurasi atau bot Telegram belum siap. Kontrak lengkap: [docs/contracts/daily-summary.md](../docs/contracts/daily-summary.md).
 
 ---
 
@@ -152,7 +158,7 @@ uv run alembic upgrade head
 ```
 
 ### 3.4. Kompilasi Kontrak Protobuf (Opsional / Saat Pembaruan Skema)
-Jika terdapat perubahan skema pada file `proto/cashier_service.proto`, kompilasi ulang stubs Python menggunakan perintah:
+Jika terdapat perubahan skema pada file `proto/cashier_service.proto`, kompilasi ulang stubs Python menggunakan perintah di bawah. Sumber kontrak ada di `../src/main/proto/cashier_service.proto`; salinan `proto/cashier_service.proto` harus identik dengan file tersebut (salin dulu sebelum kompilasi):
 ```powershell
 uv run python -m grpc_tools.protoc -Iproto --python_out=app/integrations/grpc/generated --grpc_python_out=app/integrations/grpc/generated proto/cashier_service.proto
 ```
@@ -203,7 +209,6 @@ Buka bot Telegram Anda dan coba perintah/pertanyaan berikut.
 - **`/new`**: Menutup sesi chat lama dan membuka sesi percakapan baru tanpa menghapus data history lama.
 - **Pencarian Katalog Menu**: *"Bisa pesan menu apa saja?"* atau *"Ada kopi susu?"* (AI memanggil `search_catalog_menu` via gRPC).
 - **Pengecekan Status Order**: *"Cek status pesanan ORD-20261022-001"* (AI memanggil `check_order_status` via gRPC).
-- **Pengujian Tool Monitoring CPU**: *"Cek kondisi CPU dan RAM laptop saya sekarang"* (AI otomatis memanggil `check_laptop_cpu_usage`).
 
 ---
 
@@ -226,7 +231,7 @@ uv run --locked python -m unittest discover -s tests/unit -p "test_*.py" -v
 Cakupan pengujian mencakup:
 - `test_langgraph_chat.py`: Alur kerja LangGraph end-to-end, transaksi ganda terisolasi (USER di Tx 1, ASSISTANT di Tx 2), dispatch tool terisolasi per tenant, penanganan error/timeout model, serta preservasi command.
 - `test_grpc_tools.py`: Klien gRPC asinkron, penanganan fallback offline backend kasir, eksekusi `CatalogSearchTool`, `OrderStatusTool`, dan registrasi suite default.
-- `test_tools.py`: Skema OpenRouter tool, registry dispatching, dan eksekusi metrik `CpuUsageTool`.
+- `test_tools.py`: Skema OpenRouter tool, registry dispatching, dan eksekusi tool.
 - `test_ai.py`: Validasi prompt, budgeting token/karakter, dan OpenRouter provider mocking.
 - `test_conversation.py`: Alur kerja `ChatService` dan batasan transaksi database legacy.
 - `test_database.py`: Advisory lock kepemilikan bot dan koneksi async PostgreSQL.

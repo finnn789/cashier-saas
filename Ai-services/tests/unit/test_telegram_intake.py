@@ -51,6 +51,7 @@ def delivery(status: str, retry_after: int = 0) -> SimpleNamespace:
 
 
 TENANT_ID = uuid4()
+JAVA_USER_ID = uuid4()
 
 
 class IntakeTests(unittest.IsolatedAsyncioTestCase):
@@ -60,7 +61,7 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         chat = Mock(spec=ChatService)
         # A verified user: the tenant is resolved server-side before chat.handle.
         chat.identify = AsyncMock(return_value=Identity(
-            VERIFIED, TENANT_ID, 'CASHIER', (TenantOption(TENANT_ID, 'Kopi Senja'),)
+            VERIFIED, TENANT_ID, 'CASHIER', (TenantOption(TENANT_ID, 'Kopi Senja'),), JAVA_USER_ID
         ))
         chat.handle = AsyncMock(return_value='ok')
         sender = Mock(spec=Sender)
@@ -90,6 +91,7 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         await intake.handle(message_fixture(user_id=88), Update(update_id=301))
         chat.handle.assert_awaited_once_with(
             tenant_id=TENANT_ID,
+            java_user_id=JAVA_USER_ID,
             external_user_id='88',
             external_chat_id='71',
             external_message_id='21',

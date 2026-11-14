@@ -55,24 +55,24 @@ class ClassifyLlmErrorTests(unittest.TestCase):
                 self.assertIn(code, LLM_ERROR_CODES)
         self.assertIn("AI_UNKNOWN", LLM_ERROR_CODES)
 
-    def test_wrapped_cause_chain(self) -> None:
-        inner = _status_error(openai.AuthenticationError, 401)
-        try:
+    def test_wrapped_cause_and_context_chains(self) -> None:
+        with self.subTest("explicit cause"):
+            inner = _status_error(openai.AuthenticationError, 401)
             try:
-                raise inner
-            except openai.AuthenticationError as caught:
-                raise RuntimeError("wrapper") from caught
-        except RuntimeError as outer:
-            self.assertEqual(classify_llm_error(outer), "AI_HTTP_401")
-
-    def test_wrapped_context_chain(self) -> None:
-        try:
+                try:
+                    raise inner
+                except openai.AuthenticationError as caught:
+                    raise RuntimeError("wrapper") from caught
+            except RuntimeError as outer:
+                self.assertEqual(classify_llm_error(outer), "AI_HTTP_401")
+        with self.subTest("implicit context"):
             try:
-                raise TimeoutError()
-            except TimeoutError:
-                raise RuntimeError("wrapper")
-        except RuntimeError as outer:
-            self.assertEqual(classify_llm_error(outer), "AI_TRANSPORT_UNKNOWN")
+                try:
+                    raise TimeoutError()
+                except TimeoutError:
+                    raise RuntimeError("wrapper")
+            except RuntimeError as outer:
+                self.assertEqual(classify_llm_error(outer), "AI_TRANSPORT_UNKNOWN")
 
     def test_chain_depth_is_bounded(self) -> None:
         exc: BaseException = _status_error(openai.AuthenticationError, 401)

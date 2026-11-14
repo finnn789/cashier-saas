@@ -2,7 +2,7 @@
 
 from app.tools.base import BaseTool
 from app.tools.catalog import CatalogSearchTool
-from app.tools.cpu import CpuUsageTool
+from app.tools.insights import CashierAnomaliesTool, RestockSuggestionsTool, SalesSummaryTool
 from app.tools.order import OrderStatusTool
 from app.tools.registry import ToolRegistry
 
@@ -10,17 +10,21 @@ from app.tools.registry import ToolRegistry
 def get_default_tool_registry() -> ToolRegistry:
     """Create a default ToolRegistry with built-in tools registered."""
     registry = ToolRegistry()
-    registry.register(CpuUsageTool())
     registry.register(CatalogSearchTool())
     registry.register(OrderStatusTool())
+    registry.register(SalesSummaryTool())
+    registry.register(RestockSuggestionsTool())
+    registry.register(CashierAnomaliesTool())
     return registry
 
 
 __all__ = [
     "BaseTool",
+    "CashierAnomaliesTool",
     "CatalogSearchTool",
-    "CpuUsageTool",
     "OrderStatusTool",
+    "RestockSuggestionsTool",
+    "SalesSummaryTool",
     "ToolRegistry",
     "get_default_tool_registry",
 ]

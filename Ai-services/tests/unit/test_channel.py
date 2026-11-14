@@ -223,7 +223,6 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
 
         polling_task = asyncio.create_task(polling())
         self.channel.polling_task = polling_task
-        self.database.ping.side_effect = RuntimeError('dummy-secret')
         try:
             # Ownership loss is a supervised database failure.
             from app.core.database import OwnershipLost

@@ -1,9 +1,24 @@
 # Project memory
 
-Memory version: 68
-Updated: 2026-11-11 (Asia/Jakarta)
+Memory version: 80
+Updated: 2026-11-14 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- NEXT ACTION (2026-11-14): TASK-081 test cleanup verified, awaiting commit approval; M7 committed `da2c2cd` (not pushed); push/PR only on approval.
+- TASK-081 — VERIFIED, NOT COMMITTED (2026-11-14): Tier 1+2 test cleanup from `reports/TEST-AUDIT-2026-11-14.md` by W1-W4 (test code only, 52 files, -2236/+618 lines). Java unit methods ~537 -> 430 (runs 609 -> 569), Java IT 148 unchanged; Python unit 323 -> 259, Python integration 24 -> 20 (14 skipped). `mvnw -B verify` BUILD SUCCESS (run 1 failed only because Docker was off); `.venv` unittest unit+integration OK. Tier 3 kept; dead `get_member`/`disable_member` in `Ai-services/app/chat/members.py` kept (user did not decide). Packet `tasks/TASK-081.md`, reports `reports/TASK-081-W{1..4}.md`. Canonical 79 -> 80.
+- TASK-080 — M7 VERIFIED, COMMITTED (2026-11-14, user-approved, not pushed): user-requested `mvnw -B verify` run 2 BUILD SUCCESS 609 unit + 148 IT; run 1 had 2 IT failures fixed by W3 (F1 production: `DailySummaryService.runFallback` fetches retryable rows before inserting, so one sweep never sends a row twice; F2 test-only: null REST methodLabel vs gRPC ""). Python via `Ai-services/.venv` unittest: unit 323 OK, integration 24 OK (14 skipped) after W3 F3 test-only fix (missing service_key in `test_grpc_integration.py`); pytest is not installed. Real Telegram not tried. Canonical 78 -> 79. Earlier state: IMPLEMENTED, REVIEWED, COMPILED (2026-11-14): M7 owner AI (3 owner-only read-only gRPC RPCs, AI tools, daily summary dispatch V10 + Python endpoint); packet `tasks/TASK-080.md`, decisions "M7 owner AI". TASK-079 committed `08ff7af`. Canonical 77 -> 78.
+- TASK-079 — M6 VERIFIED (user-requested `mvnw -B verify` run 3 BUILD SUCCESS 523 unit + 127 IT; runs 1-2 failed on test-only issues fixed by W4/W5, no production change), COMMITTED `08ff7af` (2026-11-14): M6 unit cost/COGS, batch stock count, inactive ingredient fix, owner reports (hour/cashier/shift, COGS, refunds), V9; packet `tasks/TASK-079.md`, decisions "M6 data owner". Canonical 76 -> 77.
+- TASK-076/077/078 committed as `b383d90` on `fix/flow-controls-a` (2026-11-14, not pushed).
+- TASK-078 — M5 VERIFIED (`mvnw -B verify` 473 unit + 121 IT green), NOT COMMITTED (2026-11-14); details in TASKS.md.
+- PRD v2.1 (2026-11-13): record-only cashier, QRIS not a payment feature, non-cash labels, mock gateway to be removed, petty cash in M5; see DECISIONS "PRD v2.1".
+- PRD v2 (2026-11-13): `PRD-MVP.md` rewritten for the pivot with milestones M4-M8; see `.ai/DECISIONS.md` "PRD v2".
+- TASK-077 — VERIFIED, NOT COMMITTED (2026-11-13): M4 cash shifts + owner refund, V7; `mvnw -B verify` 445 unit + 105 IT green (with TASK-076); packet `tasks/TASK-077.md`, details in TASKS.md.
+- TASK-076 — VERIFIED (Java), Python tests NOT RUN, NOT COMMITTED (2026-11-13): group A fixes on branch `fix/flow-controls-a` @ `038a2f7`; decisions in `.ai/DECISIONS.md` "Flow controls A"; packet `tasks/TASK-076.md`. Canonical 70 -> 73.
+
+- TASK-075 — VERIFIED, NOT COMMITTED (2026-11-12): pivot Wave B on `refactor/pivot-cashier-ai`: statuses OPEN/COMPLETED/CANCELLED + V6 (verified on PG17 incl. abort guard), server-side hold bill via `PUT .../fnb/orders/{orderId}/items`, CORS `app.cors.allowed-origins` with fail-fast validation, `GET /api/v1/public/plans` re-permitted, Telegram status labels, Postman/docs aligned. `mvnw -B verify` 385 unit + 80 IT green. UI pending in Antigravity (`prompts/refactore_feature_and_uui.md`). Canonical 69 -> 70.
+
+- TASK-074 — VERIFIED, NOT COMMITTED (2026-11-12): `mvnw -B verify` green 368 unit + 77 IT; diff reviewed vs `cf949ff` (95 files, -4138 lines), only reserved paths; coupling services lost only realtime/table calls; known regression fixed in TASK-075 A1: CORS origin fail-fast validation lost; pivot Wave A (remove QR, kitchen, tables, real-time) on `refactor/pivot-cashier-ai` @ `cf949ff`; see `.ai/DECISIONS.md` Pivot and `tasks/TASK-074.md`. Canonical 68 -> 69.
 
 - TASK-073 — DONE, REVIEWED, NOT COMMITTED, NOT EXECUTED (2026-11-11): Postman `KedaiMbo API` folders "08 - F&B Option Groups" and "09 - F&B Options" repointed to the V5 routes (`/fnb/option-groups[/{groupId}[/options[/{optionId}]]]`) by worker sonnet (packet tasks/TASK-073.md, report reports/TASK-073-W1.md); 3 new requests in folder 08 (Delete Option Group, Attach Option Groups To Product `{"groupIds":[...]}`, List Product Option Groups). Orchestrator diffed: only the URL lines changed in the six old files, new bodies match `FnbOptionGroupRequest`/`FnbOptionRequest`/`FnbProductOptionGroupsRequest`. The collection was NOT run against a live server. The user's other dirty Postman files were not touched. `FnbCatalogService.java` is still dirty with formatting-only noise (blank lines, wrapped `if` lines; no logic): awaiting the user's choice (revert recommended). Frontend prompt `prompts/PROMPT_FOR_FE_AGENT_FNB_API_INTEGRATION.md` updated (final 429 contract + no-rewrite/no-duplicate/no-tight-coupling rules), uncommitted; the user already handed it to the frontend agent. Pushed: commit `0f39c5f` (TASK-070/071/072) on `feature/fnb-stock-concurrency-tests`. Canonical 67 -> 68.
 

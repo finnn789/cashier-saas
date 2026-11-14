@@ -24,3 +24,45 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - Groups are archived, never deleted (order snapshots reference them); archiving a group attached to a non-archived product returns 409.
 - Old product-scoped group/option/option-recipe endpoints are replaced, no compatibility routes. Migration V5 backfills and drops `option_groups.product_id`.
 - The inventory PR is not merged; Phase 2 is a stacked branch on `feature/fnb-inventory-recipe` (user decision, merge skipped).
+
+## M7 owner AI — 2026-11-14
+
+- Explicit user decisions (TASK-080): daily summary sent when the last open shift of the outlet closes, fallback 23:00 outlet time, once per outlet per day; text = deterministic template + one LLM insight sentence (sent without it on LLM failure); cashier anomaly = day value > 2 × own 30-day daily average and above minimums (cancellations >= 3, discounted orders >= 3, |cash difference| >= 20000).
+- Orchestrator design: three new read-only OWNERMERCHANT-only gRPC RPCs (sales summary, restock suggestions, anomalies); Java owns the trigger and dedupe (`daily_summary_dispatches`, V10) and calls the AI service after commit; the AI service reads data back through gRPC (Java stays the source of truth).
+
+## M6 data owner — 2026-11-14
+
+- Explicit user decisions (TASK-079): cashiers may enter a purchase price on RESTOCK, but average cost and movement unit cost are visible to the owner only; per-menu gross profit = line totals − COGS (before order discount), total gross profit = net sales − COGS; stock count is one batch request per count.
+- Orchestrator design: moving average cost on `inventory_balances`, `unit_cost` snapshot on every movement, per-item `order_items.cost_amount` (null = unknown cost) because SALE movements are merged per ingredient across menus; inactive ingredients are not deducted. Migration V9.
+
+## PRD v2.1 — record-only cashier — 2026-11-13
+
+- Explicit user decision: the app only RECORDS transactions; QRIS is not a payment feature (no QRIS display, no gateway, no EDC). Payment methods = cash and non-cash; non-cash requires an owner-defined label (e.g. "QRIS", "Transfer BCA") stored as a text snapshot.
+- Mock gateway, attempt and resolve flow are to be deleted from code in M5 (DB data kept); supersedes the "flag" decision of Flow controls A for the long term.
+- M5 adds petty-cash expenses inside a shift (reduce expected cash), opening cash prefilled from the last counted cash, sequential receipt number + full receipt, optional customer name + order note, order list filters, fast cashier UI.
+
+## PRD v2 — 2026-11-13
+
+- On the user's request `PRD-MVP.md` was rewritten as v2 (cashier cafe + owner AI assistant, single outlet). It is the product source of truth from now on and absorbs the 2026-11-12 pivot and "Flow controls A".
+- Milestones: M4 cashier controls (TASK-076, shifts + cash, void/refund), M5 receipts + local payment (sequential receipt number, full receipt, QRIS manual, optional customer name), M6 owner data (unit cost / COGS, stock count, reports per hour/cashier/shift), M7 AI (daily summary, restock, anomalies, read-only), M8 pilot.
+- Orchestrator defaults written into the PRD (user may revise): payment requires an open shift of the receiving user; one open shift per user per outlet; refund is full only, owner only, order stays COMPLETED with payment REFUNDED, stock returned via SALE_REVERSAL; receipt number `INV-YYYYMMDD-NNNN` per outlet per day.
+
+## Flow controls A — 2026-11-13
+
+- Explicit user decisions after the 2026-11-13 business-flow audit (group A, TASK-076):
+- Mock gateway stays but behind `app.payment.mock-gateway.enabled` (default false; true in demo/test profiles).
+- A CASHIER may cancel an OPEN unpaid order only when it has no discount; a discounted order can be cancelled only by the owner (403 for the cashier).
+- Owner can list outlet cashiers, deactivate/reactivate them (sessions revoked, AI member status DISABLED/ACTIVE) and reset a cashier password to a one-time temporary password; self-service password change for every user. Reset refused when the cashier account belongs to another tenant.
+- gRPC money fields become decimal strings; gRPC calls carry the Java user id and are scoped to that member's active outlets; the AI CPU tool is removed.
+
+## Pivot: cashier-first POS + owner AI assistant — 2026-11-12
+
+- Explicit user decision: the product becomes a plain cashier (POS) for small F&B; the AI assistant for the owner (and later a web chat for cashiers) is the differentiator. The AI feature itself is NOT part of the refactor.
+- Removed by deleting code (git history is the way back): customer QR ordering and every `/api/v1/public/**` route, kitchen queue/KDS, dining tables, WebSocket real-time (TASK-032). DB tables/columns stay; applied migrations V1..V5 are never edited.
+- Kept: hold bill, receipts, discounts, owner audit viewer, settings, catalog, inventory/recipes, option groups, sales report, onboarding/invitations, Telegram bot and AI service.
+- Order status becomes `OPEN` (held/unpaid), `COMPLETED` (paid), `CANCELLED`; V6 relaxes `sales_orders_status_check`, maps old rows (paid -> COMPLETED, unpaid -> OPEN), then tightens.
+- Hold bill moves server-side: a held bill is an OPEN/UNPAID POS order (localStorage hold is removed in the UI). A new endpoint replaces the items of an OPEN, UNPAID POS order (`PUT .../fnb/orders/{orderId}/items`), totals recomputed by the server (TASK-075).
+- Telegram bot order-status text: OPEN = "Belum dibayar", COMPLETED = "Selesai (sudah dibayar)", CANCELLED = "Dibatalkan".
+- Without WebSocket the UI refreshes order lists by polling every 15 s plus refetch on window focus and after its own mutations; the PRD "visible within 5 seconds" target is not guaranteed any more.
+- The UI repository `E:\Java\cashier-saas-ui` is not under git yet (user keeps it that way for now); its refactor is done by an external Antigravity/Gemini agent team from `prompts/refactore_feature_and_uui.md`.
+- Backend branch: `refactor/pivot-cashier-ai` from main `cf949ff`.

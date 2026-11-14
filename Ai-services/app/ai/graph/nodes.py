@@ -13,9 +13,10 @@ from app.ai.graph.error_codes import classify_llm_error
 from app.ai.graph.state import AgentState
 from app.ai.graph.tools_adapter import (
     adapt_tool_registry,
+    current_java_user_id,
     current_tenant_id,
 )
-from app.ai.prompts import SYSTEM
+from app.ai.prompts import system_prompt
 from app.tools.base import BaseTool
 from app.tools.registry import ToolRegistry
 
@@ -60,14 +61,14 @@ def create_agent_node(
 
         # Ensure SystemMessage is present at index 0
         if not raw_messages or not isinstance(raw_messages[0], SystemMessage):
-            system_content = SYSTEM
+            system_content = system_prompt()
             display_name = state.get("display_name")
             if display_name:
                 profile_json = json.dumps(
                     {"untrusted_profile": {"display_name": str(display_name)[:160]}},
                     ensure_ascii=True,
                 )
-                system_content = f"{SYSTEM}\n{profile_json}"
+                system_content = f"{system_prompt()}\n{profile_json}"
             messages_to_send = [SystemMessage(content=system_content)] + raw_messages
         else:
             messages_to_send = raw_messages
@@ -162,6 +163,7 @@ def create_tools_node(
             return {"messages": []}
 
         tenant_id = (state.get("tenant_id") or "").strip()
+        java_user_id = (state.get("java_user_id") or "").strip()
         tool_messages: list[ToolMessage] = []
         node_started = time.perf_counter()
         logger.info(
@@ -186,8 +188,8 @@ def create_tools_node(
             else:
                 tool_args = {}
 
-            # Strict tenant isolation guard: purge tenant_id from model-supplied arguments
-            safe_args = {k: v for k, v in tool_args.items() if k != "tenant_id"}
+            # Strict isolation guard: purge tenant_id/user_id from model-supplied arguments
+            safe_args = {k: v for k, v in tool_args.items() if k not in ("tenant_id", "user_id")}
 
             tool = tools_by_name.get(tool_name)
             if tool is None:
@@ -212,9 +214,13 @@ def create_tools_node(
 
             try:
                 token = current_tenant_id.set(tenant_id)
+                user_token = current_java_user_id.set(java_user_id)
                 try:
-                    result = await tool.execute(tenant_id=tenant_id, **safe_args)
+                    result = await tool.execute(
+                        tenant_id=tenant_id, user_id=java_user_id or None, **safe_args
+                    )
                 finally:
+                    current_java_user_id.reset(user_token)
                     current_tenant_id.reset(token)
 
                 if isinstance(result, str):

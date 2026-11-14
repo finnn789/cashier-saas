@@ -1,8 +1,0 @@
-$kind: http-request
-url: "{{baseUrl}}/api/v1/public/fnb/orders/{{orderToken}}/status"
-method: GET
-headers:
-  Accept: application/json
-auth:
-  type: noauth
-order: 3000

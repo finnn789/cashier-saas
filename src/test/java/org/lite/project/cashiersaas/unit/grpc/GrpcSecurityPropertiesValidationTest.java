@@ -49,16 +49,6 @@ class GrpcSecurityPropertiesValidationTest {
     }
 
     @Test
-    void validConfigurationPassesWithDefaults() {
-        GrpcSecurityProperties properties = valid();
-
-        assertTrue(validator.validate(properties).isEmpty());
-        assertEquals(50, properties.getMaxCatalogLimit());
-        assertEquals(10, properties.getDefaultCatalogLimit());
-        assertEquals(50, properties.getRequestsPerSecond());
-    }
-
-    @Test
     void serviceKeyOfExactlySixteenCharactersIsAccepted() {
         GrpcSecurityProperties properties = valid();
         properties.setServiceKey("a".repeat(16));

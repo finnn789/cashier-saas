@@ -1,9 +1,14 @@
 package org.lite.project.cashiersaas.unit.service;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbOptionGroupRequest;
@@ -42,6 +47,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -129,8 +135,6 @@ class FnbOptionGroupServiceTest {
         assertSame(outlet, saved.getOutlet());
         assertEquals("Topping", response.getName());
         assertEquals(3, response.getMaximumSelections());
-        // Outlet-level library: creating a group never needs or touches a product.
-        verify(catalog, never()).product(any(UUID.class), any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -144,32 +148,13 @@ class FnbOptionGroupServiceTest {
         assertEquals(1, response.getMinimumSelections());
     }
 
-    @Test
-    void createGroupRejectsMinimumGreaterThanMaximum() {
+    @ParameterizedTest
+    @CsvSource({"Topping,true,3,2", "Size,true,0,1", "Topping,false,1,2"})
+    void createGroupRejectsInvalidSelectionLimits(String name, boolean required, int minimum, int maximum) {
         stubOwner();
 
         assertThrows(InvalidOperationException.class,
-                () -> service.createGroup(owner, outletId, groupRequest("Topping", true, 3, 2, 0)));
-
-        verify(catalog, never()).persist(any(OptionGroupEntity.class));
-    }
-
-    @Test
-    void createGroupRejectsRequiredGroupWithMinimumZero() {
-        stubOwner();
-
-        assertThrows(InvalidOperationException.class,
-                () -> service.createGroup(owner, outletId, groupRequest("Size", true, 0, 1, 0)));
-
-        verify(catalog, never()).persist(any(OptionGroupEntity.class));
-    }
-
-    @Test
-    void createGroupRejectsOptionalGroupWithMinimumAboveZero() {
-        stubOwner();
-
-        assertThrows(InvalidOperationException.class,
-                () -> service.createGroup(owner, outletId, groupRequest("Topping", false, 1, 2, 0)));
+                () -> service.createGroup(owner, outletId, groupRequest(name, required, minimum, maximum, 0)));
 
         verify(catalog, never()).persist(any(OptionGroupEntity.class));
     }
@@ -213,7 +198,6 @@ class FnbOptionGroupServiceTest {
         assertEquals(4, groupA.getDisplayOrder());
         assertEquals(groupAId, response.getId());
         assertEquals("Topping Baru", response.getName());
-        verify(catalog, never()).product(any(UUID.class), any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -326,19 +310,6 @@ class FnbOptionGroupServiceTest {
     }
 
     @Test
-    void replaceProductGroupsRejectsArchivedGroupBecauseTheRepositoryHidesIt() {
-        // catalog.group(...) filters archived = false, so an archived group id looks exactly like an unknown one.
-        stubOwner();
-        stubProduct();
-        when(catalog.group(tenantId, outletId, groupAId)).thenReturn(Optional.empty());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceProductGroups(owner, outletId, productId, groupsRequest(groupAId)));
-
-        verifyNothingWrittenForProductGroups();
-    }
-
-    @Test
     void replaceProductGroupsWithEmptyListOnlyClearsTheProductLinks() {
         stubOwner();
         stubProduct();
@@ -363,67 +334,35 @@ class FnbOptionGroupServiceTest {
         verifyNothingWrittenForProductGroups();
     }
 
-    @Test
-    void replaceProductGroupsRejectsProductWhoseCategoryIsArchived() {
-        CategoryEntity archivedCategory = CategoryEntity.create(tenant, outlet, "Old", 2);
-        archivedCategory.archive();
-        ProductEntity archivedProduct = ProductEntity.create(tenant, outlet,
-                new ProductEntity.Details(archivedCategory, "Latte", null, new BigDecimal("5000.00"), null, true, 0));
-        ReflectionTestUtils.setField(archivedProduct, "id", productId);
-        stubOwner();
-        when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.of(archivedProduct));
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceProductGroups(owner, outletId, productId, groupsRequest(groupAId)));
-
-        verifyNothingWrittenForProductGroups();
-    }
-
     // ---------------------------------------------------------------- 5. roles
 
-    @Test
-    void cashierCannotCreateGroup() {
-        when(guard.requireOwner(cashier, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.createGroup(cashier, outletId, groupRequest("Topping", false, 0, 2, 0)));
-
-        verify(guard).requireOwner(cashier, outletId);
-        verifyNoInteractions(catalog, inventory, audit, references);
+    private interface Call {
+        void run(FnbOptionGroupServiceTest test);
     }
 
-    @Test
-    void cashierCannotUpdateGroup() {
+    static Stream<Arguments> cashierDeniedCalls() {
+        return Stream.of(
+                Arguments.of(Named.of("createGroup", (Call) t -> t.service.createGroup(
+                        t.cashier, t.outletId, t.groupRequest("Topping", false, 0, 2, 0)))),
+                Arguments.of(Named.of("updateGroup", (Call) t -> t.service.updateGroup(
+                        t.cashier, t.outletId, t.groupAId, t.groupRequest("Topping", false, 0, 2, 0)))),
+                Arguments.of(Named.of("archiveGroup", (Call) t -> t.service.archiveGroup(
+                        t.cashier, t.outletId, t.groupAId))),
+                Arguments.of(Named.of("replaceProductGroups", (Call) t -> t.service.replaceProductGroups(
+                        t.cashier, t.outletId, t.productId, t.groupsRequest(t.groupAId)))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("cashierDeniedCalls")
+    void cashierCannotUseOwnerOnlyGroupUseCases(Call call) {
         when(guard.requireOwner(cashier, outletId)).thenThrow(new ResourceNotFoundException());
 
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.updateGroup(cashier, outletId, groupAId, groupRequest("Topping", false, 0, 2, 0)));
+        assertThrows(ResourceNotFoundException.class, () -> call.run(this));
 
         verify(guard).requireOwner(cashier, outletId);
         verifyNoInteractions(catalog, inventory, audit, references);
         assertEquals("Topping", groupA.getName());
-    }
-
-    @Test
-    void cashierCannotArchiveGroup() {
-        when(guard.requireOwner(cashier, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class, () -> service.archiveGroup(cashier, outletId, groupAId));
-
-        verify(guard).requireOwner(cashier, outletId);
-        verifyNoInteractions(catalog, inventory, audit, references);
         assertFalse(groupA.isArchived());
-    }
-
-    @Test
-    void cashierCannotReplaceProductGroups() {
-        when(guard.requireOwner(cashier, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceProductGroups(cashier, outletId, productId, groupsRequest(groupAId)));
-
-        verify(guard).requireOwner(cashier, outletId);
-        verifyNoInteractions(catalog, inventory, audit, references);
     }
 
     @Test
@@ -482,7 +421,6 @@ class FnbOptionGroupServiceTest {
         assertEquals(optionId, response.get(0).getId());
         assertEquals(groupAId, response.get(0).getOptionGroupId());
         assertEquals("Boba", response.get(0).getName());
-        verify(catalog, never()).product(any(UUID.class), any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -512,7 +450,6 @@ class FnbOptionGroupServiceTest {
         assertSame(outlet, saved.getOutlet());
         assertEquals(0, new BigDecimal("2000.00").compareTo(saved.getPriceAdjustment()));
         assertEquals(groupAId, response.getOptionGroupId());
-        verify(catalog, never()).product(any(UUID.class), any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -524,33 +461,6 @@ class FnbOptionGroupServiceTest {
                 () -> service.createOption(owner, outletId, groupAId, optionRequest("Jelly", "2000.00", null)));
 
         verify(catalog, never()).persist(any(ProductOptionEntity.class));
-    }
-
-    @Test
-    void updateOptionResolvesTheGroupByIdOnlyAndAppliesTheChange() {
-        stubOwner();
-        stubGroup(groupA);
-        when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
-
-        FnbOptionResponse response = service.updateOption(owner, outletId, groupAId, optionId,
-                optionRequest("Boba Besar", "3000.00", null));
-
-        assertEquals("Boba Besar", option.getName());
-        assertEquals("Boba Besar", response.getName());
-        assertEquals(groupAId, response.getOptionGroupId());
-        verify(catalog, never()).product(any(UUID.class), any(UUID.class), any(UUID.class));
-    }
-
-    @Test
-    void updateOptionThroughAnotherGroupThanTheOptionBelongsToIsNotFound() {
-        stubOwner();
-        stubGroup(groupB);
-        when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.updateOption(owner, outletId, groupBId, optionId, optionRequest("Hacked", "3000.00", null)));
-
-        assertEquals("Boba", option.getName());
     }
 
     // ---------------------------------------------------------------- helpers

@@ -62,6 +62,10 @@ public class StaffUserEntity extends MutableBaseEntity {
         return StatusConstants.DISABLED.equals(status);
     }
 
+    public void changePasswordHash(String newPasswordHash) {
+        passwordHash = newPasswordHash;
+    }
+
     public void completeBusinessProfile() {
         if (!isPendingProfile()) {
             throw new IllegalStateException("Business profile must be pending before it can be completed.");

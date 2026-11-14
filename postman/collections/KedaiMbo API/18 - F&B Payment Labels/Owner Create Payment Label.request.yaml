@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/payment-labels"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Transfer BCA",
+      "displayOrder": 4
+    }
+scripts:
+  - type: http:afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+       const r = pm.response.json();
+       if (r.success && r.data && r.data.id) pm.collectionVariables.set("labelId", r.data.id);
+      }
+    language: text/javascript
+description: |-
+  Hanya OWNER. name wajib (maks 40), displayOrder opsional (0-9999). Label baru selalu aktif. Nama kembar (tanpa membedakan huruf besar/kecil) = 409 "Label sudah ada."; maksimal 20 label per outlet (409).
+order: 2000

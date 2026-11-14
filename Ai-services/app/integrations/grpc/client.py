@@ -5,6 +5,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import Any
 
 import grpc
@@ -40,6 +41,21 @@ def _clamp_catalog_limit(limit: int) -> int:
     if value <= 0:
         return DEFAULT_CATALOG_LIMIT
     return min(value, MAX_CATALOG_LIMIT)
+
+
+def _message_to_dict(message: Any) -> dict[str, Any]:
+    """Protobuf message -> plain dict (int64 stay ints, money strings stay strings)."""
+    result: dict[str, Any] = {}
+    for field in message.DESCRIPTOR.fields:
+        value = getattr(message, field.name)
+        repeated = field.label == field.LABEL_REPEATED  # protobuf<6 pinned; is_repeated needs 6.x
+        if field.message_type is None:
+            result[field.name] = list(value) if repeated else value
+        elif repeated:
+            result[field.name] = [_message_to_dict(item) for item in value]
+        else:
+            result[field.name] = _message_to_dict(value)
+    return result
 
 
 class CashierGrpcClient:
@@ -150,6 +166,7 @@ class CashierGrpcClient:
         self,
         *,
         tenant_id: str,
+        user_id: str,
         query: str = "",
         limit: int = DEFAULT_CATALOG_LIMIT,
     ) -> list[dict[str, Any]]:
@@ -162,6 +179,7 @@ class CashierGrpcClient:
                 return []
             request = cashier_service_pb2.GetCatalogItemRequest(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 query=query,
                 limit=_clamp_catalog_limit(limit),
             )
@@ -176,7 +194,7 @@ class CashierGrpcClient:
                 {
                     "id": item.id,
                     "name": item.name,
-                    "price": item.price,
+                    "price": Decimal(item.price_amount),
                     "is_available": item.is_available,
                     "category": item.category,
                 }
@@ -201,6 +219,7 @@ class CashierGrpcClient:
         self,
         *,
         tenant_id: str,
+        user_id: str,
         order_number: str,
     ) -> dict[str, Any] | None:
         """Fetch status of an order for tenant via gRPC."""
@@ -212,6 +231,7 @@ class CashierGrpcClient:
                 return None
             request = cashier_service_pb2.GetOrderStatusRequest(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 order_number=order_number,
             )
             with self._rpc_span("GetOrderStatus") as span:
@@ -227,7 +247,7 @@ class CashierGrpcClient:
                 "order_number": response.order_number,
                 "status": response.status,
                 "payment_status": response.payment_status,
-                "total_amount": response.total_amount,
+                "total_amount": Decimal(response.total),
                 "created_at": response.created_at,
             }
         except grpc.aio.AioRpcError as err:
@@ -246,6 +266,66 @@ class CashierGrpcClient:
                 },
             )
             return None
+
+    async def _call_insight(self, rpc_name: str, request: Any) -> dict[str, Any] | None:
+        """Run one read-only owner insight RPC; plain dict on success, None on any error."""
+        if not self._has_service_key(rpc_name):
+            return None
+        try:
+            await self.get_channel()
+            if self._stub is None:
+                return None
+            with self._rpc_span(rpc_name):
+                response = await getattr(self._stub, rpc_name)(
+                    request,
+                    timeout=self._settings.timeout_seconds,
+                    metadata=self._call_metadata(),
+                )
+            return _message_to_dict(response)
+        except grpc.aio.AioRpcError as err:
+            self._log_rpc_error(rpc_name, err)  # PERMISSION_DENIED (non-owner) lands here too
+            return None
+        except Exception as err:
+            logger.warning(
+                "Unexpected error during gRPC %s: %s",
+                rpc_name,
+                type(err).__name__,
+                extra={
+                    "event": "grpc_call_unexpected_error",
+                    "rpc": rpc_name,
+                    "error_type": type(err).__name__,
+                },
+            )
+            return None
+
+    async def get_sales_summary(
+        self, *, tenant_id: str, user_id: str, start_date: str, end_date: str
+    ) -> dict[str, Any] | None:
+        """Owner-only sales summary per outlet for an inclusive ISO date range."""
+        return await self._call_insight(
+            "GetSalesSummary",
+            cashier_service_pb2.GetSalesSummaryRequest(
+                tenant_id=tenant_id, user_id=user_id, start_date=start_date, end_date=end_date
+            ),
+        )
+
+    async def get_restock_suggestions(
+        self, *, tenant_id: str, user_id: str
+    ) -> dict[str, Any] | None:
+        """Owner-only restock suggestions per outlet."""
+        return await self._call_insight(
+            "GetRestockSuggestions",
+            cashier_service_pb2.GetRestockSuggestionsRequest(tenant_id=tenant_id, user_id=user_id),
+        )
+
+    async def get_anomalies(
+        self, *, tenant_id: str, user_id: str, date: str
+    ) -> dict[str, Any] | None:
+        """Owner-only cashier anomalies per outlet for one ISO date."""
+        return await self._call_insight(
+            "GetAnomalies",
+            cashier_service_pb2.GetAnomaliesRequest(tenant_id=tenant_id, user_id=user_id, date=date),
+        )
 
     async def __aenter__(self) -> "CashierGrpcClient":
         await self.get_channel()

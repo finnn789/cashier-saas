@@ -1,0 +1,20 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/payments"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "method": "MANUAL_NON_CASH",
+      "amountTendered": 50000.00,
+      "labelId": "{{labelId}}",
+      "idempotencyKey": "{{paymentKey}}"
+    }
+description: |-
+  Pembayaran non-tunai (QRIS/Transfer/Debit hanya dicatat, tidak ada penyedia pembayaran). amountTendered harus sama persis dengan total pesanan dan labelId wajib berupa label aktif outlet (ambil dari Cashier List Payment Labels); selain itu 400 "Pilih label pembayaran non-tunai.". Nama label disimpan sebagai snapshot pada pembayaran.
+order: 2000

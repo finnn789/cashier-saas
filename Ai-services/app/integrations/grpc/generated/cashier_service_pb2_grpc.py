@@ -47,6 +47,21 @@ class CashierServiceStub(object):
                 request_serializer=cashier__service__pb2.GetOrderStatusRequest.SerializeToString,
                 response_deserializer=cashier__service__pb2.GetOrderStatusResponse.FromString,
                 _registered_method=True)
+        self.GetSalesSummary = channel.unary_unary(
+                '/cashier.v1.CashierService/GetSalesSummary',
+                request_serializer=cashier__service__pb2.GetSalesSummaryRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.GetSalesSummaryResponse.FromString,
+                _registered_method=True)
+        self.GetRestockSuggestions = channel.unary_unary(
+                '/cashier.v1.CashierService/GetRestockSuggestions',
+                request_serializer=cashier__service__pb2.GetRestockSuggestionsRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.GetRestockSuggestionsResponse.FromString,
+                _registered_method=True)
+        self.GetAnomalies = channel.unary_unary(
+                '/cashier.v1.CashierService/GetAnomalies',
+                request_serializer=cashier__service__pb2.GetAnomaliesRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.GetAnomaliesResponse.FromString,
+                _registered_method=True)
 
 
 class CashierServiceServicer(object):
@@ -64,6 +79,24 @@ class CashierServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSalesSummary(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRestockSuggestions(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAnomalies(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_CashierServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -76,6 +109,21 @@ def add_CashierServiceServicer_to_server(servicer, server):
                     servicer.GetOrderStatus,
                     request_deserializer=cashier__service__pb2.GetOrderStatusRequest.FromString,
                     response_serializer=cashier__service__pb2.GetOrderStatusResponse.SerializeToString,
+            ),
+            'GetSalesSummary': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSalesSummary,
+                    request_deserializer=cashier__service__pb2.GetSalesSummaryRequest.FromString,
+                    response_serializer=cashier__service__pb2.GetSalesSummaryResponse.SerializeToString,
+            ),
+            'GetRestockSuggestions': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRestockSuggestions,
+                    request_deserializer=cashier__service__pb2.GetRestockSuggestionsRequest.FromString,
+                    response_serializer=cashier__service__pb2.GetRestockSuggestionsResponse.SerializeToString,
+            ),
+            'GetAnomalies': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAnomalies,
+                    request_deserializer=cashier__service__pb2.GetAnomaliesRequest.FromString,
+                    response_serializer=cashier__service__pb2.GetAnomaliesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -132,6 +180,87 @@ class CashierService(object):
             '/cashier.v1.CashierService/GetOrderStatus',
             cashier__service__pb2.GetOrderStatusRequest.SerializeToString,
             cashier__service__pb2.GetOrderStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSalesSummary(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/GetSalesSummary',
+            cashier__service__pb2.GetSalesSummaryRequest.SerializeToString,
+            cashier__service__pb2.GetSalesSummaryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetRestockSuggestions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/GetRestockSuggestions',
+            cashier__service__pb2.GetRestockSuggestionsRequest.SerializeToString,
+            cashier__service__pb2.GetRestockSuggestionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAnomalies(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/GetAnomalies',
+            cashier__service__pb2.GetAnomaliesRequest.SerializeToString,
+            cashier__service__pb2.GetAnomaliesResponse.FromString,
             options,
             channel_credentials,
             insecure,

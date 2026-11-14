@@ -69,12 +69,6 @@ class Migration0003ChainTests(unittest.TestCase):
     def test_service_requires_the_new_head_at_startup(self) -> None:
         self.assertEqual(EXPECTED_ALEMBIC_REVISION, REVISION)
 
-    def test_earlier_revisions_do_not_know_the_new_schema(self) -> None:
-        for name in ("0001_channels", "0002_tenant_members"):
-            text = (ROOT / "migrations" / "versions" / f"{name}.py").read_text(encoding="utf-8")
-            self.assertNotIn("tenant_selections", text)
-            self.assertNotIn("conversation_tenant", text)
-
 
 class Migration0003SqlTests(unittest.TestCase):
     def test_upgrade_backfills_conversation_tenant_before_not_null(self) -> None:

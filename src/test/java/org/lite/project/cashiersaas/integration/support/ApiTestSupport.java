@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
@@ -107,12 +108,72 @@ public final class ApiTestSupport {
                         + "\"price\":" + price + ",\"available\":true,\"displayOrder\":1}"), 200, 201), "$.data.id");
     }
 
-    /** Creates a table and returns {tableId, qrToken}. */
-    public String[] createTable(MerchantFixture merchant, String name) throws Exception {
-        MvcResult result = send(post("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/tables")
-                .header(HttpHeaders.AUTHORIZATION, merchant.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"" + name + "\",\"active\":true}"), 200, 201);
-        return new String[] {read(result, "$.data.id"), read(result, "$.data.qrToken")};
+    /** Opens the caller's cash shift (payments require one); fails unless it is opened. */
+    public MvcResult openShift(MerchantFixture actor, String openingCash) throws Exception {
+        return send(post("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/shifts")
+                .header(HttpHeaders.AUTHORIZATION, actor.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"openingCash\":" + openingCash + "}"), 201);
+    }
+
+    /** Opens a zero-cash shift for the caller unless one is already open. */
+    public void ensureShift(MerchantFixture actor) throws Exception {
+        MvcResult current = call(get("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/shifts/current")
+                .header(HttpHeaders.AUTHORIZATION, actor.bearer()));
+        if (current.getResponse().getStatus() == 404) {
+            openShift(actor, "0.00");
+        }
+    }
+
+    /** First active payment label of the actor's outlet (onboarding seeds QRIS, Transfer, Debit). */
+    public String firstActiveLabelId(MerchantFixture actor) throws Exception {
+        return read(send(get("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/payment-labels")
+                .header(HttpHeaders.AUTHORIZATION, actor.bearer()), 200), "$.data[0].id");
+    }
+
+    /** Creates an OPEN POS order (DINE_IN, customer "Budi") for {@code quantity} of the product; returns its id. */
+    public String createPosOrder(MerchantFixture actor, String productId, int quantity) throws Exception {
+        return read(send(post("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/orders")
+                .header(HttpHeaders.AUTHORIZATION, actor.bearer()).header("Idempotency-Key", "pos-" + UUID.randomUUID())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"serviceType\":\"DINE_IN\",\"customerLabel\":\"Budi\",\"items\":[{\"productId\":\""
+                        + productId + "\",\"quantity\":" + quantity + ",\"optionIds\":[]}]}"), 201), "$.data.orderId");
+    }
+
+    public String orderTotal(MerchantFixture actor, String orderId) throws Exception {
+        return read(send(get("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/orders/" + orderId)
+                .header(HttpHeaders.AUTHORIZATION, actor.bearer()), 200), "$.data.total");
+    }
+
+    /** Payment request without asserting the status; {@code labelId} and {@code idempotencyKey} may be null (random key). */
+    public MvcResult pay(MerchantFixture actor, String orderId, String method, String amount, String labelId,
+                         String idempotencyKey) throws Exception {
+        return call(post("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/orders/" + orderId + "/payments")
+                .header(HttpHeaders.AUTHORIZATION, actor.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"method\":\"" + method + "\",\"amountTendered\":" + amount + ",\"idempotencyKey\":\""
+                        + (idempotencyKey == null ? "pay-" + UUID.randomUUID() : idempotencyKey) + "\""
+                        + (labelId == null ? "" : ",\"labelId\":\"" + labelId + "\"") + "}"));
+    }
+
+    /** Pays the order in cash with the exact total (the caller must have an open shift); must succeed. */
+    public MvcResult payCashExact(MerchantFixture actor, String orderId) throws Exception {
+        MvcResult paid = pay(actor, orderId, "CASH", orderTotal(actor, orderId), null, null);
+        assertSuccessStatus(paid);
+        return paid;
+    }
+
+    /** Pays the order non-cash with the given label and the exact total; must succeed. */
+    public MvcResult payNonCash(MerchantFixture actor, String orderId, String labelId) throws Exception {
+        MvcResult paid = pay(actor, orderId, "MANUAL_NON_CASH", orderTotal(actor, orderId), labelId, null);
+        assertSuccessStatus(paid);
+        return paid;
+    }
+
+    private static void assertSuccessStatus(MvcResult result) throws Exception {
+        int status = result.getResponse().getStatus();
+        if (status != 200 && status != 201) {
+            throw new AssertionError("Expected a successful payment but was " + status + ": "
+                    + result.getResponse().getContentAsString());
+        }
     }
 
     /** Performs the request and fails with the response body unless the status is one of the expected ones. */

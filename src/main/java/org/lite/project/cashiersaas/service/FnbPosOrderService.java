@@ -6,18 +6,21 @@ import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.FnbStaffOrderMapper;
 import org.lite.project.cashiersaas.dto.request.FnbPosOrderRequest;
 import org.lite.project.cashiersaas.dto.response.FnbStaffOrderResponse;
-import org.lite.project.cashiersaas.entity.fnb.DiningTableEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.ServiceType;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
+import org.lite.project.cashiersaas.repository.FnbDiscountRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
-import org.lite.project.cashiersaas.repository.FnbTableRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,10 +36,10 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class FnbPosOrderService {
     private final MerchantAccessGuard guard;
-    private final FnbTableRepository tables;
     private final FnbOrderRepository orders;
     private final FnbOrderPricingService pricing;
-    private final FnbRealtimePublisher realtime;
+    private final FnbDiscountRepository discounts;
+    private final AuditLogRepository audit;
 
     @Transactional
     public FnbStaffOrderResponse checkout(TenantPrincipal principal, UUID outletId, String key,
@@ -48,40 +51,69 @@ public class FnbPosOrderService {
         context = guard.requireOutlet(principal, outletId);
         if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
             throw new ResourceNotFoundException();
-        DiningTableEntity table = selectedTable(context, request);
+        requireServiceType(request);
         SalesOrderEntity existing = orders.byIdempotency(context.getTenant().getId(), idempotencyKey).orElse(null);
         if (existing != null) return replay(existing, outletId, fingerprint);
         FnbOrderPricingService.PricedOrder priced = pricing.price(context.getTenant().getId(), outletId,
-                request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
-                        item.getQuantity(), item.getNote(), item.getOptionIds())).toList(),
-                context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
+                lineInputs(request), context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
         String number = "POS-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase();
         SalesOrderEntity order = SalesOrderEntity.pos(context.getTenant(), context.getOutlet(),
-                new SalesOrderEntity.PosDetails(table, idempotencyKey, fingerprint, number,
-                        request.getServiceType(), request.getCustomerLabel().trim()),
+                new SalesOrderEntity.PosDetails(idempotencyKey, fingerprint, number,
+                        request.getServiceType(), blankToNull(request.getCustomerLabel()),
+                        blankToNull(request.getOrderNote())),
                 new SalesOrderEntity.Charges(priced.subtotal(), priced.taxAmount(), priced.serviceChargeAmount()));
         order.snapshotRates(context.getTenant().getTaxRate(), context.getTenant().getServiceChargeRate());
         orders.persist(order);
         persistLines(context, order, priced.lines());
-        if (table != null) table.markAwaitingPayment();
         orders.flush();
-        realtime.orderChanged("ORDER_CREATED", order);
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
+                AuditLogEntity.Action.FNB_ORDER_CREATED, order.getId(), null,
+                "orderNumber=" + number + " total=" + order.getTotal().toPlainString()));
         return response(order);
     }
 
-    private DiningTableEntity selectedTable(MerchantAccessContext context, FnbPosOrderRequest request) {
+    // Hold bill: replaces every line of an OPEN, unpaid POS order and reprices with the order's own rate snapshot.
+    @Transactional
+    public FnbStaffOrderResponse replaceItems(TenantPrincipal principal, UUID outletId, UUID orderId,
+                                              FnbPosOrderRequest request) {
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        UUID tenantId = context.getTenant().getId();
+        orders.lockTenant(tenantId);
+        context = guard.requireOutlet(principal, outletId);
+        if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
+            throw new ResourceNotFoundException();
+        SalesOrderEntity order = orders.byId(tenantId, outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+        orders.refreshOrder(order);
+        if (order.getSource() != OrderSource.POS) throw new OperationConflictException("Hanya pesanan POS yang dapat diubah.");
+        if (order.getStatus() != OrderStatus.OPEN || order.getPaymentStatus() != PaymentStatus.UNPAID)
+            throw new OperationConflictException("Pesanan hanya dapat diubah selama masih terbuka dan belum dibayar.");
+        if (discounts.byOrder(tenantId, outletId, orderId).isPresent())
+            throw new OperationConflictException("Pesanan sudah memiliki diskon; item tidak dapat diubah.");
+        requireServiceType(request);
+        FnbOrderPricingService.PricedOrder priced = pricing.price(tenantId, outletId, lineInputs(request),
+                order.getTaxRateSnapshot(), order.getServiceChargeRateSnapshot());
+        String previousSubtotal = order.getSubtotal().toPlainString();
+        orders.deleteLines(tenantId, outletId, order);
+        order.replaceLines(request.getServiceType(), blankToNull(request.getCustomerLabel()),
+                blankToNull(request.getOrderNote()),
+                new SalesOrderEntity.Charges(priced.subtotal(), priced.taxAmount(), priced.serviceChargeAmount()));
+        persistLines(context, order, priced.lines());
+        orders.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
+                AuditLogEntity.Action.FNB_ORDER_ITEMS_REPLACED, order.getId(), null,
+                "subtotal=" + previousSubtotal + "->" + priced.subtotal().toPlainString()));
+        return response(order);
+    }
+
+    private List<FnbOrderPricingService.LineInput> lineInputs(FnbPosOrderRequest request) {
+        return request.getItems().stream().map(item -> new FnbOrderPricingService.LineInput(item.getProductId(),
+                item.getQuantity(), item.getNote(), item.getOptionIds())).toList();
+    }
+
+    private void requireServiceType(FnbPosOrderRequest request) {
         if (request.getServiceType() == null) throw new InvalidOperationException("Tipe layanan wajib diisi.");
-        if (request.getServiceType() == ServiceType.TAKEAWAY) {
-            if (request.getTableId() != null) throw new InvalidOperationException("Takeaway tidak dapat memakai meja.");
-            return null;
-        }
-        if (request.getServiceType() != ServiceType.DINE_IN)
+        if (request.getServiceType() != ServiceType.DINE_IN && request.getServiceType() != ServiceType.TAKEAWAY)
             throw new InvalidOperationException("Tipe layanan tidak valid.");
-        if (request.getTableId() == null) return null;
-        DiningTableEntity table = tables.find(context.getTenant().getId(), context.getOutlet().getId(), request.getTableId())
-                .orElseThrow(ResourceNotFoundException::new);
-        if (!table.isActive()) throw new InvalidOperationException("Meja tidak tersedia.");
-        return table;
     }
 
     private FnbStaffOrderResponse replay(SalesOrderEntity existing, UUID outletId, String fingerprint) {
@@ -110,7 +142,11 @@ public class FnbPosOrderService {
         return FnbStaffOrderMapper.order(order, items, options);
     }
 
-    private String validatedKey(String key) {
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    static String validatedKey(String key) {
         if (key == null || !key.matches("[A-Za-z0-9_-]{16,128}"))
             throw new InvalidOperationException("Idempotency-Key wajib 16-128 karakter alfanumerik, '_' atau '-'.");
         return key;
@@ -119,8 +155,8 @@ public class FnbPosOrderService {
     private String fingerprint(FnbPosOrderRequest request) {
         StringBuilder canonical = new StringBuilder();
         append(canonical, request.getServiceType() == null ? null : request.getServiceType().name());
-        append(canonical, request.getTableId() == null ? null : request.getTableId().toString());
-        append(canonical, request.getCustomerLabel() == null ? null : request.getCustomerLabel().trim());
+        append(canonical, blankToNull(request.getCustomerLabel()));
+        append(canonical, blankToNull(request.getOrderNote()));
         if (request.getItems() == null) throw new InvalidOperationException("Pesanan harus memiliki item.");
         for (FnbPosOrderRequest.Item item : request.getItems()) {
             append(canonical, item.getProductId() == null ? null : item.getProductId().toString());

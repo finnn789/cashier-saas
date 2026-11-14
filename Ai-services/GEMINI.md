@@ -9,7 +9,7 @@ Layanan ini merupakan subsistem AI Customer Service untuk ekosistem **Cashier Sa
 - **Bot Engine**: `aiogram` 3.x (single-process long polling, supervised task, graceful child teardown).
 - **LLM Provider**: `OpenRouterClient` (`aiohttp`, fallback/retry konservatif, UTF-16 chunked delivery).
 - **Persistence**: SQLAlchemy 2.0 (async), `asyncpg`, migrasi via Alembic.
-- **Tool Calling System**: `app/tools` (`BaseTool`, `ToolRegistry`, `CpuUsageTool`, `CatalogSearchTool`), diintegrasikan otomatis pada `ChatService` & bot Telegram.
+- **Tool Calling System**: `app/tools` (`BaseTool`, `ToolRegistry`, `CatalogSearchTool`, `OrderStatusTool`), diintegrasikan otomatis pada `ChatService` & bot Telegram.
 - **Safety / Lock**: PostgreSQL session-level advisory lock (`BOT_OWNERSHIP_KEY`) untuk menjamin kepemilikan tunggal bot.
 
 ## 3. Database Schema (Minimal Multichannel)

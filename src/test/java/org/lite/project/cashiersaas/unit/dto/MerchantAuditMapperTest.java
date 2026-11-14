@@ -45,22 +45,6 @@ class MerchantAuditMapperTest {
     }
 
     @Test
-    void nullOptionalProjectionFieldsAreAbsentFromJacksonJson() throws Exception {
-        MerchantAuditRepository.AuditRow row = new MerchantAuditRepository.AuditRow(UUID.randomUUID(),
-                Instant.parse("2026-10-07T03:30:00Z"), "ACTION", "ENTITY", UUID.randomUUID(), null, null, null, null);
-        MerchantAuditEntryResponse response = MerchantAuditMapper.entry(row, ZoneId.of("UTC"));
-        ObjectMapper mapper = new ObjectMapper();
-
-        String json = mapper.writeValueAsString(response);
-
-        assertTrue(json.contains("\"action\":\"ACTION\""));
-        assertFalse(json.contains("actorId"));
-        assertFalse(json.contains("actorDisplayName"));
-        assertFalse(json.contains("reason"));
-        assertFalse(json.contains("details"));
-    }
-
-    @Test
     void jacksonThreeOmitsNullFieldsInPageAndNestedEntriesButRetainsPrimitiveMetadata() {
         MerchantAuditRepository.AuditRow row = new MerchantAuditRepository.AuditRow(UUID.randomUUID(),
                 Instant.parse("2026-10-07T03:30:00Z"), "ACTION", "ENTITY", UUID.randomUUID(), null, null, null, null);

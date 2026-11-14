@@ -41,4 +41,18 @@ public class TenantMembershipEntity extends MutableBaseEntity {
         membership.active = true;
         return membership;
     }
+
+    /** @return true when the state changed; deactivating an inactive membership is a no-op. */
+    public boolean deactivate() {
+        boolean changed = active;
+        active = false;
+        return changed;
+    }
+
+    /** @return true when the state changed; reactivating an active membership is a no-op. */
+    public boolean reactivate() {
+        boolean changed = !active;
+        active = true;
+        return changed;
+    }
 }

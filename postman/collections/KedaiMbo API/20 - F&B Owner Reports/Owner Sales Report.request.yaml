@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/reports/sales?startDate=2026-11-01&endDate=2026-11-14&topProducts=10&page=0&size=20"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: http:afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data.summary).to.have.property("grossProfit");
+    language: text/javascript
+description: |-
+  Hanya OWNER. Filter: startDate, endDate (YYYY-MM-DD, zona waktu outlet, maks 366 hari), orderStatus, paymentMethod, page, size (maks 100), topProducts (maks 50). Hanya transaksi lunas dan tidak dibatalkan; refund penuh keluar dari laporan.
+  Tambahan M6: summary.costOfGoodsSold (HPP, jumlah cost_amount item), summary.grossProfit (= netSales - HPP), summary.itemsWithoutCost (item tanpa HPP, mis. bahan tanpa harga beli atau pesanan sebelum V9), summary.refundCount dan summary.refundAmount (refund dengan refundedAt di rentang, tanpa filter status/metode). topProducts[] menambah costOfGoodsSold, grossProfit (= grossSales - HPP, sebelum diskon pesanan) dan itemsWithoutCost. hourly[] {hour 0-23, transactionCount, netSales} jam yang ada data saja; cashiers[] {staffUserId, fullName, transactionCount, netSales, amountCollected} urut netSales turun; shifts[] {shiftId, cashierName, openedAt, closedAt, status, transactionCount, netSales} urut openedAt turun (pembayaran tanpa shift = satu baris dengan field shift null). CSV (/sales/csv) tidak berubah.
+order: 1000

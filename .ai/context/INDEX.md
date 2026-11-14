@@ -31,3 +31,4 @@
 - Paused unit-test checkpoint: `reports/UNIT-20261007-orchestrator.md` — user-requested pause, memory13; TASK-033/034 reviewed, TASK-035 final corrected report/review and all execution pending. Saved source copies/hashes: `reports/artifacts/UNIT-20261007/paused-checkpoint/`, `paused-test-sha256.csv`.
 
 Previous architecture/workflow context was absent at setup time. Architecture, MVP source inventory and scoped worker implementation now have reviewed reports; runtime milestone acceptance and deployment readiness remain unverified.
+- Pivot refactor (2026-11-12): `pivot-refactor-rules.md` (rules, removal inventory, invariants) and `pivot-refactor-design.md` (target design, waves). Decisions in `.ai/DECISIONS.md` "Pivot". Packets `tasks/TASK-074.md` (Wave A, removal) and `tasks/TASK-075.md` (Wave B, status + hold edit).

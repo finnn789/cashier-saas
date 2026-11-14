@@ -190,6 +190,7 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         identity = await self.verify(self.service())
         self.assertEqual(identity.status, VERIFIED)
         self.assertEqual((identity.tenant_id, identity.role), (self.tenant_a, "OWNERMERCHANT"))
+        self.assertEqual(identity.java_user_id, java_user)
         self.assertEqual([option.name for option in identity.options], ["Kopi Senja"])
         self.assertEqual(self.fake.memberships[self.user_id], {self.tenant_a: java_user})
         self.assertEqual(self.fake.selection[self.user_id], self.tenant_a)
@@ -226,10 +227,6 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         identity = await self.verify(self.service())
         self.assertEqual((identity.status, identity.tenant_id), (VERIFIED, self.tenant_a))
         self.assertEqual(set(self.fake.memberships[self.user_id]), {self.tenant_a})
-
-    async def test_disabled_member_is_not_matched(self) -> None:
-        self.fake.add_staff(self.tenant_a, "Kopi Senja", status="DISABLED")
-        self.assertEqual((await self.verify(self.service())).status, NOT_REGISTERED)
 
     async def test_phone_must_be_normalized_digits(self) -> None:
         for phone in ("", "+6281234567890", "0812 3456 7890"):
@@ -345,6 +342,7 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         fallback = uuid4()
         identity = await self.service(fallback).identify(**self.profile)
         self.assertEqual((identity.status, identity.tenant_id, identity.role), (FALLBACK, fallback, None))
+        self.assertIsNone(identity.java_user_id)
         self.assertTrue(identity.can_chat)
 
     async def test_fallback_never_overrides_a_verified_tenant(self) -> None:

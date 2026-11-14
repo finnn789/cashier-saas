@@ -5,6 +5,7 @@ import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
 import org.springframework.stereotype.Repository;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,4 +31,12 @@ public class FnbPaymentRepository {
     }
 
     public void persist(PaymentEntity payment) { entityManager.persist(payment); }
+
+    /** Atomically advances the per-outlet daily counter; the row lock serialises concurrent payments. */
+    public int nextReceiptSequence(UUID outletId, LocalDate businessDate) {
+        return ((Number) entityManager.createNativeQuery("INSERT INTO receipt_sequences (outlet_id, business_date, last_value) "
+                        + "VALUES (:outletId, :businessDate, 1) ON CONFLICT (outlet_id, business_date) "
+                        + "DO UPDATE SET last_value = receipt_sequences.last_value + 1 RETURNING last_value")
+                .setParameter("outletId", outletId).setParameter("businessDate", businessDate).getSingleResult()).intValue();
+    }
 }

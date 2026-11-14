@@ -40,6 +40,7 @@ class ToolRegistry:
         tool_name: str,
         arguments_json: str,
         tenant_id: str,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Parse arguments and securely execute the designated tool."""
         tool = self.get_tool(tool_name)
@@ -63,7 +64,8 @@ class ToolRegistry:
             extra={"event": "tool_dispatch_started", "tool_name": tool_name},
         )
         try:
-            result = await tool.execute(tenant_id=tenant_id, **kwargs)
+            kwargs.pop("user_id", None)  # trusted context only, never model-supplied
+            result = await tool.execute(tenant_id=tenant_id, user_id=user_id, **kwargs)
             logger.info(
                 "Tool dispatch finished",
                 extra={

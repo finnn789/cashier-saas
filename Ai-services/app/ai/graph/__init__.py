@@ -12,6 +12,7 @@ from app.ai.graph.tools_adapter import (
     adapt_tool,
     adapt_tool_registry,
     adapt_tool_registry_to_dict,
+    current_java_user_id,
     current_tenant_id,
     json_schema_to_pydantic_model,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "build_chat_graph",
     "create_agent_node",
     "create_tools_node",
+    "current_java_user_id",
     "current_tenant_id",
     "json_schema_to_pydantic_model",
     "should_continue",

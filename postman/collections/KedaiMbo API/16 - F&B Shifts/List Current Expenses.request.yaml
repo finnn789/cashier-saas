@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/shifts/current/expenses"
+method: GET
+headers:
+  Accept: application/json
+description: |-
+  Pengeluaran kas kecil pada shift terbuka milik pemanggil, terlama dulu (404 bila tidak ada shift terbuka).
+order: 9000

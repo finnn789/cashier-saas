@@ -17,6 +17,7 @@ public class FnbSalesTransactionResponse {
     private String orderNumber;
     private OrderStatus orderStatus;
     private PaymentMethod paymentMethod;
+    private String methodLabel;
     private BigDecimal subtotal;
     private BigDecimal netSales;
     private BigDecimal total;

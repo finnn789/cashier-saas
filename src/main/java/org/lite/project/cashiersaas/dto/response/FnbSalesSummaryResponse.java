@@ -19,4 +19,9 @@ public class FnbSalesSummaryResponse {
     private BigDecimal taxAmount;
     private BigDecimal serviceChargeAmount;
     private long cancellationCount;
+    private BigDecimal costOfGoodsSold;
+    private BigDecimal grossProfit;
+    private long itemsWithoutCost;
+    private long refundCount;
+    private BigDecimal refundAmount;
 }

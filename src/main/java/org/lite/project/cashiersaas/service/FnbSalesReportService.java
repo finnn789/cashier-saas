@@ -8,7 +8,9 @@ import org.lite.project.cashiersaas.dto.request.FnbSalesReportFilter;
 import org.lite.project.cashiersaas.dto.response.FnbSalesCsvResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesReportResponse;
 import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentMethod;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,25 +33,41 @@ public class FnbSalesReportService {
     private static final int MAX_CSV_ROWS = 10_000;
     private final MerchantAccessGuard guard;
     private final FnbSalesReportRepository reports;
+    private final FnbRefundRepository refunds;
 
     @Transactional(readOnly = true)
     public FnbSalesReportResponse report(TenantPrincipal principal, UUID outletId, FnbSalesReportFilter filter) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
-        Query query = query(context, filter);
-        List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), query.page, query.size);
+        return assemble(principal.getTenantId(), outletId, query(context, filter), filter.getOrderStatus(), filter.getPaymentMethod());
+    }
+
+    /** Owner-side read model for an already authorised context: no status/method filter, one transaction row. */
+    @Transactional(readOnly = true)
+    public FnbSalesReportResponse summarize(MerchantAccessContext context, LocalDate startDate, LocalDate endDate, int topProducts) {
+        FnbSalesReportFilter filter = new FnbSalesReportFilter();
+        filter.setStartDate(startDate); filter.setEndDate(endDate); filter.setPage(0); filter.setSize(1); filter.setTopProducts(topProducts);
+        return assemble(context.getTenant().getId(), context.getOutlet().getId(), query(context, filter), null, null);
+    }
+
+    private FnbSalesReportResponse assemble(UUID tenantId, UUID outletId, Query query, OrderStatus status, PaymentMethod method) {
+        List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(tenantId, outletId,
+                query.start, query.end, status, method, query.page, query.size);
         boolean hasNext = rows.size() > query.size;
         if (hasNext) rows = rows.subList(0, query.size);
         FnbSalesReportResponse value = new FnbSalesReportResponse();
         value.setStartDate(query.startDate); value.setEndDate(query.endDate); value.setTimeZone(query.zone.getId());
-        value.setSummary(FnbSalesReportMapper.summary(reports.summary(principal.getTenantId(), outletId, query.start,
-                query.end, filter.getOrderStatus(), filter.getPaymentMethod()),
-                reports.cancellations(principal.getTenantId(), outletId, query.start, query.end)));
+        value.setSummary(FnbSalesReportMapper.summary(reports.summary(tenantId, outletId, query.start, query.end, status, method),
+                reports.cancellations(tenantId, outletId, query.start, query.end),
+                reports.cost(tenantId, outletId, query.start, query.end, status, method),
+                refunds.totals(tenantId, outletId, query.start, query.end)));
+        value.setHourly(FnbSalesReportMapper.hourly(reports.hourly(tenantId, outletId, query.start,
+                query.end, query.zone.getId(), status, method)));
+        value.setCashiers(FnbSalesReportMapper.cashiers(reports.cashiers(tenantId, outletId, query.start, query.end, status, method)));
+        value.setShifts(FnbSalesReportMapper.shifts(reports.shifts(tenantId, outletId, query.start, query.end, status, method)));
         value.setTransactions(rows.stream().map(row -> FnbSalesReportMapper.transaction(row, query.zone)).toList());
-        value.setTopProducts(FnbSalesReportMapper.products(reports.products(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), query.top)));
-        value.setPaymentBreakdown(FnbSalesReportMapper.methods(reports.methods(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod())));
+        value.setTopProducts(FnbSalesReportMapper.products(reports.products(tenantId, outletId,
+                query.start, query.end, status, method, query.top)));
+        value.setPaymentBreakdown(FnbSalesReportMapper.methods(reports.methods(tenantId, outletId, query.start, query.end, status, method)));
         value.setPage(query.page); value.setSize(query.size); value.setHasNext(hasNext);
         return value;
     }
@@ -61,10 +79,10 @@ public class FnbSalesReportService {
         List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(principal.getTenantId(), outletId,
                 query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), 0, MAX_CSV_ROWS);
         if (rows.size() > MAX_CSV_ROWS) throw new InvalidOperationException("Ekspor melebihi batas 10000 baris; persempit rentang tanggal.");
-        StringBuilder content = new StringBuilder("Order Number,Receipt Number,Status,Payment Method,Paid At,Net Sales,Total,Amount Collected,Discount,Tax,Service Charge\r\n");
+        StringBuilder content = new StringBuilder("Order Number,Receipt Number,Status,Payment Method,Payment Label,Paid At,Net Sales,Total,Amount Collected,Discount,Tax,Service Charge\r\n");
         for (FnbSalesReportRepository.TransactionRow row : rows) {
             content.append(csv(row.orderNumber)).append(',').append(csv(row.receipt)).append(',')
-                    .append(csv(String.valueOf(row.status))).append(',').append(csv(String.valueOf(row.method))).append(',')
+                    .append(csv(String.valueOf(row.status))).append(',').append(csv(String.valueOf(row.method))).append(',').append(csv(row.methodLabel)).append(',')
                     .append(csv(row.paidAt.atZone(query.zone).toString())).append(',')
                     .append(csv(row.subtotal.subtract(row.discount).toPlainString())).append(',')
                     .append(csv(row.total.toPlainString())).append(',')
@@ -85,7 +103,7 @@ public class FnbSalesReportService {
         LocalDate startDate = filter.getStartDate() == null ? today : filter.getStartDate();
         LocalDate endDate = filter.getEndDate() == null ? today : filter.getEndDate();
         if (endDate.isBefore(startDate) || ChronoUnit.DAYS.between(startDate, endDate) >= MAX_DAYS) throw new InvalidOperationException("Rentang tanggal laporan tidak valid.");
-        if (filter.getOrderStatus() == OrderStatus.NEW || filter.getOrderStatus() == OrderStatus.CANCELLED) throw new InvalidOperationException("Filter status tidak berlaku untuk laporan penjualan.");
+        if (filter.getOrderStatus() == OrderStatus.OPEN || filter.getOrderStatus() == OrderStatus.CANCELLED) throw new InvalidOperationException("Filter status tidak berlaku untuk laporan penjualan.");
         int page = filter.getPage() == null ? 0 : filter.getPage(), size = filter.getSize() == null ? 20 : filter.getSize(), top = filter.getTopProducts() == null ? 10 : filter.getTopProducts();
         if (page < 0 || page > MAX_PAGE || size < 1 || size > MAX_SIZE || top < 1 || top > MAX_TOP) throw new InvalidOperationException("Batas laporan tidak valid.");
         try { return new Query(startDate, endDate, zone, startDate.atStartOfDay(zone).toInstant(), endDate.plusDays(1).atStartOfDay(zone).toInstant(), page, size, top); } catch (DateTimeException exception) { throw new InvalidOperationException("Rentang tanggal laporan tidak valid."); }

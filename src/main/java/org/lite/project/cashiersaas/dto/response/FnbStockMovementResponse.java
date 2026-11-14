@@ -19,4 +19,5 @@ public class FnbStockMovementResponse {
     private UUID orderId;
     private Instant occurredAt;
     private UUID actorMembershipId;
+    private BigDecimal unitCost;
 }

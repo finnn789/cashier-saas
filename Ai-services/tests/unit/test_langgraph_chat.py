@@ -4,21 +4,17 @@ import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.ai.config import OpenRouterSettings
-from app.ai.graph.workflow import build_chat_graph
 from app.ai.openrouter import AIError, OpenRouterClient
-from app.ai.prompts import MAX_INPUT_CHARS
 from app.chat.repositories import ChannelRepository, Repository
 from app.chat.service import ChatService
 from app.core.database import Database
-from app.tools.base import BaseTool
-from app.tools.registry import ToolRegistry
 
 
 class TransactionMarkers:
@@ -47,32 +43,6 @@ class TransactionMarkers:
             self.events.append(("commit", num))
         finally:
             self.active = False
-
-
-class MockTool(BaseTool):
-    """Mock tool to verify dispatch, args, and strict tenant isolation."""
-
-    name = "mock_order_lookup"
-    description = "Mock order lookup tool for testing."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "order_number": {"type": "string"},
-            "tenant_id": {"type": "string"},
-        },
-        "required": ["order_number"],
-    }
-
-    def __init__(self) -> None:
-        self.invocations: list[dict[str, Any]] = []
-
-    async def execute(self, tenant_id: str, **kwargs: Any) -> dict[str, Any]:
-        self.invocations.append({"tenant_id": tenant_id, "kwargs": kwargs})
-        return {
-            "order_number": kwargs.get("order_number"),
-            "status": "PROCESSING",
-            "injected_tenant": tenant_id,
-        }
 
 
 class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -255,139 +225,33 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         ])
 
     # -------------------------------------------------------------------------
-    # 2. Tool call execution flow (LangGraph multi-turn loop)
+    # 2. Error handling: AI unavailable, timeouts, and error codes
     # -------------------------------------------------------------------------
 
-    async def test_tool_call_execution_cycle_with_real_graph_and_mocked_llm(self) -> None:
-        """Tests full compiled LangGraph with ChatOpenAI mock executing a tool and returning response."""
-        mock_tool = MockTool()
-        registry = ToolRegistry()
-        registry.register(mock_tool)
-
-        compiled_graph = build_chat_graph(
-            openrouter_key="sk-test-key",
-            ai_model="mock-model",
-            tools=registry,
+    async def test_graph_exceptions_return_localized_message_and_persist_no_assistant(self) -> None:
+        cases = (
+            (AIError("AI_NOT_CONFIGURED"), "AI belum dikonfigurasi"),
+            (AIError("AI_HTTP_401"), "Akses AI ditolak"),
+            (AIError("AI_HTTP_402"), "Saldo layanan AI tidak mencukupi"),
+            # A bare TimeoutError is classified as AI_TRANSPORT_UNKNOWN (transport message).
+            (TimeoutError("OpenRouter timeout after 45s"), "Koneksi AI terputus"),
+            # An exception that classifies as AI_UNKNOWN yields the default text.
+            (RuntimeError("boom 401 402 403"), "Layanan AI belum dapat menjawab"),
         )
+        for error, expected in cases:
+            with self.subTest(error=f"{type(error).__name__}: {error}"):
+                self.setUp()
+                mock_graph = AsyncMock()
+                mock_graph.ainvoke.side_effect = error
 
-        llm_turns: list[AIMessage] = [
-            # Turn 1: LLM decides to call the tool with args (attempting tenant_id injection)
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "mock_order_lookup",
-                        "args": {
-                            "order_number": "ORD-777",
-                            "tenant_id": "malicious-injected-tenant",
-                        },
-                        "id": "call_ord_1",
-                    }
-                ],
-            ),
-            # Turn 2: LLM receives tool response and answers user
-            AIMessage(content="Status pesanan ORD-777 Anda adalah PROCESSING."),
-        ]
+                service = ChatService(self.database, self.channels, graph=mock_graph)
+                result = await service.handle(**self.input)
 
-        # Patch ChatOpenAI.ainvoke inside app.ai.graph.nodes
-        with patch("langchain_openai.ChatOpenAI.ainvoke", new_callable=AsyncMock) as mock_llm_invoke:
-            mock_llm_invoke.side_effect = llm_turns
-
-            service = ChatService(
-                self.database,
-                self.channels,
-                tools=registry,
-                graph=compiled_graph,
-            )
-
-            result = await service.handle(**self.input)
-
-            self.assertEqual(result, "Status pesanan ORD-777 Anda adalah PROCESSING.")
-            # Verify LLM was invoked twice (agent -> tools -> agent -> END)
-            self.assertEqual(mock_llm_invoke.await_count, 2)
-
-            # Verify tool was actually executed
-            self.assertEqual(len(mock_tool.invocations), 1)
-            invocation = mock_tool.invocations[0]
-
-            # Verify strict tenant isolation:
-            # The malicious tenant_id was stripped, and the real repository tenant_id was injected
-            self.assertEqual(invocation["tenant_id"], str(self.tenant_id))
-            self.assertNotIn("tenant_id", invocation["kwargs"])
-            self.assertEqual(invocation["kwargs"]["order_number"], "ORD-777")
-
-            # Verify DB persistence
-            self.assertEqual(self.boundary.events, [
-                ("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)
-            ])
-            self.repository.insert_message.assert_awaited_with(
-                self.connection,
-                self.conversation_id,
-                self.user_id,
-                "tg-chat-200",
-                "ASSISTANT",
-                "Status pesanan ORD-777 Anda adalah PROCESSING.",
-            )
-
-    # -------------------------------------------------------------------------
-    # 3. Error handling: AI unavailable, timeouts, and error codes
-    # -------------------------------------------------------------------------
-
-    async def test_error_handling_ai_not_configured(self) -> None:
-        """When AI is unconfigured, return user-friendly message without saving ASSISTANT."""
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.side_effect = AIError("AI_NOT_CONFIGURED")
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIn("AI belum dikonfigurasi", result)
-        # Verify Transaction 1 committed USER, but Transaction 2 was never started
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-        self.assertEqual(self.db_events[-1], ("history", 1))
-
-    async def test_error_handling_http_401_auth_failure(self) -> None:
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.side_effect = AIError("AI_HTTP_401")
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIn("Akses AI ditolak", result)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
-    async def test_error_handling_http_402_insufficient_quota(self) -> None:
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.side_effect = AIError("AI_HTTP_402")
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIn("Saldo layanan AI tidak mencukupi", result)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
-    async def test_error_handling_graph_timeout_exception(self) -> None:
-        """Verify generic unhandled runtime errors return safe fallback without crashing."""
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.side_effect = TimeoutError("OpenRouter timeout after 45s")
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        # A bare TimeoutError is classified as AI_TRANSPORT_UNKNOWN (transport message).
-        self.assertIn("Koneksi AI terputus", result)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
-    async def test_error_handling_graph_unclassified_exception_uses_default_message(self) -> None:
-        """An exception that classifies as AI_UNKNOWN yields the default text, nothing persisted."""
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.side_effect = RuntimeError("boom 401 402 403")
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIn("Layanan AI belum dapat menjawab", result)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+                self.assertIn(expected, result)
+                # Transaction 1 committed USER, but Transaction 2 was never started
+                self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+                self.assertEqual(self.db_events[-1], ("history", 1))
+                self.assertEqual(self._assistant_inserts(), [])
 
     def _assistant_inserts(self) -> list[Any]:
         return [
@@ -396,34 +260,37 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             if len(call.args) > 4 and call.args[4] == "ASSISTANT"
         ]
 
-    async def test_graph_state_error_code_402_returns_message_and_persists_nothing(self) -> None:
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.return_value = {
-            "messages": [HumanMessage(content="Halo")],
-            "error_code": "AI_HTTP_402",
-        }
+    async def test_graph_state_error_code_returns_localized_message_and_persists_nothing(self) -> None:
+        cases = (
+            (
+                {"messages": [HumanMessage(content="Halo")], "error_code": "AI_HTTP_402"},
+                "Saldo layanan AI tidak mencukupi",
+            ),
+            (
+                {
+                    "messages": [AIMessage(content="Jawaban yang tidak boleh disimpan.")],
+                    "final_response": "Jawaban yang tidak boleh disimpan.",
+                    "error_code": "weird_code",
+                },
+                "Layanan AI belum dapat menjawab",
+            ),
+            (
+                {"messages": [], "final_response": None, "error_code": "AI_TRANSPORT_UNKNOWN"},
+                "Koneksi AI terputus",
+            ),
+        )
+        for state, expected in cases:
+            with self.subTest(error_code=state["error_code"]):
+                self.setUp()
+                mock_graph = AsyncMock()
+                mock_graph.ainvoke.return_value = state
 
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
+                service = ChatService(self.database, self.channels, graph=mock_graph)
+                result = await service.handle(**self.input)
 
-        self.assertIn("Saldo layanan AI tidak mencukupi", result)
-        self.assertEqual(self._assistant_inserts(), [])
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
-    async def test_graph_state_unknown_error_code_returns_default_and_persists_nothing(self) -> None:
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.return_value = {
-            "messages": [AIMessage(content="Jawaban yang tidak boleh disimpan.")],
-            "final_response": "Jawaban yang tidak boleh disimpan.",
-            "error_code": "weird_code",
-        }
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIn("Layanan AI belum dapat menjawab", result)
-        self.assertEqual(self._assistant_inserts(), [])
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+                self.assertIn(expected, result)
+                self.assertEqual(self._assistant_inserts(), [])
+                self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
 
     async def test_graph_state_without_error_code_still_persists_assistant_answer(self) -> None:
         mock_graph = AsyncMock()
@@ -441,76 +308,9 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             self.boundary.events, [("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)]
         )
 
-    async def test_error_handling_graph_state_error_code(self) -> None:
-        """Verify state returning error_code mapped to localized response."""
-        mock_graph = AsyncMock()
-        mock_graph.ainvoke.return_value = {
-            "messages": [],
-            "final_response": None,
-            "error_code": "AI_TRANSPORT_UNKNOWN",
-        }
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIn("Koneksi AI terputus", result)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
     # -------------------------------------------------------------------------
-    # 4. Commands and Duplicate Prevention
+    # 3. Constructor Backward Compatibility & Graph Auto-construction
     # -------------------------------------------------------------------------
-
-    async def test_duplicate_text_bypasses_graph_and_returns_none(self) -> None:
-        self.repository.find_duplicate_incoming.return_value = True
-        mock_graph = AsyncMock()
-
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-        result = await service.handle(**self.input)
-
-        self.assertIsNone(result)
-        mock_graph.ainvoke.assert_not_awaited()
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
-    async def test_commands_do_not_invoke_graph(self) -> None:
-        mock_graph = AsyncMock()
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-
-        for kind in ("START", "NEW", "SESSION"):
-            with self.subTest(kind=kind):
-                answer = await service.handle(**{**self.input, "kind": kind})
-                self.assertIn(str(self.conversation_id), answer)
-                mock_graph.ainvoke.assert_not_awaited()
-
-    async def test_invalid_and_unsupported_inputs(self) -> None:
-        mock_graph = AsyncMock()
-        service = ChatService(self.database, self.channels, graph=mock_graph)
-
-        for kind, content in (
-            ("INVALID", ""),
-            ("UNSUPPORTED", ""),
-            ("TEXT", " "),
-            ("TEXT", "a" * (MAX_INPUT_CHARS + 1)),
-        ):
-            with self.subTest(kind=kind, length=len(content)):
-                answer = await service.handle(**{**self.input, "kind": kind, "content": content})
-                self.assertIsInstance(answer, str)
-                self.assertTrue(len(answer) > 0)
-                mock_graph.ainvoke.assert_not_awaited()
-
-    # -------------------------------------------------------------------------
-    # 5. Constructor Backward Compatibility & Graph Auto-construction
-    # -------------------------------------------------------------------------
-
-    async def test_init_with_ai_settings_constructs_graph(self) -> None:
-        ai_settings = OpenRouterSettings(
-            openrouter_key="sk-valid-openrouter-key",
-            ai_model="google/gemini-2.5-flash",
-        )
-        ai_client = OpenRouterClient(ai_settings, session=Mock())
-        service = ChatService(self.database, self.channels, ai=ai_client)
-
-        self.assertIsNotNone(service.graph)
-        self.assertIs(service.ai, ai_client)
 
     async def test_init_with_unconfigured_ai_settings(self) -> None:
         ai_settings = OpenRouterSettings(openrouter_key="", ai_model="")

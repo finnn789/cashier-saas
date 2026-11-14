@@ -4,14 +4,17 @@ import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.dto.request.identity.ChangePasswordRequest;
 import org.lite.project.cashiersaas.dto.request.identity.LoginRequest;
 import org.lite.project.cashiersaas.dto.request.identity.RegisterUserRequest;
 import org.lite.project.cashiersaas.dto.request.identity.SelectMerchantRequest;
 import org.lite.project.cashiersaas.component.AccountPrincipal;
+import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.component.RefreshCookieService;
 import org.lite.project.cashiersaas.dto.response.identity.LoginResponse;
 import org.lite.project.cashiersaas.dto.response.identity.MerchantOutletChoiceResponse;
 import org.lite.project.cashiersaas.dto.response.identity.RegisterUserResponse;
+import org.lite.project.cashiersaas.service.AccountPasswordService;
 import org.lite.project.cashiersaas.service.LoginService;
 import org.lite.project.cashiersaas.service.AuthSessionService;
 import org.lite.project.cashiersaas.service.RegisterService;
@@ -36,6 +39,7 @@ public class AuthController {
     private final LoginService loginService;
     private final RegisterService registerService;
     private final AuthSessionService authSessionService;
+    private final AccountPasswordService accountPasswordService;
     private final RefreshCookieService refreshCookieService;
 
     @PostMapping("/login")
@@ -60,6 +64,19 @@ public class AuthController {
                                                       @Valid @RequestBody SelectMerchantRequest request) {
         return ApiResponse.success("Merchant dan outlet dipilih.",
                 loginService.selectMerchant(principal, request.getTenantId(), request.getOutletId()));
+    }
+
+    /** Any authenticated caller: exactly one of the two principals is non-null (the resolver returns null on a type mismatch). */
+    @PostMapping("/password")
+    public ApiResponse<Void> changePassword(@AuthenticationPrincipal AccountPrincipal account,
+                                            @AuthenticationPrincipal TenantPrincipal tenant,
+                                            @Valid @RequestBody ChangePasswordRequest request) {
+        if (account != null) {
+            accountPasswordService.change(account.getUserId(), account.getSessionId(), request);
+        } else {
+            accountPasswordService.change(tenant.getUserId(), tenant.getSessionId(), request);
+        }
+        return ApiResponse.success("Password diperbarui.", null);
     }
 
     @GetMapping("/outlets")

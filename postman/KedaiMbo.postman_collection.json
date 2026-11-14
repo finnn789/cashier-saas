@@ -2,7 +2,7 @@
   "info": {
     "name": "KedaiMbo API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Collection dari 11 controller Java KedaiMbo (cashier-saas), 1 Oktober 2026. 46 endpoint sesuai kode saat dibuat.\n\nMulai: isi baseUrl, email, password (gunakan nilai lokal/environment untuk kredensial), lalu Register atau Login. Token ACCOUNT disimpan ke accountToken; token operasional ke accessToken. Akun baru: Choose Intent OWNER -> Start Free Tier -> Complete Business Profile. Akun existing: List Merchant & Outlet Choices -> isi tenantId/outletId -> Select Merchant. Request merchant/cashier mewarisi Bearer accessToken; onboarding/select-merchant memakai accountToken.\n\nF&B: Create Category -> Create Product -> opsional Create Group/Option -> Create Table -> Get Menu -> Checkout Public Order -> Get Status. Endpoint Archive dan Rotate memiliki efek pada data/QR; jalankan masing-masing sesuai kebutuhan, bukan Run All sebagai alur onboarding.\n\nRefresh/logout menggunakan cookie jar cashier_refresh dan CSRF: jalankan Get CSRF terlebih dahulu. Backend default cookie secure=true; HTTPS atau konfigurasi development CASHIER_REFRESH_COOKIE_SECURE=false diperlukan untuk cookie melalui HTTP.\n\nIdempotency key dihasilkan sekali bila kosong. Pertahankan saat retry payload yang sama; kosongkan/ganti variabel key untuk operasi baru. Tidak ada tenant header buatan. ID tenant/outlet dipakai hanya pada path atau kontrak Select Merchant dan tetap diperiksa server.\n\nSemua endpoint controller dimasukkan termasuk katalog layanan/sales yang kebijakan tipe usahanya dapat berbeda dari F&B. API belum dijalankan. Skrip response hanya menangkap variabel, tidak berisi assertion test."
+    "description": "Collection controller Java KedaiMbo (cashier-saas). Dibuat 1 Oktober 2026; disesuaikan setelah pivot kasir (QR, tabel, dapur, dan real-time dihapus) pada 12 November 2026.\n\nMulai: isi baseUrl, email, password (gunakan nilai lokal/environment untuk kredensial), lalu Register atau Login. Token ACCOUNT disimpan ke accountToken; token operasional ke accessToken. Akun baru: Choose Intent OWNER -> Start Free Tier -> Complete Business Profile. Akun existing: List Merchant & Outlet Choices -> isi tenantId/outletId -> Select Merchant. Request merchant/cashier mewarisi {{bearer_token_0vit}}; onboarding/select-merchant memakai accountToken.\n\nF&B: Create Category -> Create Product -> opsional Create Group/Option -> Checkout POS Order (pesanan tertahan = status OPEN) -> opsional Replace Order Items (hanya pesanan OPEN yang belum dibayar) -> pembayaran -> status COMPLETED. Endpoint Archive memiliki efek pada data; jalankan masing-masing sesuai kebutuhan, bukan Run All sebagai alur onboarding.\n\nRefresh/logout menggunakan cookie jar cashier_refresh dan CSRF: jalankan Get CSRF terlebih dahulu. Backend default cookie secure=true; HTTPS atau konfigurasi development CASHIER_REFRESH_COOKIE_SECURE=false diperlukan untuk cookie melalui HTTP.\n\nIdempotency key dihasilkan sekali bila kosong. Pertahankan saat retry payload yang sama; kosongkan/ganti variabel key untuk operasi baru. Tidak ada tenant header buatan. ID tenant/outlet dipakai hanya pada path atau kontrak Select Merchant dan tetap diperiksa server.\n\nSemua endpoint controller dimasukkan termasuk katalog layanan/sales yang kebijakan tipe usahanya dapat berbeda dari F&B. API belum dijalankan. Skrip response hanya menangkap variabel, tidak berisi assertion test."
   },
   "auth": {
     "type": "bearer",
@@ -86,22 +86,7 @@
       "type": "string"
     },
     {
-      "key": "tableId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "qrToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "outletQrToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "orderToken",
+      "key": "orderId",
       "value": "",
       "type": "string"
     },
@@ -131,7 +116,7 @@
       "type": "string"
     },
     {
-      "key": "publicOrderKey",
+      "key": "posOrderKey",
       "value": "",
       "type": "string"
     }
@@ -142,7 +127,7 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "[\"onboardingKey\",\"saleKey\",\"publicOrderKey\"].forEach(function (key) {",
+          "[\"onboardingKey\",\"saleKey\",\"posOrderKey\"].forEach(function (key) {",
           " if (!pm.variables.get(key)) pm.collectionVariables.set(key, pm.variables.replaceIn(\"{{$guid}}\"));",
           "});"
         ]
@@ -269,7 +254,29 @@
         },
         {
           "name": "List Merchant & Outlet Choices",
-          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["if (pm.response.code >= 200 && pm.response.code < 300) {","    const response = pm.response.json();","    if (response.success && Array.isArray(response.data)) {","        const choice = response.data[0];","        if (choice && choice.tenantId && choice.outletId) {","            pm.collectionVariables.set(\"tenantId\", choice.tenantId);","            pm.collectionVariables.set(\"outletId\", choice.outletId);","        } else {","            pm.collectionVariables.unset(\"tenantId\");","            pm.collectionVariables.unset(\"outletId\");","        }","    }","}"]}}],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && Array.isArray(response.data)) {",
+                  "        const choice = response.data[0];",
+                  "        if (choice && choice.tenantId && choice.outletId) {",
+                  "            pm.collectionVariables.set(\"tenantId\", choice.tenantId);",
+                  "            pm.collectionVariables.set(\"outletId\", choice.outletId);",
+                  "        } else {",
+                  "            pm.collectionVariables.unset(\"tenantId\");",
+                  "            pm.collectionVariables.unset(\"outletId\");",
+                  "        }",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [
@@ -1205,321 +1212,6 @@
       ]
     },
     {
-      "name": "10 - F&B Tables",
-      "item": [
-        {
-          "name": "Create Table & QR",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/tables",
-            "description": "POST /api/v1/merchant/outlets/{{outletId}}/fnb/tables. Sumber: controller KedaiMbo. Role OWNERMERCHANT.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Meja 01\",\n  \"active\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  " const r = pm.response.json();",
-                  " if (r.success && r.data) {",
-                  "  if (r.data.id !== undefined && r.data.id !== null) pm.collectionVariables.set(\"tableId\", r.data.id);",
-                  "  if (r.data.qrToken !== undefined && r.data.qrToken !== null) pm.collectionVariables.set(\"qrToken\", r.data.qrToken);",
-                  " }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List Tables",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/tables",
-            "description": "GET /api/v1/merchant/outlets/{{outletId}}/fnb/tables. Sumber: controller KedaiMbo. Role OWNERMERCHANT."
-          },
-          "response": []
-        },
-        {
-          "name": "Update Table",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/tables/{{tableId}}",
-            "description": "PUT /api/v1/merchant/outlets/{{outletId}}/fnb/tables/{{tableId}}. Sumber: controller KedaiMbo. Role OWNERMERCHANT.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Meja 01\",\n  \"active\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Rotate Table QR",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/tables/{{tableId}}/rotate-qr",
-            "description": "Role OWNERMERCHANT. QR sebelumnya menjadi tidak berlaku; simpan token baru."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  " const r = pm.response.json();",
-                  " if (r.success && r.data) {",
-                  "  if (r.data.qrToken !== undefined && r.data.qrToken !== null) pm.collectionVariables.set(\"qrToken\", r.data.qrToken);",
-                  " }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "11 - F&B Outlet QR",
-      "item": [
-        {
-          "name": "Get Outlet QR",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/outlet-qr",
-            "description": "Role OWNERMERCHANT. Token QR outlet disimpan sebagai outletQrToken; gunakan untuk TAKEAWAY dengan mengganti qrToken."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  " const r = pm.response.json();",
-                  " if (r.success && r.data) {",
-                  "  if (r.data.token !== undefined && r.data.token !== null) pm.collectionVariables.set(\"outletQrToken\", r.data.token);",
-                  " }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create Outlet QR",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/outlet-qr",
-            "description": "Role OWNERMERCHANT. Token QR outlet disimpan sebagai outletQrToken; gunakan untuk TAKEAWAY dengan mengganti qrToken."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  " const r = pm.response.json();",
-                  " if (r.success && r.data) {",
-                  "  if (r.data.token !== undefined && r.data.token !== null) pm.collectionVariables.set(\"outletQrToken\", r.data.token);",
-                  " }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Rotate Outlet QR",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/outlet-qr/rotate",
-            "description": "Role OWNERMERCHANT. Token QR outlet disimpan sebagai outletQrToken; gunakan untuk TAKEAWAY dengan mengganti qrToken."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  " const r = pm.response.json();",
-                  " if (r.success && r.data) {",
-                  "  if (r.data.token !== undefined && r.data.token !== null) pm.collectionVariables.set(\"outletQrToken\", r.data.token);",
-                  " }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "12 - Public F&B Menu & Orders",
-      "item": [
-        {
-          "name": "Get Menu by QR",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/public/fnb/menu/{{qrToken}}",
-            "description": "GET /api/v1/public/fnb/menu/{{qrToken}}. Sumber: controller KedaiMbo. ",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Checkout Public Order",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{publicOrderKey}}",
-                "description": "Gunakan key yang sama saat retry payload yang sama. Ganti untuk transaksi baru."
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/public/fnb/menu/{{qrToken}}/orders",
-            "description": "Tanpa JWT. QR meja untuk DINE_IN. Untuk TAKEAWAY, isi qrToken dengan outletQrToken dan serviceType=TAKEAWAY. optionIds dapat diisi optionId. Totals dihitung server. Key harus tetap untuk retry.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"serviceType\": \"DINE_IN\",\n  \"customerLabel\": \"Pelanggan KedaiMbo\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1,\n      \"note\": \"Tanpa bawang\",\n      \"optionIds\": []\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  " const r = pm.response.json();",
-                  " if (r.success && r.data) {",
-                  "  if (r.data.orderToken !== undefined && r.data.orderToken !== null) pm.collectionVariables.set(\"orderToken\", r.data.orderToken);",
-                  " }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Get Public Order Status",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/public/fnb/orders/{{orderToken}}/status",
-            "description": "GET /api/v1/public/fnb/orders/{{orderToken}}/status. Sumber: controller KedaiMbo. ",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
       "name": "13 - Cashier Service Catalog",
       "item": [
         {
@@ -1705,6 +1397,86 @@
             ],
             "url": "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/sales/{{saleId}}",
             "description": "GET /api/v1/cashier/outlets/{{outletId}}/sales/{{saleId}}. Sumber: controller KedaiMbo. Role OWNERMERCHANT atau CASHIER."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "15 - F&B POS Orders",
+      "item": [
+        {
+          "name": "Checkout POS Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{posOrderKey}}",
+                "description": "Gunakan key yang sama saat retry payload yang sama. Ganti untuk pesanan baru."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders",
+            "description": "Membuat pesanan POS. Pesanan yang belum dibayar berstatus OPEN (tertahan). Total dihitung server. Role OWNERMERCHANT atau CASHIER.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceType\": \"DINE_IN\",\n  \"customerLabel\": \"Pelanggan KedaiMbo\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1,\n      \"note\": \"\",\n      \"optionIds\": []\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  " const r = pm.response.json();",
+                  " if (r.success && r.data && r.data.id) pm.collectionVariables.set(\"orderId\", r.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replace Order Items",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/items",
+            "description": "Mengganti seluruh item pesanan POS yang masih OPEN dan belum dibayar. Total dihitung ulang server. Tanpa Idempotency-Key (penggantian penuh bersifat idempoten). Role OWNERMERCHANT atau CASHIER.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceType\": \"DINE_IN\",\n  \"customerLabel\": \"Pelanggan KedaiMbo\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2,\n      \"note\": \"\",\n      \"optionIds\": []\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }

@@ -39,28 +39,19 @@ class PhoneNumberNormalizerTest {
     }
 
     @Test
-    void everyContractCaseProducesTheExpectedResult() throws Exception {
+    void everyContractCaseProducesTheExpectedResultFromTryNormalizeAndNormalize() throws Exception {
         List<Case> cases = loadCases();
         assertTrue(cases.size() >= 16, "Fixture unexpectedly small: " + cases.size());
         for (Case testCase : cases) {
             Optional<String> actual = PhoneNumberNormalizer.tryNormalize(testCase.input());
             if (testCase.expected() == null) {
                 assertTrue(actual.isEmpty(), "Expected invalid for input [" + testCase.input() + "]");
-            } else {
-                assertEquals(Optional.of(testCase.expected()), actual, "Input [" + testCase.input() + "]");
-            }
-        }
-    }
-
-    @Test
-    void normalizeReturnsDigitsForValidAndThrowsBadRequestExceptionForInvalidContractCases() throws Exception {
-        for (Case testCase : loadCases()) {
-            if (testCase.expected() == null) {
                 InvalidOperationException exception = assertThrows(InvalidOperationException.class,
                         () -> PhoneNumberNormalizer.normalize(testCase.input()),
                         "Input [" + testCase.input() + "]");
                 assertEquals("Nomor telepon tidak valid.", exception.getMessage());
             } else {
+                assertEquals(Optional.of(testCase.expected()), actual, "Input [" + testCase.input() + "]");
                 assertEquals(testCase.expected(), PhoneNumberNormalizer.normalize(testCase.input()),
                         "Input [" + testCase.input() + "]");
             }

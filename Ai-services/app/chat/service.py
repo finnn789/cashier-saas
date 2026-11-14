@@ -57,6 +57,7 @@ class Identity:
     tenant_id: UUID | None = None
     role: str | None = None
     options: tuple[TenantOption, ...] = ()
+    java_user_id: UUID | None = None  # the verified Java staff user; sent to the backend as user_id
 
     @property
     def can_chat(self) -> bool:
@@ -152,7 +153,7 @@ class ChatService:
                 found = 'identity_lookup_finished'
                 if chosen is not None:
                     return _log_identity(
-                        Identity(VERIFIED, chosen.tenant_id, chosen.role, options),
+                        Identity(VERIFIED, chosen.tenant_id, chosen.role, options, chosen.java_user_id),
                         found,
                         revoked_count=len(revoked),
                     )
@@ -163,7 +164,10 @@ class ChatService:
                 if len(active) == 1:
                     await members.select_tenant(connection, user_id, active[0].tenant_id)
                     return _log_identity(
-                        Identity(VERIFIED, active[0].tenant_id, active[0].role, options),
+                        Identity(
+                            VERIFIED, active[0].tenant_id, active[0].role, options,
+                            active[0].java_user_id,
+                        ),
                         found,
                         revoked_count=len(revoked),
                     )
@@ -210,7 +214,10 @@ class ChatService:
                 if len(matches) == 1:
                     await members.select_tenant(connection, user_id, matches[0].tenant_id)
                     return _log_identity(
-                        Identity(VERIFIED, matches[0].tenant_id, matches[0].role, options),
+                        Identity(
+                            VERIFIED, matches[0].tenant_id, matches[0].role, options,
+                            matches[0].java_user_id,
+                        ),
                         verified,
                         matches_count=len(matches),
                     )
@@ -254,7 +261,9 @@ class ChatService:
                             Identity(LISTED, options=options), chosen_event, choice=choice
                         )
                     return _log_identity(
-                        Identity(LISTED, current.tenant_id, current.role, options),
+                        Identity(
+                            LISTED, current.tenant_id, current.role, options, current.java_user_id
+                        ),
                         chosen_event,
                         choice=choice,
                     )
@@ -265,7 +274,9 @@ class ChatService:
                 target = active[choice - 1]
                 await members.select_tenant(connection, user_id, target.tenant_id)
                 return _log_identity(
-                    Identity(VERIFIED, target.tenant_id, target.role, options),
+                    Identity(
+                        VERIFIED, target.tenant_id, target.role, options, target.java_user_id
+                    ),
                     chosen_event,
                     choice=choice,
                 )
@@ -295,6 +306,7 @@ class ChatService:
         first_name: str | None,
         kind: str,
         content: str,
+        java_user_id: UUID | None = None,
     ) -> str | None:
         '''Handle one permitted SDK message; None means a duplicate TEXT was stored.'''
         if not isinstance(tenant_id, UUID):
@@ -413,6 +425,7 @@ class ChatService:
                     graph_state = await self.graph.ainvoke({
                         'messages': formatted_messages,
                         'tenant_id': str(tenant_id),
+                        'java_user_id': str(java_user_id) if java_user_id else None,
                         'user_id': user_id,
                         'conversation_id': str(conversation_id),
                         'display_name': display_name,
@@ -535,6 +548,7 @@ class ChatService:
                             tool_name=fn_name,
                             arguments_json=fn_args,
                             tenant_id=str(tenant_id),
+                            user_id=str(java_user_id) if java_user_id else None,
                         )
                         logger.info(
                             'AI tool call finished',

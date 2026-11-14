@@ -5,6 +5,7 @@ with mock gRPC stubs and channels.
 """
 
 import unittest
+from decimal import Decimal
 from unittest.mock import AsyncMock, Mock
 
 import grpc
@@ -13,6 +14,9 @@ import grpc.aio
 from app.integrations.grpc.client import CashierGrpcClient
 from app.integrations.grpc.config import GrpcSettings
 from app.integrations.grpc.generated import cashier_service_pb2
+
+
+USER_ID = "11111111-1111-1111-1111-111111111111"
 
 
 class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
@@ -47,14 +51,14 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
             cashier_service_pb2.CatalogItem(
                 id="item-001",
                 name="Kopi Susu Gula Aren",
-                price=18000,
+                price_amount="18000.00",
                 is_available=True,
                 category="Beverage",
             ),
             cashier_service_pb2.CatalogItem(
                 id="item-002",
                 name="Kopi Hitam",
-                price=12000,
+                price_amount="12000.00",
                 is_available=False,
                 category="Beverage",
             ),
@@ -70,7 +74,7 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         print(f"  --> INPUT: tenant_id='{tenant_id}', query='{query}', limit={limit}")
 
         result = await self.client.get_catalog_items(
-            tenant_id=tenant_id,
+            tenant_id=tenant_id, user_id=USER_ID,
             query=query,
             limit=limit,
         )
@@ -85,6 +89,7 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(request_obj, cashier_service_pb2.GetCatalogItemRequest)
         self.assertEqual(request_obj.tenant_id, tenant_id)
+        self.assertEqual(request_obj.user_id, USER_ID)
         self.assertEqual(request_obj.query, query)
         self.assertEqual(request_obj.limit, limit)
         self.assertEqual(kwargs.get("timeout"), self.settings.timeout_seconds)
@@ -98,14 +103,14 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
             {
                 "id": "item-001",
                 "name": "Kopi Susu Gula Aren",
-                "price": 18000,
+                "price": Decimal("18000.00"),
                 "is_available": True,
                 "category": "Beverage",
             },
             {
                 "id": "item-002",
                 "name": "Kopi Hitam",
-                "price": 12000,
+                "price": Decimal("12000.00"),
                 "is_available": False,
                 "category": "Beverage",
             },
@@ -120,9 +125,9 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         mock_response = cashier_service_pb2.GetOrderStatusResponse(
             tenant_id=tenant_id,
             order_number=order_number,
-            status="READY_FOR_PICKUP",
+            status="COMPLETED",
             payment_status="PAID",
-            total_amount=45000,
+            total="45000.00",
             created_at="2026-10-30T10:15:00Z",
         )
         self.mock_stub.GetOrderStatus = AsyncMock(return_value=mock_response)
@@ -132,7 +137,7 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         print(f"  --> INPUT: tenant_id='{tenant_id}', order_number='{order_number}'")
 
         result = await self.client.get_order_status(
-            tenant_id=tenant_id,
+            tenant_id=tenant_id, user_id=USER_ID,
             order_number=order_number,
         )
 
@@ -146,6 +151,7 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(request_obj, cashier_service_pb2.GetOrderStatusRequest)
         self.assertEqual(request_obj.tenant_id, tenant_id)
+        self.assertEqual(request_obj.user_id, USER_ID)
         self.assertEqual(request_obj.order_number, order_number)
         self.assertEqual(kwargs.get("timeout"), self.settings.timeout_seconds)
         self.assertEqual(
@@ -157,9 +163,9 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         expected = {
             "tenant_id": tenant_id,
             "order_number": order_number,
-            "status": "READY_FOR_PICKUP",
+            "status": "COMPLETED",
             "payment_status": "PAID",
-            "total_amount": 45000,
+            "total_amount": Decimal("45000.00"),
             "created_at": "2026-10-30T10:15:00Z",
         }
         self.assertEqual(result, expected)
@@ -177,7 +183,7 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         print(f"  --> INPUT: tenant_id='{tenant_id}', order_number='{order_number}'")
 
         result = await self.client.get_order_status(
-            tenant_id=tenant_id,
+            tenant_id=tenant_id, user_id=USER_ID,
             order_number=order_number,
         )
 
@@ -186,79 +192,47 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
 
-    async def test_catalog_rpc_unavailable_fallback(self) -> None:
-        """When gRPC returns UNAVAILABLE AioRpcError, get_catalog_items gracefully returns []."""
+    async def test_rpc_error_fallback(self) -> None:
+        """AioRpcError (UNAVAILABLE / NOT_FOUND) is swallowed: catalog gives [], order status gives None."""
         tenant_id = "tenant-unit-err"
-        self.mock_stub.GetCatalogItem = AsyncMock(
-            side_effect=grpc.aio.AioRpcError(
-                code=grpc.StatusCode.UNAVAILABLE,
-                initial_metadata=(),
-                trailing_metadata=(),
-                details="Service Unavailable",
-                debug_error_string="Transport closed",
-            )
+        cases = (
+            (
+                "get_catalog_items", "GetCatalogItem", grpc.StatusCode.UNAVAILABLE,
+                "Service Unavailable", "Transport closed",
+                {"query": "roti", "limit": 10}, [],
+            ),
+            (
+                "get_order_status", "GetOrderStatus", grpc.StatusCode.NOT_FOUND,
+                "Order not found in Cashier backend", "",
+                {"order_number": "ORD-404"}, None,
+            ),
+            (
+                "get_order_status", "GetOrderStatus", grpc.StatusCode.UNAVAILABLE,
+                "Connection refused", "",
+                {"order_number": "ORD-503"}, None,
+            ),
         )
+        for method, rpc, code, details, debug, arguments, expected in cases:
+            with self.subTest(rpc=rpc, code=code.name):
+                setattr(
+                    self.mock_stub,
+                    rpc,
+                    AsyncMock(
+                        side_effect=grpc.aio.AioRpcError(
+                            code=code,
+                            initial_metadata=(),
+                            trailing_metadata=(),
+                            details=details,
+                            debug_error_string=debug,
+                        )
+                    ),
+                )
 
-        print("\n" + "=" * 60)
-        print("[UNIT TEST: get_catalog_items UNAVAILABLE fallback]")
-        print(f"  --> INPUT: tenant_id='{tenant_id}', query='roti', limit=10")
+                result = await getattr(self.client, method)(
+                    tenant_id=tenant_id, user_id=USER_ID, **arguments
+                )
 
-        result = await self.client.get_catalog_items(tenant_id=tenant_id, query="roti", limit=10)
-
-        print(f"  <-- OUTPUT: {result} (Graceful fallback to empty list)")
-        print("=" * 60)
-
-        self.assertEqual(result, [])
-
-    async def test_order_status_not_found_fallback(self) -> None:
-        """When gRPC returns NOT_FOUND AioRpcError, get_order_status gracefully returns None."""
-        tenant_id = "tenant-unit-err"
-        order_number = "ORD-404"
-        self.mock_stub.GetOrderStatus = AsyncMock(
-            side_effect=grpc.aio.AioRpcError(
-                code=grpc.StatusCode.NOT_FOUND,
-                initial_metadata=(),
-                trailing_metadata=(),
-                details="Order not found in Cashier backend",
-                debug_error_string="",
-            )
-        )
-
-        print("\n" + "=" * 60)
-        print("[UNIT TEST: get_order_status NOT_FOUND fallback]")
-        print(f"  --> INPUT: tenant_id='{tenant_id}', order_number='{order_number}'")
-
-        result = await self.client.get_order_status(tenant_id=tenant_id, order_number=order_number)
-
-        print(f"  <-- OUTPUT: {result} (Graceful fallback to None)")
-        print("=" * 60)
-
-        self.assertIsNone(result)
-
-    async def test_order_status_unavailable_fallback(self) -> None:
-        """When gRPC returns UNAVAILABLE AioRpcError, get_order_status gracefully returns None."""
-        tenant_id = "tenant-unit-err"
-        order_number = "ORD-503"
-        self.mock_stub.GetOrderStatus = AsyncMock(
-            side_effect=grpc.aio.AioRpcError(
-                code=grpc.StatusCode.UNAVAILABLE,
-                initial_metadata=(),
-                trailing_metadata=(),
-                details="Connection refused",
-                debug_error_string="",
-            )
-        )
-
-        print("\n" + "=" * 60)
-        print("[UNIT TEST: get_order_status UNAVAILABLE fallback]")
-        print(f"  --> INPUT: tenant_id='{tenant_id}', order_number='{order_number}'")
-
-        result = await self.client.get_order_status(tenant_id=tenant_id, order_number=order_number)
-
-        print(f"  <-- OUTPUT: {result} (Graceful fallback to None)")
-        print("=" * 60)
-
-        self.assertIsNone(result)
+                self.assertEqual(result, expected)
 
     async def test_unexpected_generic_exception_handling(self) -> None:
         """When stub raises unexpected non-gRPC exception, client catches and falls back cleanly."""
@@ -269,11 +243,11 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
         print("\n" + "=" * 60)
         print("[UNIT TEST: generic exception handling]")
         print("  --> Testing GetCatalogItem with RuntimeError")
-        catalog_result = await self.client.get_catalog_items(tenant_id=tenant_id)
+        catalog_result = await self.client.get_catalog_items(tenant_id=tenant_id, user_id=USER_ID)
         print(f"  <-- OUTPUT: {catalog_result}")
 
         print("  --> Testing GetOrderStatus with RuntimeError")
-        order_result = await self.client.get_order_status(tenant_id=tenant_id, order_number="ORD-X")
+        order_result = await self.client.get_order_status(tenant_id=tenant_id, user_id=USER_ID, order_number="ORD-X")
         print(f"  <-- OUTPUT: {order_result}")
         print("=" * 60)
 

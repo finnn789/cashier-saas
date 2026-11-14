@@ -1,0 +1,19 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/payment-labels/{{labelId}}"
+method: PUT
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Transfer BCA",
+      "displayOrder": 4,
+      "active": true
+    }
+description: |-
+  Hanya OWNER. Tidak ada hapus; nonaktifkan dengan active=false. displayOrder dan active yang dihilangkan mempertahankan nilai lama.
+order: 3000

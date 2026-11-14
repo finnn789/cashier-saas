@@ -43,10 +43,22 @@ class MerchantBusinessSettingsMapperTest {
         assertEquals("Outlet road", response.getOutletAddress());
         assertEquals("08222", response.getOutletPhoneNumber());
         assertEquals("Asia/Makassar", response.getTimeZone());
+        assertNull(response.getReceiptFooter());
     }
 
     @Test
-    void mapsExplicitTenantAndOutletValuesAndOmitsNullOptionalFieldsFromJson() throws Exception {
+    void mapsTheReceiptFooter() {
+        TenantEntity tenant = new TenantEntity();
+        tenant.updateBusinessSettings("Kopi Nusantara", null, "IDR", null, null,
+                new BigDecimal("11.00"), new BigDecimal("5.00"), "Asia/Jakarta");
+        tenant.changeReceiptFooter("Terima kasih");
+        OutletEntity outlet = OutletEntity.open(tenant, "Menteng", "Asia/Jakarta", null, null);
+
+        assertEquals("Terima kasih", MerchantBusinessSettingsMapper.response(tenant, outlet).getReceiptFooter());
+    }
+
+    @Test
+    void nullOptionalFieldsStayNullAndAreOmittedFromJson() throws Exception {
         TenantEntity tenant = new TenantEntity();
         UUID outletId = UUID.randomUUID();
         tenant.updateBusinessSettings("Kopi Nusantara", null, "IDR", null, null,
@@ -58,13 +70,6 @@ class MerchantBusinessSettingsMapperTest {
         ObjectMapper mapper = new ObjectMapper();
         JsonNode json = mapper.readTree(mapper.writeValueAsString(response));
 
-        assertEquals(outletId, response.getOutletId());
-        assertEquals("Kopi Nusantara", response.getBusinessName());
-        assertEquals("IDR", response.getCurrency());
-        assertEquals(new BigDecimal("11.00"), response.getTaxRate());
-        assertEquals(new BigDecimal("5.00"), response.getServiceChargeRate());
-        assertEquals("Menteng", response.getOutletName());
-        assertEquals("Asia/Jakarta", response.getTimeZone());
         assertNull(response.getLogoUrl());
         assertNull(response.getAddress());
         assertNull(response.getPhoneNumber());

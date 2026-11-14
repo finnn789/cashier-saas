@@ -29,6 +29,9 @@ public class AiServiceProperties {
 
     private Duration readTimeout = Duration.ofSeconds(5);
 
+    /** Read timeout of the daily summary request (Ai-services builds the text, including one LLM call). */
+    private Duration dailySummaryReadTimeout = Duration.ofSeconds(30);
+
     /** Total attempts per sync (first call plus retries). */
     private int maxAttempts = 3;
 

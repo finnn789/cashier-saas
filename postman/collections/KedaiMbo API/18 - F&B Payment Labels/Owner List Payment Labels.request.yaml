@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/payment-labels"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: http:afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+       const r = pm.response.json();
+       if (r.success && r.data && r.data.length) pm.collectionVariables.set("labelId", r.data[0].id);
+      }
+    language: text/javascript
+description: |-
+  Hanya OWNER. Semua label outlet termasuk yang nonaktif, urut displayOrder lalu nama. Outlet baru otomatis memiliki QRIS, Transfer, Debit.
+order: 1000

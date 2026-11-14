@@ -14,4 +14,7 @@ public class FnbSalesProductResponse {
     private String productName;
     private long quantity;
     private BigDecimal grossSales;
+    private BigDecimal costOfGoodsSold;
+    private BigDecimal grossProfit;
+    private long itemsWithoutCost;
 }

@@ -9,10 +9,11 @@ import org.lite.project.cashiersaas.dto.request.FnbCancelOrderRequest;
 import org.lite.project.cashiersaas.dto.response.FnbCancellationResponse;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
-import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.enums.Role;
+import org.lite.project.cashiersaas.exception.runtime.AccessForbiddenException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
-import org.lite.project.cashiersaas.repository.FnbGatewayAttemptRepository;
+import org.lite.project.cashiersaas.repository.FnbDiscountRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,10 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class FnbOrderCancellationService {
     private final MerchantAccessGuard guard;
     private final FnbOrderRepository orders;
-    private final FnbGatewayAttemptRepository attempts;
+    private final FnbDiscountRepository discounts;
     private final AuditLogRepository audit;
-    private final FnbTableReconciliationService reconciliation;
-    private final FnbRealtimePublisher realtime;
 
     @Transactional
     public FnbCancellationResponse cancel(TenantPrincipal principal, UUID outletId, UUID orderId,
@@ -35,15 +34,14 @@ public class FnbOrderCancellationService {
         SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId)
                 .orElseThrow(ResourceNotFoundException::new);
         orders.refreshOrder(order);
-        if (attempts.pendingForOrder(principal.getTenantId(), outletId, orderId).isPresent()) {
-            throw new OperationConflictException("Gateway attempt masih tertunda.");
+        if (context.getMembership().getRole() == Role.CASHIER
+                && discounts.byOrder(principal.getTenantId(), outletId, orderId).isPresent()) {
+            throw new AccessForbiddenException("Pesanan dengan diskon hanya dapat dibatalkan oleh owner.");
         }
         order.cancel(request.getReason());
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
                 AuditLogEntity.Action.FNB_ORDER_CANCELLED, order.getId(), order.getCancellationReason(), null));
         orders.flush();
-        reconciliation.reconcile(order);
-        realtime.orderChanged("ORDER_CANCELLED", order);
         return FnbPaymentMapper.cancellation(order);
     }
 }

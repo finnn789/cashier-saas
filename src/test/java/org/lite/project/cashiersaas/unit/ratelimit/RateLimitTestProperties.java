@@ -14,10 +14,6 @@ final class RateLimitTestProperties {
         properties.setEnabled(true);
         properties.setMaxBuckets(100000);
         properties.setAuth(new Limit(10, 10));
-        properties.setPublicRead(new Limit(240, 60));
-        properties.setPublicOrderWrite(new Limit(20, 10));
-        properties.setQrToken(new Limit(600, 120));
-        properties.setRealtimeTicket(new Limit(10, 5));
         properties.setAuthenticated(new Limit(300, 60));
         properties.setAnonymousOther(new Limit(120, 30));
         return properties;

@@ -64,8 +64,19 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     private static final UUID TENANT_UNKNOWN = UUID.fromString("dddddddd-0000-4000-8000-0000000000dd");
     private static final String DENIED_MESSAGE = "Tenant is not permitted for this service";
 
+    // Staff users the gRPC caller acts for (Ai-services sends the verified Java user id with every call).
+    private static final UUID USER_A1 = UUID.fromString("00000001-0000-4000-8000-0000000000a1");
+    private static final UUID USER_A1_OUTLET2 = UUID.fromString("00000002-0000-4000-8000-0000000000a1");
+    private static final UUID USER_A1_DEACTIVATED = UUID.fromString("00000003-0000-4000-8000-0000000000a1");
+    private static final UUID USER_A1_DISABLED = UUID.fromString("00000004-0000-4000-8000-0000000000a1");
+    private static final UUID USER_A2 = UUID.fromString("00000001-0000-4000-8000-0000000000a2");
+    private static final UUID USER_TOGGLE = UUID.fromString("00000001-0000-4000-8000-0000000000b4");
+    /** Active staff user without any membership. */
+    private static final UUID USER_OUTSIDER = UUID.fromString("00000009-0000-4000-8000-000000000009");
+
     private static final String ORDER_A1_PAID = "ORD-A1-0001";
-    private static final String ORDER_A1_NEW = "ORD-A1-0002";
+    private static final String ORDER_A1_OPEN = "ORD-A1-0002";
+    private static final String ORDER_A1_OUTLET2 = "ORD-A1-0003";
     private static final String ORDER_A2 = "ORD-A2-0001";
     private static final String ORDER_C = "ORD-C-0001";
     private static final int BULK_PRODUCTS = 60;
@@ -86,6 +97,10 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     private JdbcTemplate jdbc;
     private ManagedChannel channel;
     private UUID a1KopiSusuId;
+    private UUID a1Outlet;
+    private UUID a1Outlet2;
+    private UUID a2Outlet;
+    private UUID toggleOutlet;
 
     @BeforeAll
     void setUpAll() {
@@ -96,9 +111,11 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         seedTenantA2();
         seedTenantDisabled();
         seedTenant(TENANT_TOGGLE, "Warung Toggle", "ACTIVE", "FNB");
+        toggleOutlet = seedOutlet(TENANT_TOGGLE, "Outlet Toggle");
         seedTenant(TENANT_PENDING, "Warung Pending", "PENDING_PROFILE", "FNB");
         seedTenant(TENANT_NON_FNB, "Toko Lain", "ACTIVE", "OTHER");
         seedTenant(TENANT_NO_BUSINESS_TYPE, "Tanpa Tipe", "ACTIVE", null);
+        seedStaffAccess();
         channel = ManagedChannelBuilder.forAddress("127.0.0.1", portHolder.port()).usePlaintext().build();
     }
 
@@ -170,7 +187,7 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
                 "archived, unavailable and other tenants' 'Kopi' products must not appear");
         CatalogItem item = response.getItems(0);
         assertEquals(a1KopiSusuId.toString(), item.getId());
-        assertEquals(18000L, item.getPrice());
+        assertEquals("18000.00", item.getPriceAmount());
         assertTrue(item.getIsAvailable());
         assertEquals("Minuman", item.getCategory());
     }
@@ -266,9 +283,10 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
 
         for (String badTenant : new String[] {"", "   ", "not-a-uuid", "12345"}) {
             assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getCatalogItem(
-                    GetCatalogItemRequest.newBuilder().setTenantId(badTenant).setQuery("kopi").build()));
+                    GetCatalogItemRequest.newBuilder().setTenantId(badTenant).setUserId(USER_A1.toString()).setQuery("kopi").build()));
             assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getOrderStatus(
-                    GetOrderStatusRequest.newBuilder().setTenantId(badTenant).setOrderNumber(ORDER_A1_PAID).build()));
+                    GetOrderStatusRequest.newBuilder().setTenantId(badTenant).setUserId(USER_A1.toString())
+                            .setOrderNumber(ORDER_A1_PAID).build()));
         }
     }
 
@@ -335,15 +353,15 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         GetOrderStatusResponse paid = validStub().getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_PAID));
         assertEquals(TENANT_A1.toString(), paid.getTenantId());
         assertEquals(ORDER_A1_PAID, paid.getOrderNumber());
-        assertEquals("CONFIRMED", paid.getStatus());
+        assertEquals("COMPLETED", paid.getStatus());
         assertEquals("PAID", paid.getPaymentStatus());
-        assertEquals(75000L, paid.getTotalAmount());
+        assertEquals("75000.00", paid.getTotal());
         assertFalse(paid.getCreatedAt().isEmpty());
 
-        GetOrderStatusResponse fresh = validStub().getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_NEW));
-        assertEquals("NEW", fresh.getStatus());
+        GetOrderStatusResponse fresh = validStub().getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_OPEN));
+        assertEquals("OPEN", fresh.getStatus());
         assertEquals("UNPAID", fresh.getPaymentStatus());
-        assertEquals(25000L, fresh.getTotalAmount());
+        assertEquals("25000.00", fresh.getTotal());
     }
 
     @Test
@@ -379,6 +397,88 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     void blankOrderNumberIsInvalidArgument() {
         assertCode(Status.Code.INVALID_ARGUMENT, () -> validStub().getOrderStatus(orderRequest(TENANT_A1, "  ")));
+    }
+
+    // ---------------------------------------------------------------- member and outlet scoping (user_id)
+
+    @Test
+    void missingOrMalformedUserIdIsInvalidArgumentForBothRpcs() {
+        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
+
+        for (String badUser : new String[] {"", "   ", "not-a-uuid"}) {
+            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getCatalogItem(GetCatalogItemRequest.newBuilder()
+                    .setTenantId(TENANT_A1.toString()).setUserId(badUser).setQuery("kopi").build()));
+            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getOrderStatus(GetOrderStatusRequest.newBuilder()
+                    .setTenantId(TENANT_A1.toString()).setUserId(badUser).setOrderNumber(ORDER_A1_PAID).build()));
+        }
+    }
+
+    @Test
+    void usersWithoutAnActiveMembershipAndOutletAccessArePermissionDeniedLikeADeniedTenant() {
+        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
+        UUID unknownUser = UUID.fromString("00000007-0000-4000-8000-000000000007");
+
+        // outsider: active staff user with no membership; USER_A2: member of another tenant only;
+        // deactivated: membership.active=false; disabled: staff user status DISABLED; unknown: no such user.
+        for (UUID caller : new UUID[] {USER_OUTSIDER, USER_A2, USER_A1_DEACTIVATED, USER_A1_DISABLED, unknownUser}) {
+            StatusRuntimeException catalogError = assertCode(Status.Code.PERMISSION_DENIED,
+                    () -> stub.getCatalogItem(catalogRequest(TENANT_A1, caller, "kopi", 0)));
+            StatusRuntimeException orderError = assertCode(Status.Code.PERMISSION_DENIED,
+                    () -> stub.getOrderStatus(orderRequest(TENANT_A1, caller, ORDER_A1_PAID)));
+            assertEquals(DENIED_MESSAGE, catalogError.getStatus().getDescription(), "caller " + caller);
+            assertEquals(DENIED_MESSAGE, orderError.getStatus().getDescription(), "caller " + caller);
+            assertDoesNotLeak(catalogError, caller.toString(), TENANT_A1.toString());
+            assertDoesNotLeak(orderError, caller.toString(), ORDER_A1_PAID);
+        }
+    }
+
+    @Test
+    void deactivatingTheMembershipStopsGrpcAccessImmediately() {
+        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
+        GetCatalogItemRequest request = catalogRequest(TENANT_TOGGLE, USER_TOGGLE, "", 0);
+
+        assertEquals(TENANT_TOGGLE.toString(), stub.getCatalogItem(request).getTenantId());
+
+        jdbc.update("UPDATE tenant_memberships SET active = false WHERE user_id = ?", USER_TOGGLE);
+        try {
+            assertCode(Status.Code.PERMISSION_DENIED, () -> stub.getCatalogItem(request));
+        } finally {
+            jdbc.update("UPDATE tenant_memberships SET active = true WHERE user_id = ?", USER_TOGGLE);
+        }
+
+        assertEquals(TENANT_TOGGLE.toString(), stub.getCatalogItem(request).getTenantId());
+    }
+
+    @Test
+    void catalogIsLimitedToTheOutletsOfTheCaller() {
+        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
+
+        assertEquals(List.of("Kopi Susu"), names(stub.getCatalogItem(catalogRequest(TENANT_A1, USER_A1, "kopi", 0))),
+                "outlet 1 user must not see outlet 2 products");
+        assertEquals(List.of("Kopi Cabang Dua"),
+                names(stub.getCatalogItem(catalogRequest(TENANT_A1, USER_A1_OUTLET2, "kopi", 0))),
+                "outlet 2 user must not see outlet 1 products");
+        assertEquals("21000.00", stub.getCatalogItem(catalogRequest(TENANT_A1, USER_A1_OUTLET2, "kopi", 0))
+                .getItems(0).getPriceAmount());
+    }
+
+    @Test
+    void orderOfAnotherOutletIsNotFoundForTheCallerAndFoundForItsOwnOutlet() {
+        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
+
+        StatusRuntimeException otherOutlet = assertCode(Status.Code.NOT_FOUND,
+                () -> stub.getOrderStatus(orderRequest(TENANT_A1, USER_A1, ORDER_A1_OUTLET2)));
+        StatusRuntimeException missing = assertCode(Status.Code.NOT_FOUND,
+                () -> stub.getOrderStatus(orderRequest(TENANT_A1, USER_A1, "ORD-DOES-NOT-EXIST")));
+        assertDoesNotLeak(otherOutlet, ORDER_A1_OUTLET2);
+        assertEquals(missing.getStatus().getDescription(), otherOutlet.getStatus().getDescription(),
+                "an order of another outlet must look like a missing order");
+        assertCode(Status.Code.NOT_FOUND,
+                () -> stub.getOrderStatus(orderRequest(TENANT_A1, USER_A1_OUTLET2, ORDER_A1_PAID)));
+
+        GetOrderStatusResponse own = stub.getOrderStatus(orderRequest(TENANT_A1, USER_A1_OUTLET2, ORDER_A1_OUTLET2));
+        assertEquals(ORDER_A1_OUTLET2, own.getOrderNumber());
+        assertEquals("12500.50", own.getTotal(), "money is a plain decimal string with scale 2");
     }
 
     // ---------------------------------------------------------------- reflection
@@ -475,13 +575,30 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         return headers;
     }
 
+    /** The caller is the default member of the tenant; tenants without seeded members use USER_A1 (denied earlier by the tenant check). */
+    private static UUID memberOf(UUID tenantId) {
+        if (TENANT_A2.equals(tenantId)) {
+            return USER_A2;
+        }
+        return TENANT_TOGGLE.equals(tenantId) ? USER_TOGGLE : USER_A1;
+    }
+
     private static GetCatalogItemRequest catalogRequest(UUID tenantId, String query, int limit) {
-        return GetCatalogItemRequest.newBuilder().setTenantId(tenantId.toString()).setQuery(query).setLimit(limit)
-                .build();
+        return catalogRequest(tenantId, memberOf(tenantId), query, limit);
+    }
+
+    private static GetCatalogItemRequest catalogRequest(UUID tenantId, UUID userId, String query, int limit) {
+        return GetCatalogItemRequest.newBuilder().setTenantId(tenantId.toString()).setUserId(userId.toString())
+                .setQuery(query).setLimit(limit).build();
     }
 
     private static GetOrderStatusRequest orderRequest(UUID tenantId, String orderNumber) {
-        return GetOrderStatusRequest.newBuilder().setTenantId(tenantId.toString()).setOrderNumber(orderNumber).build();
+        return orderRequest(tenantId, memberOf(tenantId), orderNumber);
+    }
+
+    private static GetOrderStatusRequest orderRequest(UUID tenantId, UUID userId, String orderNumber) {
+        return GetOrderStatusRequest.newBuilder().setTenantId(tenantId.toString()).setUserId(userId.toString())
+                .setOrderNumber(orderNumber).build();
     }
 
     private static List<String> names(GetCatalogItemResponse response) {
@@ -551,7 +668,7 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private void seedOrder(UUID tenantId, UUID outletId, String orderNumber, String status, String paymentStatus,
-            long total) {
+            double total) {
         jdbc.update("INSERT INTO sales_orders (id, tenant_id, outlet_id, order_number, idempotency_key, status, "
                 + "payment_status, service_type, source, subtotal, discount_amount, tax_amount, "
                 + "service_charge_amount, tax_rate_snapshot, service_charge_rate_snapshot, total, created_at, "
@@ -560,10 +677,37 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
                 paymentStatus, BigDecimal.valueOf(total), BigDecimal.valueOf(total));
     }
 
+    /** Staff users with their membership and outlet access; the gRPC caller must be one of these. */
+    private void seedStaffAccess() {
+        seedMember(USER_A1, "ACTIVE", TENANT_A1, true, a1Outlet);
+        seedMember(USER_A1_OUTLET2, "ACTIVE", TENANT_A1, true, a1Outlet2);
+        seedMember(USER_A1_DEACTIVATED, "ACTIVE", TENANT_A1, false, a1Outlet);
+        seedMember(USER_A1_DISABLED, "DISABLED", TENANT_A1, true, a1Outlet);
+        seedMember(USER_A2, "ACTIVE", TENANT_A2, true, a2Outlet);
+        seedMember(USER_TOGGLE, "ACTIVE", TENANT_TOGGLE, true, toggleOutlet);
+        seedStaffUser(USER_OUTSIDER, "ACTIVE");
+    }
+
+    private void seedStaffUser(UUID userId, String status) {
+        jdbc.update("INSERT INTO staff_users (id, email, password_hash, full_name, status, created_at, updated_at, version) "
+                + "VALUES (?, ?, 'unused-hash', ?, ?, now(), now(), 0)", userId, "grpc-" + userId + "@example.com",
+                "Staff " + userId, status);
+    }
+
+    private void seedMember(UUID userId, String userStatus, UUID tenantId, boolean membershipActive, UUID outletId) {
+        seedStaffUser(userId, userStatus);
+        UUID membershipId = UUID.randomUUID();
+        jdbc.update("INSERT INTO tenant_memberships (id, tenant_id, user_id, role, active, created_at, updated_at, version) "
+                + "VALUES (?, ?, ?, 'CASHIER', ?, now(), now(), 0)", membershipId, tenantId, userId, membershipActive);
+        jdbc.update("INSERT INTO membership_outlet_access (id, membership_id, outlet_id, tenant_id, created_at) "
+                + "VALUES (?, ?, ?, ?, now())", UUID.randomUUID(), membershipId, outletId, tenantId);
+    }
+
     private void seedTenantA1() {
         UUID tenant = TENANT_A1;
         seedTenant(tenant, "Warung A1", "ACTIVE", "FNB");
         UUID outlet = seedOutlet(tenant, "Outlet A1");
+        a1Outlet = outlet;
         UUID drinks = seedCategory(tenant, outlet, "Minuman");
         UUID snacks = seedCategory(tenant, outlet, "Snack");
         a1KopiSusuId = seedProduct(tenant, outlet, drinks, "Kopi Susu", 18000, true, false, 1);
@@ -573,18 +717,24 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
             seedProduct(tenant, outlet, snacks, String.format("Bulk Item %03d", index), 5000L + index, true, false,
                     10 + index);
         }
-        seedOrder(tenant, outlet, ORDER_A1_PAID, "CONFIRMED", "PAID", 75000);
-        seedOrder(tenant, outlet, ORDER_A1_NEW, "NEW", "UNPAID", 25000);
+        seedOrder(tenant, outlet, ORDER_A1_PAID, "COMPLETED", "PAID", 75000);
+        seedOrder(tenant, outlet, ORDER_A1_OPEN, "OPEN", "UNPAID", 25000);
+
+        a1Outlet2 = seedOutlet(tenant, "Outlet A1 Dua");
+        UUID drinks2 = seedCategory(tenant, a1Outlet2, "Minuman");
+        seedProduct(tenant, a1Outlet2, drinks2, "Kopi Cabang Dua", 21000, true, false, 1);
+        seedOrder(tenant, a1Outlet2, ORDER_A1_OUTLET2, "OPEN", "UNPAID", 12500.5);
     }
 
     private void seedTenantA2() {
         UUID tenant = TENANT_A2;
         seedTenant(tenant, "Warung A2", "ACTIVE", "FNB");
         UUID outlet = seedOutlet(tenant, "Outlet A2");
+        a2Outlet = outlet;
         UUID drinks = seedCategory(tenant, outlet, "Minuman");
         seedProduct(tenant, outlet, drinks, "Kopi Tetangga", 20000, true, false, 1);
         seedProduct(tenant, outlet, drinks, "Promo 100% Off", 9000, true, false, 2);
-        seedOrder(tenant, outlet, ORDER_A2, "NEW", "UNPAID", 40000);
+        seedOrder(tenant, outlet, ORDER_A2, "OPEN", "UNPAID", 40000);
     }
 
     /** A tenant with real data that is disabled: its data must stay unreachable through gRPC. */
@@ -594,6 +744,6 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         UUID outlet = seedOutlet(tenant, "Outlet C");
         UUID drinks = seedCategory(tenant, outlet, "Minuman");
         seedProduct(tenant, outlet, drinks, "Kopi Tenant C", 22000, true, false, 1);
-        seedOrder(tenant, outlet, ORDER_C, "NEW", "UNPAID", 30000);
+        seedOrder(tenant, outlet, ORDER_C, "OPEN", "UNPAID", 30000);
     }
 }

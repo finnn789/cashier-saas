@@ -18,4 +18,5 @@ public class FnbInventoryItemResponse {
     private boolean active;
     private BigDecimal quantityOnHand;
     private InventoryBalanceEntity.Status stockStatus;
+    private BigDecimal averageUnitCost;
 }

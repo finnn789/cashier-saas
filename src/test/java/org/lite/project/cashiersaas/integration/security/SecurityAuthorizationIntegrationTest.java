@@ -50,9 +50,19 @@ class SecurityAuthorizationIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test
-    void publicEndpointIsNotBlockedBySecurityWhenNoBearerTokenIsPresent() throws Exception {
-        mockMvc.perform(get("/api/v1/public/probe"))
-                .andExpect(status().isNotFound());
+    void removedPublicAndRealtimeRoutesAreProtectedLikeAnyOtherApiPath() throws Exception {
+        mockMvc.perform(get("/api/v1/public/fnb/menu/x"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/fnb/realtime"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void publicPlanCatalogIsAnonymousGetOnlyWhileOtherPublicPathsStayProtected() throws Exception {
+        mockMvc.perform(get("/api/v1/public/plans"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/public/fnb/menu/x"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

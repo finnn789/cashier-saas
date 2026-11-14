@@ -26,4 +26,5 @@ public class MerchantBusinessSettingsRequest {
     @Size(max = 255) private String outletAddress;
     @Size(max = 32) private String outletPhoneNumber;
     @NotBlank @Size(max = 64) private String timeZone;
+    @Size(max = 200) private String receiptFooter;
 }

@@ -25,7 +25,7 @@ import org.springframework.stereotype.Service;
 public class FnbStockService {
     private final FnbOrderRepository orders;
     private final FnbInventoryRepository inventory;
-    private final PublicOrderTokenService tokens;
+    private final DigestService tokens;
 
     // Runs inside the caller's payment transaction. Stock may go negative; this method never blocks a payment.
     public List<String> consumeForPaidOrder(MerchantAccessContext context, SalesOrderEntity order) {
@@ -65,30 +65,88 @@ public class FnbStockService {
             if (inventory.movementByKey(tenantId, key).isPresent()) continue;
             InventoryItemEntity inventoryItem = inventoryItems.get(itemId);
             BigDecimal delta = need.getValue();
-            InventoryBalanceEntity balance = balances.get(itemId);
-            if (balance == null) {
-                balance = InventoryBalanceEntity.create(tenantId, outletId, inventoryItem);
-                inventory.persist(balance);
-            } else {
-                inventory.lock(balance);
-            }
+            InventoryBalanceEntity balance = lockedBalance(balances, tenantId, outletId, inventoryItem);
+            BigDecimal averageUnitCost = balance.getAverageUnitCost(); // SALE never changes the average
             balance.apply(delta.negate());
             inventory.persist(InventoryMovementEntity.record(tenantId, outletId, inventoryItem, order.getId(), InventoryMovementEntity.Type.SALE,
                     delta.negate(), "Penjualan " + order.getOrderNumber(), key,
-                    tokens.digest("sale|" + order.getId() + "|" + itemId + "|" + delta.toPlainString()), context.getMembership().getId()));
+                    tokens.digest("sale|" + order.getId() + "|" + itemId + "|" + delta.toPlainString()), context.getMembership().getId(),
+                    null, averageUnitCost));
+            String warning = warning(inventoryItem, balance);
+            if (warning != null) warnings.add(warning);
+        }
+        // COGS snapshot per order item (average is stable across this loop); never overwrite a cost already recorded.
+        for (OrderItemEntity item : items) {
+            if (item.getProduct() == null || item.getCostAmount() != null) continue;
+            List<RecipeLineEntity> lines = new ArrayList<>(productRecipes.getOrDefault(item.getProduct().getId(), List.of()));
+            for (OrderItemOptionEntity option : options)
+                if (option.getProductOption() != null && option.getOrderItem().getId().equals(item.getId()))
+                    lines.addAll(optionRecipes.getOrDefault(option.getProductOption().getId(), List.of()));
+            item.recordCost(itemCost(item.getQuantity(), lines, balances));
+        }
+        return warnings;
+    }
+
+    // Runs inside the refund transaction. Puts back exactly what the SALE movements took out; idempotent per (order, item).
+    public List<String> reverseForRefundedOrder(MerchantAccessContext context, SalesOrderEntity order) {
+        UUID tenantId = context.getTenant().getId();
+        UUID outletId = context.getOutlet().getId();
+        List<InventoryMovementEntity> sales = inventory.saleMovements(tenantId, outletId, order.getId()); // ordered by item id
+        if (sales.isEmpty()) return List.of();
+        Map<UUID, InventoryBalanceEntity> balances = new HashMap<>();
+        for (InventoryBalanceEntity balance : inventory.balances(tenantId, outletId, sales.stream().map(sale -> sale.getInventoryItem().getId()).toList()))
+            balances.put(balance.getInventoryItem().getId(), balance);
+
+        List<String> warnings = new ArrayList<>();
+        for (InventoryMovementEntity sale : sales) {
+            InventoryItemEntity inventoryItem = sale.getInventoryItem();
+            String key = "sale-reversal:" + order.getId() + ":" + inventoryItem.getId();
+            if (inventory.movementByKey(tenantId, key).isPresent()) continue;
+            BigDecimal delta = sale.getQuantityDelta().negate();
+            InventoryBalanceEntity balance = lockedBalance(balances, tenantId, outletId, inventoryItem);
+            balance.apply(delta);
+            inventory.persist(InventoryMovementEntity.record(tenantId, outletId, inventoryItem, order.getId(), InventoryMovementEntity.Type.SALE_REVERSAL,
+                    delta, "Refund pesanan " + order.getOrderNumber(), key,
+                    tokens.digest("sale-reversal|" + order.getId() + "|" + inventoryItem.getId() + "|" + delta.toPlainString()), context.getMembership().getId(), sale.getId(), sale.getUnitCost()));
             String warning = warning(inventoryItem, balance);
             if (warning != null) warnings.add(warning);
         }
         return warnings;
     }
 
+    private InventoryBalanceEntity lockedBalance(Map<UUID, InventoryBalanceEntity> balances, UUID tenantId, UUID outletId, InventoryItemEntity item) {
+        InventoryBalanceEntity balance = balances.get(item.getId());
+        if (balance == null) {
+            balance = InventoryBalanceEntity.create(tenantId, outletId, item);
+            inventory.persist(balance);
+        } else {
+            inventory.lock(balance);
+        }
+        return balance;
+    }
+
     private static void addNeeds(Map<UUID, BigDecimal> needs, Map<UUID, InventoryItemEntity> inventoryItems, List<RecipeLineEntity> recipe, int quantity) {
         if (recipe == null) return;
         for (RecipeLineEntity line : recipe) {
+            if (!line.getInventoryItem().isActive()) continue;
             UUID itemId = line.getInventoryItem().getId();
             inventoryItems.putIfAbsent(itemId, line.getInventoryItem());
             needs.merge(itemId, line.getQuantityPerUnit().multiply(BigDecimal.valueOf(quantity)), BigDecimal::add);
         }
+    }
+
+    // Null when no active recipe line exists or any used ingredient has no average cost.
+    private static BigDecimal itemCost(int quantity, List<RecipeLineEntity> lines, Map<UUID, InventoryBalanceEntity> balances) {
+        BigDecimal cost = BigDecimal.ZERO;
+        boolean used = false;
+        for (RecipeLineEntity line : lines) {
+            if (!line.getInventoryItem().isActive()) continue;
+            used = true;
+            InventoryBalanceEntity balance = balances.get(line.getInventoryItem().getId());
+            if (balance == null || balance.getAverageUnitCost() == null) return null;
+            cost = cost.add(line.getQuantityPerUnit().multiply(BigDecimal.valueOf(quantity)).multiply(balance.getAverageUnitCost()));
+        }
+        return used ? cost : null;
     }
 
     private static String warning(InventoryItemEntity item, InventoryBalanceEntity balance) {

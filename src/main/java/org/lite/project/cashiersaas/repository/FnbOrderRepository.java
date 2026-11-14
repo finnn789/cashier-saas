@@ -10,7 +10,6 @@ import org.lite.project.cashiersaas.entity.fnb.QOrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.QSalesOrderEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
-import org.lite.project.cashiersaas.entity.fnb.TableQrTokenEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.OrderStatus;
@@ -18,7 +17,10 @@ import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,7 +33,7 @@ public class FnbOrderRepository {
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
-    // A tenant row lock serializes checkout with the same idempotency key even across QR tables.
+    // A tenant row lock serializes checkout with the same idempotency key.
     public void lockTenant(UUID tenantId) {
         TenantEntity tenant = criteriaBuilderFactory.create(entityManager, TenantEntity.class, "tenant")
                 .where("tenant.id").eq(tenantId).setMaxResults(1).getResultList().stream()
@@ -39,21 +41,9 @@ public class FnbOrderRepository {
         entityManager.refresh(tenant, LockModeType.PESSIMISTIC_WRITE);
     }
 
-    public void refreshQr(TableQrTokenEntity qr) {
-        entityManager.refresh(qr);
-        entityManager.refresh(qr.getOutlet());
-        if (qr.getDiningTable() != null) entityManager.refresh(qr.getDiningTable());
-    }
-
     public Optional<SalesOrderEntity> byIdempotency(UUID tenant, String key) {
         return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
                 .where(ORDER.tenant.id.toString()).eq(tenant).where(ORDER.idempotencyKey.toString()).eq(key)
-                .setMaxResults(1).getResultList().stream().findFirst();
-    }
-
-    public Optional<SalesOrderEntity> byStatusDigest(String digest) {
-        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
-                .where(ORDER.publicStatusTokenDigest.toString()).eq(digest)
                 .setMaxResults(1).getResultList().stream().findFirst();
     }
 
@@ -63,15 +53,42 @@ public class FnbOrderRepository {
                 .where(ORDER.id.toString()).eq(orderId).setMaxResults(1).getResultList().stream().findFirst();
     }
 
+    public int countOpenUnpaid(UUID tenantId, UUID outletId) {
+        return Math.toIntExact(entityManager.createQuery("select count(o) from SalesOrderEntity o where o.tenant.id = :tenantId "
+                        + "and o.outlet.id = :outletId and o.status = :status and o.paymentStatus = :paymentStatus", Long.class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("status", OrderStatus.OPEN).setParameter("paymentStatus", PaymentStatus.UNPAID)
+                .getSingleResult());
+    }
+
+    /** createdAt in [from, to) when both are given (both or none); orderNumber is an exact match. */
     public List<SalesOrderEntity> page(UUID tenantId, UUID outletId, int page, int size,
-                                       OrderStatus status, PaymentStatus paymentStatus, OrderSource source) {
+                                       OrderStatus status, PaymentStatus paymentStatus, OrderSource source,
+                                       Instant from, Instant to, String orderNumber) {
         var query = criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
                 .where(ORDER.tenant.id.toString()).eq(tenantId).where(ORDER.outlet.id.toString()).eq(outletId);
         if (status != null) query.where(ORDER.status.toString()).eq(status);
         if (paymentStatus != null) query.where(ORDER.paymentStatus.toString()).eq(paymentStatus);
         if (source != null) query.where(ORDER.source.toString()).eq(source);
+        if (from != null) query.where(ORDER.createdAt.toString()).ge(from).where(ORDER.createdAt.toString()).lt(to);
+        if (orderNumber != null) query.where(ORDER.orderNumber.toString()).eq(orderNumber);
         return query.orderByDesc(ORDER.createdAt.toString()).orderByDesc(ORDER.id.toString())
                 .setFirstResult(page * size).setMaxResults(size + 1).getResultList();
+    }
+
+    /** Paid, non-cancelled orders with a discount, paid in [from, to), counted per receiving staff user. */
+    public Map<UUID, Long> discountedPaidOrdersByReceiver(UUID tenantId, UUID outletId, Instant from, Instant to) {
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : entityManager.createQuery("select p.receivedBy.id, count(distinct o.id) from PaymentEntity p "
+                        + "join p.salesOrder o where p.tenant.id = :tenantId and p.outlet.id = :outletId "
+                        + "and o.tenant.id = :tenantId and o.outlet.id = :outletId and p.paidAt >= :from and p.paidAt < :to "
+                        + "and o.paymentStatus = :paid and o.status <> :cancelled and o.discountAmount > 0 "
+                        + "group by p.receivedBy.id", Object[].class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("from", from).setParameter("to", to)
+                .setParameter("paid", PaymentStatus.PAID).setParameter("cancelled", OrderStatus.CANCELLED).getResultList())
+            counts.put((UUID) row[0], (Long) row[1]);
+        return counts;
     }
 
     public List<OrderItemEntity> items(UUID tenantId, UUID outletId, List<UUID> orderIds) {
@@ -88,13 +105,13 @@ public class FnbOrderRepository {
                 .where(OPTION.orderItem.id.toString()).in(itemIds).orderByAsc(OPTION.createdAt.toString()).getResultList();
     }
 
-    public List<SalesOrderEntity> activeForTable(UUID tenantId, UUID outletId, UUID tableId) {
-        return criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
-                .where(ORDER.tenant.id.toString()).eq(tenantId)
-                .where(ORDER.outlet.id.toString()).eq(outletId)
-                .where(ORDER.diningTable.id.toString()).eq(tableId)
-                .where(ORDER.status.toString()).notEq(OrderStatus.CANCELLED)
-                .where(ORDER.status.toString()).notEq(OrderStatus.COMPLETED).getResultList();
+    // Options first so the foreign key from order_item_options never blocks the item delete.
+    public void deleteLines(UUID tenantId, UUID outletId, SalesOrderEntity order) {
+        List<OrderItemEntity> items = items(tenantId, outletId, List.of(order.getId()));
+        itemOptions(tenantId, outletId, items.stream().map(OrderItemEntity::getId).toList()).forEach(entityManager::remove);
+        entityManager.flush();
+        items.forEach(entityManager::remove);
+        entityManager.flush();
     }
 
     public void refreshOrder(SalesOrderEntity order) {

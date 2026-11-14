@@ -13,7 +13,11 @@ import org.lite.project.cashiersaas.entity.shared.inventory.QInventoryMovementEn
 import org.lite.project.cashiersaas.entity.shared.inventory.QRecipeLineEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.RecipeLineEntity;
 import org.springframework.stereotype.Repository;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -66,10 +70,29 @@ public class FnbInventoryRepository {
                 .setFirstResult(page * size).setMaxResults(size).getResultList();
     }
 
+    public List<InventoryMovementEntity> saleMovements(UUID tenant, UUID outlet, UUID orderId) {
+        return criteriaBuilderFactory.create(entityManager, InventoryMovementEntity.class, MOVEMENT.getMetadata().getName())
+                .where(MOVEMENT.tenantId.toString()).eq(tenant).where(MOVEMENT.outletId.toString()).eq(outlet)
+                .where(MOVEMENT.orderId.toString()).eq(orderId).where(MOVEMENT.type.toString()).eq(InventoryMovementEntity.Type.SALE)
+                .orderByAsc(MOVEMENT.inventoryItem.id.toString()).getResultList();
+    }
+
     public Optional<InventoryMovementEntity> movementByKey(UUID tenant, String idempotencyKey) {
         return criteriaBuilderFactory.create(entityManager, InventoryMovementEntity.class, MOVEMENT.getMetadata().getName())
                 .where(MOVEMENT.tenantId.toString()).eq(tenant).where(MOVEMENT.idempotencyKey.toString()).eq(idempotencyKey)
                 .setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    /** Net quantity_delta per item of the given movement types since the instant (usage is negative); one grouped query. */
+    public Map<UUID, BigDecimal> netDeltaByItem(UUID tenant, UUID outlet, Instant since, List<InventoryMovementEntity.Type> types) {
+        Map<UUID, BigDecimal> totals = new HashMap<>();
+        for (Object[] row : entityManager.createQuery("select m.inventoryItem.id, sum(m.quantityDelta) from InventoryMovementEntity m "
+                        + "where m.tenantId = :tenant and m.outletId = :outlet and m.occurredAt >= :since and m.type in :types "
+                        + "group by m.inventoryItem.id", Object[].class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).setParameter("since", since)
+                .setParameter("types", types).getResultList())
+            totals.put((UUID) row[0], (BigDecimal) row[1]);
+        return totals;
     }
 
     public List<RecipeLineEntity> productRecipes(UUID tenant, UUID outlet, List<UUID> productIds) {

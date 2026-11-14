@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/items"
+method: PUT
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "serviceType": "DINE_IN",
+      "customerLabel": "Pelanggan KedaiMbo",
+      "orderNote": "Es dipisah, tanpa sedotan",
+      "items": [
+        {
+          "productId": "{{productId}}",
+          "quantity": 2,
+          "note": "",
+          "optionIds": []
+        }
+      ]
+    }
+order: 2000

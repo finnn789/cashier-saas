@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from app.api.internal_daily_summaries import router as internal_daily_summaries_router
 from app.api.internal_members import router as internal_members_router
 from app.channels.telegram.bot import TelegramChannel, start_telegram_channel
 from app.config import load_settings
@@ -27,6 +28,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="AI Service", lifespan=lifespan)
 app.include_router(internal_members_router)
+app.include_router(internal_daily_summaries_router)
 
 
 @app.get("/")

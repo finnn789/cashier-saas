@@ -250,7 +250,8 @@ class VerifiedTenantReachesToolTests(unittest.IsolatedAsyncioTestCase):
         registry.register(tool)
         graph = build_chat_graph(openrouter_key="sk-test", ai_model="mock-model", tools=registry)
         service = ChatService(TransactionFake(), channels, tools=registry, graph=graph)  # type: ignore[arg-type]
-        membership = VerifiedMembership(verified, "Kopi Senja", uuid4(), "CASHIER", True)
+        java_user = uuid4()
+        membership = VerifiedMembership(verified, "Kopi Senja", java_user, "CASHIER", True)
         sender = Mock(spec=Sender)
         sender.send = AsyncMock(return_value=SimpleNamespace(status="SENT", retry_after=0))
         intake = Intake(TelegramSettings("dummy-token", frozenset()), service, sender)
@@ -265,7 +266,7 @@ class VerifiedTenantReachesToolTests(unittest.IsolatedAsyncioTestCase):
         llm_turns = [
             AIMessage(content="", tool_calls=[{
                 "name": "order_lookup",
-                "args": {"order_number": "ORD-1", "tenant_id": str(attacker)},
+                "args": {"order_number": "ORD-1", "tenant_id": str(attacker), "user_id": str(attacker)},
                 "id": "call-1",
             }]),
             AIMessage(content="Pesanan ORD-1 sedang diproses."),
@@ -280,7 +281,10 @@ class VerifiedTenantReachesToolTests(unittest.IsolatedAsyncioTestCase):
             llm.side_effect = llm_turns
             await intake.process(incoming)
 
-        self.assertEqual(tool.calls, [{"tenant_id": str(verified), "order_number": "ORD-1"}])
+        self.assertEqual(
+            tool.calls,
+            [{"tenant_id": str(verified), "user_id": str(java_user), "order_number": "ORD-1"}],
+        )
         self.assertEqual(store.views, [verified])
         channels.for_tenant.assert_called_once_with(verified)
         sender.send.assert_awaited_once_with(71, "Pesanan ORD-1 sedang diproses.", 1)

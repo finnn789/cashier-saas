@@ -32,22 +32,6 @@ public class RateLimitProperties {
 
     @NotNull
     @Valid
-    private Limit publicRead;
-
-    @NotNull
-    @Valid
-    private Limit publicOrderWrite;
-
-    @NotNull
-    @Valid
-    private Limit qrToken;
-
-    @NotNull
-    @Valid
-    private Limit realtimeTicket;
-
-    @NotNull
-    @Valid
     private Limit authenticated;
 
     @NotNull

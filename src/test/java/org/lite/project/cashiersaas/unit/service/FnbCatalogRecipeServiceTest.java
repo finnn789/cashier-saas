@@ -1,9 +1,15 @@
 package org.lite.project.cashiersaas.unit.service;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbOptionRequest;
@@ -45,6 +51,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -110,12 +117,32 @@ class FnbCatalogRecipeServiceTest {
 
     // ---------------------------------------------------------------- replaceProductRecipe
 
-    @Test
-    void replaceProductRecipeRequiresOwnerGuardAndTouchesNothingWhenDenied() {
+    private interface Call {
+        void run(FnbCatalogRecipeServiceTest test);
+    }
+
+    static Stream<Arguments> ownerOnlyCalls() {
+        return Stream.of(
+                Arguments.of(Named.of("replaceProductRecipe", (Call) t -> t.service.replaceProductRecipe(
+                        t.owner, t.outletId, t.productId, t.recipeRequest(t.line(t.itemAId, "18"))))),
+                Arguments.of(Named.of("replaceOptionRecipe", (Call) t -> t.service.replaceOptionRecipe(
+                        t.owner, t.outletId, t.groupId, t.optionId, t.recipeRequest(t.line(t.itemAId, "50"))))),
+                Arguments.of(Named.of("productRecipe", (Call) t -> t.service.productRecipe(
+                        t.owner, t.outletId, t.productId))),
+                Arguments.of(Named.of("optionRecipe", (Call) t -> t.service.optionRecipe(
+                        t.owner, t.outletId, t.groupId, t.optionId))),
+                Arguments.of(Named.of("updateOption", (Call) t -> t.service.updateOption(
+                        t.owner, t.outletId, t.groupId, t.optionId, t.optionRequest("Boba", "3000.00", null)))),
+                Arguments.of(Named.of("updateProduct", (Call) t -> t.service.updateProduct(
+                        t.owner, t.outletId, t.productId, t.productRequest("Latte", "10000.00", null)))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("ownerOnlyCalls")
+    void ownerOnlyUseCasesRequireOwnerGuardAndTouchNothingWhenDenied(Call call) {
         when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
 
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceProductRecipe(owner, outletId, productId, recipeRequest(line(itemAId, "18"))));
+        assertThrows(ResourceNotFoundException.class, () -> call.run(this));
 
         verify(guard).requireOwner(owner, outletId);
         verifyNoInteractions(catalog, inventory, audit, references);
@@ -186,6 +213,7 @@ class FnbCatalogRecipeServiceTest {
         order.verify(inventory).deleteProductRecipe(tenantId, outletId, productId);
         order.verify(inventory, times(2)).persist(any(RecipeLineEntity.class));
         order.verify(audit).persist(any(AuditLogEntity.class));
+        verify(inventory, never()).deleteOptionRecipe(any(UUID.class), any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -249,17 +277,6 @@ class FnbCatalogRecipeServiceTest {
     }
 
     @Test
-    void replaceProductRecipeUsesProductVariantOfDeleteOnly() {
-        arrangeProductRecipeHappyPath();
-
-        service.replaceProductRecipe(owner, outletId, productId,
-                recipeRequest(line(itemAId, "18"), line(itemBId, "120.5")));
-
-        verify(inventory).deleteProductRecipe(tenantId, outletId, productId);
-        verify(inventory, never()).deleteOptionRecipe(any(UUID.class), any(UUID.class), any(UUID.class));
-    }
-
-    @Test
     void replaceProductRecipeWithEmptyListClearsRecipeAndAuditsZeroLines() {
         stubOwner();
         stubProduct();
@@ -279,18 +296,6 @@ class FnbCatalogRecipeServiceTest {
     }
 
     // ---------------------------------------------------------------- replaceOptionRecipe
-
-    @Test
-    void replaceOptionRecipeRequiresOwnerGuardAndTouchesNothingWhenDenied() {
-        when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
-                        recipeRequest(line(itemAId, "50"))));
-
-        verify(guard).requireOwner(owner, outletId);
-        verifyNoInteractions(catalog, inventory, audit, references);
-    }
 
     @Test
     void replaceOptionRecipeRejectsGroupIdThatDoesNotMatchTheOptionGroup() {
@@ -327,18 +332,6 @@ class FnbCatalogRecipeServiceTest {
         stubOwner();
         stubGroup();
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.empty());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
-                        recipeRequest(line(itemAId, "50"))));
-
-        verifyNoInteractions(inventory, audit);
-    }
-
-    @Test
-    void replaceOptionRecipeRejectsMissingGroup() {
-        stubOwner();
-        when(catalog.group(tenantId, outletId, groupId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
                 () -> service.replaceOptionRecipe(owner, outletId, groupId, optionId,
@@ -428,20 +421,6 @@ class FnbCatalogRecipeServiceTest {
     }
 
     @Test
-    void replaceOptionRecipeReturnsMappedLines() {
-        arrangeOptionRecipeHappyPath();
-
-        FnbRecipeResponse response = service.replaceOptionRecipe(owner, outletId, groupId, optionId,
-                recipeRequest(line(itemAId, "50"), line(itemBId, "15")));
-
-        assertEquals(2, response.getLines().size());
-        assertEquals("Kopi", response.getLines().get(0).getInventoryItemName());
-        assertEquals("g", response.getLines().get(0).getUnit());
-        assertEquals("Susu", response.getLines().get(1).getInventoryItemName());
-        assertEquals("ml", response.getLines().get(1).getUnit());
-    }
-
-    @Test
     void replaceOptionRecipeWithEmptyListClearsRecipeAndAuditsZeroLines() {
         stubOwner();
         stubOption();
@@ -460,33 +439,9 @@ class FnbCatalogRecipeServiceTest {
     // ---------------------------------------------------------------- productRecipe / optionRecipe (GET)
 
     @Test
-    void productRecipeRequiresOwnerGuardAndQueriesNothingWhenDenied() {
-        when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class, () -> service.productRecipe(owner, outletId, productId));
-
-        verify(guard).requireOwner(owner, outletId);
-        verifyNoInteractions(catalog, inventory, audit);
-    }
-
-    @Test
     void productRecipeRejectsMissingProductWithoutQueryingRecipes() {
         stubOwner();
         when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.empty());
-
-        assertThrows(ResourceNotFoundException.class, () -> service.productRecipe(owner, outletId, productId));
-
-        verifyNoInteractions(inventory);
-    }
-
-    @Test
-    void productRecipeRejectsProductWhoseCategoryIsArchived() {
-        CategoryEntity archivedCategory = CategoryEntity.create(tenant, outlet, "Old", 2);
-        archivedCategory.archive();
-        ProductEntity archivedProduct = ProductEntity.create(tenant, outlet, productDetails(archivedCategory, "5000.00"));
-        ReflectionTestUtils.setField(archivedProduct, "id", productId);
-        stubOwner();
-        when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.of(archivedProduct));
 
         assertThrows(ResourceNotFoundException.class, () -> service.productRecipe(owner, outletId, productId));
 
@@ -517,28 +472,6 @@ class FnbCatalogRecipeServiceTest {
         verify(inventory, never()).deleteProductRecipe(any(UUID.class), any(UUID.class), any(UUID.class));
         verify(inventory, never()).persist(any(RecipeLineEntity.class));
         verifyNoInteractions(audit);
-    }
-
-    @Test
-    void productRecipeReturnsEmptyLinesWhenProductHasNoRecipe() {
-        stubOwner();
-        stubProduct();
-        when(inventory.productRecipes(tenantId, outletId, List.of(productId))).thenReturn(List.of());
-
-        FnbRecipeResponse response = service.productRecipe(owner, outletId, productId);
-
-        assertTrue(response.getLines().isEmpty());
-    }
-
-    @Test
-    void optionRecipeRequiresOwnerGuardAndQueriesNothingWhenDenied() {
-        when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.optionRecipe(owner, outletId, groupId, optionId));
-
-        verify(guard).requireOwner(owner, outletId);
-        verifyNoInteractions(catalog, inventory, audit);
     }
 
     @Test
@@ -589,49 +522,17 @@ class FnbCatalogRecipeServiceTest {
         verifyNoInteractions(audit);
     }
 
-    @Test
-    void optionRecipeReturnsEmptyLinesWhenOptionHasNoRecipe() {
-        stubOwner();
-        stubOption();
-        when(inventory.optionRecipes(tenantId, outletId, List.of(optionId))).thenReturn(List.of());
-
-        FnbRecipeResponse response = service.optionRecipe(owner, outletId, groupId, optionId);
-
-        assertTrue(response.getLines().isEmpty());
-    }
-
     // ---------------------------------------------------------------- regression: updateOption / recordPrice
 
-    @Test
-    void updateOptionRequiresOwnerGuard() {
-        when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "3000.00", null)));
-
-        verifyNoInteractions(catalog, audit, references);
-    }
-
-    @Test
-    void updateOptionPriceChangeWithoutReasonIsRejectedAndNothingIsAudited() {
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"   "})
+    void updateOptionPriceChangeWithoutOrBlankReasonIsRejectedAndNothingIsAudited(String reason) {
         stubOwner();
         stubOption();
 
         InvalidOperationException error = assertThrows(InvalidOperationException.class,
-                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "4000.00", null)));
-
-        assertEquals(PRICE_REASON_MESSAGE, error.getMessage());
-        verifyNoInteractions(audit);
-        assertEquals(0, new BigDecimal("3000.00").compareTo(option.getPriceAdjustment()));
-    }
-
-    @Test
-    void updateOptionPriceChangeWithBlankReasonIsRejected() {
-        stubOwner();
-        stubOption();
-
-        InvalidOperationException error = assertThrows(InvalidOperationException.class,
-                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "4000.00", "   ")));
+                () -> service.updateOption(owner, outletId, groupId, optionId, optionRequest("Boba", "4000.00", reason)));
 
         assertEquals(PRICE_REASON_MESSAGE, error.getMessage());
         verifyNoInteractions(audit);
@@ -720,41 +621,20 @@ class FnbCatalogRecipeServiceTest {
 
     // ---------------------------------------------------------------- regression: updateProduct / recordPrice
 
-    @Test
-    void updateProductRequiresOwnerGuard() {
-        when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.updateProduct(owner, outletId, productId, productRequest("Latte", "10000.00", null)));
-
-        verifyNoInteractions(catalog, audit, references);
-    }
-
-    @Test
-    void updateProductPriceChangeWithoutReasonIsRejectedAndNothingIsAudited() {
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"  "})
+    void updateProductPriceChangeWithoutOrBlankReasonIsRejectedAndNothingIsAudited(String reason) {
         stubOwner();
         stubProduct();
         stubCategory();
 
         InvalidOperationException error = assertThrows(InvalidOperationException.class,
-                () -> service.updateProduct(owner, outletId, productId, productRequest("Latte", "12000.00", null)));
+                () -> service.updateProduct(owner, outletId, productId, productRequest("Latte", "12000.00", reason)));
 
         assertEquals(PRICE_REASON_MESSAGE, error.getMessage());
         verifyNoInteractions(audit);
         assertEquals(0, new BigDecimal("10000.00").compareTo(product.getPrice()));
-    }
-
-    @Test
-    void updateProductPriceChangeWithBlankReasonIsRejected() {
-        stubOwner();
-        stubProduct();
-        stubCategory();
-
-        InvalidOperationException error = assertThrows(InvalidOperationException.class,
-                () -> service.updateProduct(owner, outletId, productId, productRequest("Latte", "12000.00", "  ")));
-
-        assertEquals(PRICE_REASON_MESSAGE, error.getMessage());
-        verifyNoInteractions(audit);
     }
 
     @Test

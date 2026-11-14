@@ -37,6 +37,14 @@ VALUES ('00000000-0000-4000-8000-0000000000d1', '00000000-0000-4000-8000-0000000
         'Asia/Jakarta', 'Jl. Demo No. 1, Jakarta', '+6281200000000', true, now(), now(), 0)
 ON CONFLICT DO NOTHING;
 
+-- Default payment labels (V8 only seeded outlets that existed before this seed ran). Fixed ids + ON CONFLICT DO NOTHING also absorbs the (outlet_id, lower(name)) unique index.
+INSERT INTO payment_labels (id, created_at, updated_at, version, tenant_id, outlet_id, name, active, display_order)
+VALUES
+ ('00000000-0000-4000-8000-000000000d11', now(), now(), 0, '00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000d1', 'QRIS', true, 1),
+ ('00000000-0000-4000-8000-000000000d12', now(), now(), 0, '00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000d1', 'Transfer', true, 2),
+ ('00000000-0000-4000-8000-000000000d13', now(), now(), 0, '00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000d1', 'Debit', true, 3)
+ON CONFLICT DO NOTHING;
+
 INSERT INTO tenant_memberships (id, tenant_id, user_id, role, active, created_at, updated_at, version)
 VALUES
  ('00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000b1',

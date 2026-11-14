@@ -24,11 +24,8 @@ public final class FnbStaffOrderMapper {
         response.setOrderNumber(order.getOrderNumber());
         response.setSource(order.getSource());
         response.setServiceType(order.getServiceType());
-        if (order.getDiningTable() != null) {
-            response.setTableId(order.getDiningTable().getId());
-            response.setTableName(order.getDiningTable().getName());
-        }
         response.setCustomerLabel(order.getCustomerLabel());
+        response.setOrderNote(order.getOrderNote());
         response.setStatus(order.getStatus());
         response.setPaymentStatus(order.getPaymentStatus());
         response.setCreatedAt(order.getCreatedAt());

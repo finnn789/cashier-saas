@@ -37,18 +37,29 @@ class CatalogSearchTool(BaseTool):
             "required": ["query"],
         }
 
-    async def execute(self, *, tenant_id: str, query: str = "", **kwargs: Any) -> Any:
+    async def execute(
+        self, *, tenant_id: str, user_id: str | None = None, query: str = "", **kwargs: Any
+    ) -> Any:
         clean_query = query.strip()
+        if not user_id:
+            return {
+                "query": clean_query,
+                "total": 0,
+                "items": [],
+                "message": "Katalog tidak tersedia: akun Anda belum terverifikasi.",
+            }
         client = self._client
         if client is None:
             client = CashierGrpcClient(load_grpc_settings())
             self._client = client
 
-        items = await client.get_catalog_items(tenant_id=tenant_id, query=clean_query)
+        items = await client.get_catalog_items(
+            tenant_id=tenant_id, user_id=user_id, query=clean_query
+        )
         return {
             "query": clean_query,
             "total": len(items),
-            "items": items,
+            "items": [{**item, "price": str(item["price"])} for item in items],
             "message": (
                 f"Ditemukan {len(items)} menu untuk pencarian '{clean_query}'."
                 if items

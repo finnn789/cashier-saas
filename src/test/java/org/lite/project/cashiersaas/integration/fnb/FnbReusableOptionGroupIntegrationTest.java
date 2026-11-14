@@ -202,6 +202,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
     }
 
     private MvcResult payCash(MerchantFixture actor, String orderId) throws Exception {
+        api.ensureShift(actor);
         return api.send(post(orders(actor) + "/" + orderId + "/payments").header(AUTH, actor.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"method\":\"CASH\",\"amountTendered\":1000000,\"idempotencyKey\":\"pay-" + UUID.randomUUID()
@@ -325,10 +326,10 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         assertEquals(List.of("OK"), readList(list, "$.data[?(@.id=='" + gula + "')].stockStatus"));
     }
 
-    // ------------------------------------------------------------------ 2. public menu
+    // ------------------------------------------------------------------ 2. cashier option listing
 
     @Test
-    void publicMenuListsTheSharedGroupUnderBothProductsWithEachOptionExactlyOnce() throws Exception {
+    void cashierListsTheSharedGroupUnderBothProductsWithEachOptionExactlyOnce() throws Exception {
         MerchantFixture owner = api.onboardOwner("rog-menu");
         String category = api.createCategory(owner, "Minuman");
         String teh = api.createProduct(owner, category, "Es Teh", PRICE);
@@ -339,22 +340,16 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         String jelly = createOption(owner, groupId, "Jelly", "2000");
         attachOk(owner, teh, groupId);
         attachOk(owner, kopi, groupId);
-        String qrToken = api.createTable(owner, "Meja 1")[1];
 
-        MvcResult menu = api.send(get("/api/v1/public/fnb/menu/" + qrToken), 200);
-
-        String products = "$.data.categories[*].products";
         for (String productId : List.of(teh, kopi)) {
-            assertEquals(List.of(groupId), readList(menu, products + "[?(@.id=='" + productId + "')].groups[*].id"),
+            assertEquals(List.of(groupId), productGroupIds(owner, productId),
                     "the shared group appears exactly once under each product");
-            List<String> optionIds = readList(menu, products + "[?(@.id=='" + productId + "')].groups[?(@.id=='"
-                    + groupId + "')].options[*].id");
-            assertEquals(2, optionIds.size(), "no duplicated options under " + productId + ": " + optionIds);
-            assertEquals(Set.of(boba, jelly), new HashSet<>(optionIds));
         }
-        assertTrue(readList(menu, products + "[?(@.id=='" + plain + "')].groups[*].id").isEmpty(),
-                "a product without attached groups exposes none");
-        assertEquals(List.of(groupId, groupId), readList(menu, products + "[*].groups[*].id"));
+        assertTrue(productGroupIds(owner, plain).isEmpty(), "a product without attached groups exposes none");
+        List<String> optionIds = readList(api.send(get(optionsReadUrl(owner, groupId)).header(AUTH, owner.bearer()), 200),
+                "$.data[*].id");
+        assertEquals(2, optionIds.size(), "no duplicated options in the shared group: " + optionIds);
+        assertEquals(Set.of(boba, jelly), new HashSet<>(optionIds));
     }
 
     // ------------------------------------------------------------------ 3. group rules enforced at order time

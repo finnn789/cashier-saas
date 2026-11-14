@@ -22,6 +22,7 @@ import org.lite.project.cashiersaas.repository.StaffUserRepository;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
+import org.lite.project.cashiersaas.shared.StatusConstants;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -82,7 +83,7 @@ public class CashierInvitationService {
         }
         if (invitation.isClaimedBy(user)) {
             // Idempotent re-claim: re-publish so an earlier failed Ai-services sync is healed.
-            memberSyncPublisher.memberChanged(invitation.getTenant(), user, Role.CASHIER);
+            memberSyncPublisher.memberChanged(invitation.getTenant(), user, Role.CASHIER, StatusConstants.ACTIVE);
             return OnboardingMapper.toClaim(invitation);
         }
         if (invitation.getClaimedAt() != null || !invitation.getExpiresAt().isAfter(Instant.now())
@@ -110,7 +111,7 @@ public class CashierInvitationService {
         if (user.isPendingProfile()) {
             user.activateInvitedCashier();
         }
-        memberSyncPublisher.memberChanged(invitation.getTenant(), user, Role.CASHIER);
+        memberSyncPublisher.memberChanged(invitation.getTenant(), user, Role.CASHIER, StatusConstants.ACTIVE);
         return OnboardingMapper.toClaim(invitation);
     }
 

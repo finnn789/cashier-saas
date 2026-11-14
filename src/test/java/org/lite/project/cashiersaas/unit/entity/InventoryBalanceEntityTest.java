@@ -2,6 +2,8 @@ package org.lite.project.cashiersaas.unit.entity;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
@@ -11,7 +13,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 @Tag("unit")
 class InventoryBalanceEntityTest {
@@ -31,19 +33,6 @@ class InventoryBalanceEntityTest {
     }
 
     @Test
-    void createStartsAtZeroAndKeepsScopeAndItem() {
-        InventoryItemEntity item = item("10");
-
-        InventoryBalanceEntity balance = InventoryBalanceEntity.create(tenantId, outletId, item);
-
-        assertEquals(0, BigDecimal.ZERO.compareTo(balance.getQuantityOnHand()));
-        assertEquals(tenantId, balance.getTenantId());
-        assertEquals(outletId, balance.getOutletId());
-        assertSame(item, balance.getInventoryItem());
-        assertEquals(InventoryBalanceEntity.Status.OUT, balance.status());
-    }
-
-    @Test
     void applyAccumulatesPositiveAndNegativeDeltasKeepingScale() {
         InventoryBalanceEntity balance = InventoryBalanceEntity.create(tenantId, outletId, item("10"));
 
@@ -55,48 +44,114 @@ class InventoryBalanceEntityTest {
         assertEquals(new BigDecimal("-1.250"), balance.getQuantityOnHand());
     }
 
-    @Test
-    void negativeQuantityIsNegativeEvenJustBelowZero() {
-        assertEquals(InventoryBalanceEntity.Status.NEGATIVE, balanceOf("10", "-0.001").status());
-        assertEquals(InventoryBalanceEntity.Status.NEGATIVE, balanceOf("0", "-26").status());
+    @ParameterizedTest
+    @CsvSource({
+            "10, -0.001, NEGATIVE",
+            "0, -26, NEGATIVE",
+            "10, 0, OUT",
+            "10, 0.000, OUT",
+            "0, 0, OUT",
+            "10, 10, LOW",
+            "10, 10.000, LOW",
+            "10.000, 10, LOW",
+            "10, 0.001, LOW",
+            "10, 10.001, OK",
+            "0, 0.001, OK"
+    })
+    void statusComparesQuantityToReorderLevelIgnoringScaleAndNegativeIsBelowZero(
+            String reorderLevel, String quantity, InventoryBalanceEntity.Status expected) {
+        assertEquals(expected, balanceOf(reorderLevel, quantity).status());
+    }
+
+    // ---- moving average (receive)
+
+    private InventoryBalanceEntity emptyBalance() {
+        return InventoryBalanceEntity.create(tenantId, outletId, item("10"));
     }
 
     @Test
-    void exactlyZeroIsOutRegardlessOfReorderLevelAndScale() {
-        assertEquals(InventoryBalanceEntity.Status.OUT, balanceOf("10", "0").status());
-        assertEquals(InventoryBalanceEntity.Status.OUT, balanceOf("10", "0.000").status());
-        assertEquals(InventoryBalanceEntity.Status.OUT, balanceOf("0", "0").status());
+    void firstPricedReceiveSetsAverageToThePriceAndAddsStock() {
+        InventoryBalanceEntity balance = emptyBalance();
+
+        balance.receive(new BigDecimal("10"), new BigDecimal("5.5"));
+
+        assertEquals(new BigDecimal("5.5000"), balance.getAverageUnitCost());
+        assertEquals(0, new BigDecimal("10").compareTo(balance.getQuantityOnHand()));
     }
 
     @Test
-    void quantityEqualToReorderLevelIsLowIgnoringScaleDifferences() {
-        assertEquals(InventoryBalanceEntity.Status.LOW, balanceOf("10", "10").status());
-        assertEquals(InventoryBalanceEntity.Status.LOW, balanceOf("10", "10.000").status());
-        assertEquals(InventoryBalanceEntity.Status.LOW, balanceOf("10.000", "10").status());
-        assertEquals(InventoryBalanceEntity.Status.LOW, balanceOf("10", "0.001").status());
+    void secondPricedReceiveBlendsByQuantityWeight() {
+        InventoryBalanceEntity balance = emptyBalance();
+        balance.receive(new BigDecimal("10"), new BigDecimal("5"));
+
+        balance.receive(new BigDecimal("30"), new BigDecimal("9"));
+
+        // (10*5 + 30*9) / 40 = 8
+        assertEquals(new BigDecimal("8.0000"), balance.getAverageUnitCost());
+        assertEquals(0, new BigDecimal("40").compareTo(balance.getQuantityOnHand()));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "1, 1, 2, 2, 1.6667", // (1*1 + 2*2) / 3 = 1.666666... -> 1.6667
+            "1, 0.0001, 1, 0.0002, 0.0002", // (0.0001 + 0.0002) / 2 = 0.00015 -> 0.0002 (HALF_UP)
+            "3, 1.23455, , , 1.2346" // more than four decimals on the first receive only
+    })
+    void averageIsRoundedHalfUpToFourDecimals(BigDecimal firstQuantity, BigDecimal firstPrice,
+                                              BigDecimal secondQuantity, BigDecimal secondPrice, BigDecimal expected) {
+        InventoryBalanceEntity balance = emptyBalance();
+        balance.receive(firstQuantity, firstPrice);
+        if (secondQuantity != null) {
+            balance.receive(secondQuantity, secondPrice);
+        }
+
+        assertEquals(expected, balance.getAverageUnitCost());
+    }
+
+    // Rows: zero stock, negative stock (-5 on hand) and positive stock without any cost yet; the average resets to the new price.
+    @ParameterizedTest
+    @CsvSource({
+            "10, 5, -10, 4, 7, 7.0000, 4",
+            "10, 5, -15, 20, 8, 8.0000, 15",
+            ", , 20, 5, 3, 3.0000, 25"
+    })
+    void averageResetsToTheNewPriceWhenStockIsZeroNegativeOrUncosted(
+            BigDecimal initialQuantity, BigDecimal initialPrice, BigDecimal delta, BigDecimal quantity,
+            BigDecimal price, BigDecimal expectedAverage, BigDecimal expectedOnHand) {
+        InventoryBalanceEntity balance = emptyBalance();
+        if (initialPrice != null) {
+            balance.receive(initialQuantity, initialPrice);
+        }
+        balance.apply(delta);
+
+        balance.receive(quantity, price);
+
+        assertEquals(expectedAverage, balance.getAverageUnitCost());
+        assertEquals(0, expectedOnHand.compareTo(balance.getQuantityOnHand()));
     }
 
     @Test
-    void quantityJustAboveReorderLevelIsOk() {
-        assertEquals(InventoryBalanceEntity.Status.OK, balanceOf("10", "10.001").status());
-        assertEquals(InventoryBalanceEntity.Status.OK, balanceOf("0", "0.001").status());
+    void receiveWithoutPriceKeepsAverageAndStillAddsStock() {
+        InventoryBalanceEntity balance = emptyBalance();
+        balance.receive(new BigDecimal("10"), new BigDecimal("5"));
+
+        balance.receive(new BigDecimal("10"), null);
+
+        assertEquals(new BigDecimal("5.0000"), balance.getAverageUnitCost());
+        assertEquals(0, new BigDecimal("20").compareTo(balance.getQuantityOnHand()));
+        InventoryBalanceEntity unpriced = emptyBalance();
+        unpriced.receive(new BigDecimal("3"), null);
+        assertNull(unpriced.getAverageUnitCost());
     }
 
     @Test
-    void statusFollowsQuantityAfterEachApply() {
-        InventoryBalanceEntity balance = InventoryBalanceEntity.create(tenantId, outletId, item("100"));
-        assertEquals(InventoryBalanceEntity.Status.OUT, balance.status());
+    void applyNeverChangesTheAverage() {
+        InventoryBalanceEntity balance = emptyBalance();
+        balance.receive(new BigDecimal("10"), new BigDecimal("5"));
 
-        balance.apply(new BigDecimal("1000"));
-        assertEquals(InventoryBalanceEntity.Status.OK, balance.status());
+        balance.apply(new BigDecimal("-4"));
+        balance.apply(new BigDecimal("100"));
 
-        balance.apply(new BigDecimal("-900"));
-        assertEquals(InventoryBalanceEntity.Status.LOW, balance.status());
-
-        balance.apply(new BigDecimal("-100"));
-        assertEquals(InventoryBalanceEntity.Status.OUT, balance.status());
-
-        balance.apply(new BigDecimal("-26"));
-        assertEquals(InventoryBalanceEntity.Status.NEGATIVE, balance.status());
+        assertEquals(new BigDecimal("5.0000"), balance.getAverageUnitCost());
     }
 }

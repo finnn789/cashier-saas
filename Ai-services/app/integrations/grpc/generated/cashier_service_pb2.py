@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15\x63\x61shier_service.proto\x12\ncashier.v1\"H\n\x15GetCatalogItemRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\r\n\x05query\x18\x02 \x01(\t\x12\r\n\x05limit\x18\x03 \x01(\x05\"^\n\x0b\x43\x61talogItem\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\r\n\x05price\x18\x03 \x01(\x03\x12\x14\n\x0cis_available\x18\x04 \x01(\x08\x12\x10\n\x08\x63\x61tegory\x18\x05 \x01(\t\"S\n\x16GetCatalogItemResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12&\n\x05items\x18\x02 \x03(\x0b\x32\x17.cashier.v1.CatalogItem\"@\n\x15GetOrderStatusRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x14\n\x0corder_number\x18\x02 \x01(\t\"\x93\x01\n\x16GetOrderStatusResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x14\n\x0corder_number\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\x16\n\x0epayment_status\x18\x04 \x01(\t\x12\x14\n\x0ctotal_amount\x18\x05 \x01(\x03\x12\x12\n\ncreated_at\x18\x06 \x01(\t2\xc2\x01\n\x0e\x43\x61shierService\x12W\n\x0eGetCatalogItem\x12!.cashier.v1.GetCatalogItemRequest\x1a\".cashier.v1.GetCatalogItemResponse\x12W\n\x0eGetOrderStatus\x12!.cashier.v1.GetOrderStatusRequest\x1a\".cashier.v1.GetOrderStatusResponseB#\n\x13\x63om.cashier.grpc.v1P\x01Z\ncashier/v1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15\x63\x61shier_service.proto\x12\ncashier.v1\"Y\n\x15GetCatalogItemRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\r\n\x05query\x18\x02 \x01(\t\x12\r\n\x05limit\x18\x03 \x01(\x05\x12\x0f\n\x07user_id\x18\x04 \x01(\t\"r\n\x0b\x43\x61talogItem\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x14\n\x0cis_available\x18\x04 \x01(\x08\x12\x10\n\x08\x63\x61tegory\x18\x05 \x01(\t\x12\x14\n\x0cprice_amount\x18\x06 \x01(\tJ\x04\x08\x03\x10\x04R\x05price\"S\n\x16GetCatalogItemResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12&\n\x05items\x18\x02 \x03(\x0b\x32\x17.cashier.v1.CatalogItem\"Q\n\x15GetOrderStatusRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x14\n\x0corder_number\x18\x02 \x01(\t\x12\x0f\n\x07user_id\x18\x03 \x01(\t\"\xa0\x01\n\x16GetOrderStatusResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x14\n\x0corder_number\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\x16\n\x0epayment_status\x18\x04 \x01(\t\x12\x12\n\ncreated_at\x18\x06 \x01(\t\x12\r\n\x05total\x18\x07 \x01(\tJ\x04\x08\x05\x10\x06R\x0ctotal_amount\"b\n\x16GetSalesSummaryRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x12\n\nstart_date\x18\x03 \x01(\t\x12\x10\n\x08\x65nd_date\x18\x04 \x01(\t\"M\n\nLabelTotal\x12\x0e\n\x06method\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\r\n\x05\x63ount\x18\x03 \x01(\x03\x12\x11\n\tnet_sales\x18\x04 \x01(\t\"\x91\x01\n\x0cProductTotal\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08quantity\x18\x02 \x01(\x03\x12\x13\n\x0bgross_sales\x18\x03 \x01(\t\x12\x1a\n\x12\x63ost_of_goods_sold\x18\x04 \x01(\t\x12\x14\n\x0cgross_profit\x18\x05 \x01(\t\x12\x1a\n\x12items_without_cost\x18\x06 \x01(\x03\"\xf5\x04\n\x12OutletSalesSummary\x12\x11\n\toutlet_id\x18\x01 \x01(\t\x12\x13\n\x0boutlet_name\x18\x02 \x01(\t\x12\x11\n\ttime_zone\x18\x03 \x01(\t\x12\x12\n\nstart_date\x18\x04 \x01(\t\x12\x10\n\x08\x65nd_date\x18\x05 \x01(\t\x12\x19\n\x11transaction_count\x18\x06 \x01(\x03\x12\x13\n\x0bgross_sales\x18\x07 \x01(\t\x12\x17\n\x0f\x64iscount_amount\x18\x08 \x01(\t\x12\x11\n\tnet_sales\x18\t \x01(\t\x12\r\n\x05total\x18\n \x01(\t\x12\x12\n\ntax_amount\x18\x0b \x01(\t\x12\x1d\n\x15service_charge_amount\x18\x0c \x01(\t\x12\x1a\n\x12\x63ost_of_goods_sold\x18\r \x01(\t\x12\x14\n\x0cgross_profit\x18\x0e \x01(\t\x12\x1a\n\x12items_without_cost\x18\x0f \x01(\x03\x12\x14\n\x0crefund_count\x18\x10 \x01(\x03\x12\x15\n\rrefund_amount\x18\x11 \x01(\t\x12\x1a\n\x12\x63\x61ncellation_count\x18\x12 \x01(\x03\x12\x1e\n\x16\x64iscounted_order_count\x18\x13 \x01(\x03\x12\x16\n\x0e\x65xpenses_total\x18\x14 \x01(\t\x12\x1d\n\x15\x63\x61sh_difference_total\x18\x15 \x01(\t\x12\x1a\n\x12\x63losed_shift_count\x18\x16 \x01(\x03\x12&\n\x06labels\x18\x17 \x03(\x0b\x32\x16.cashier.v1.LabelTotal\x12.\n\x0ctop_products\x18\x18 \x03(\x0b\x32\x18.cashier.v1.ProductTotal\"]\n\x17GetSalesSummaryResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12/\n\x07outlets\x18\x02 \x03(\x0b\x32\x1e.cashier.v1.OutletSalesSummary\"B\n\x1cGetRestockSuggestionsRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\"\xca\x01\n\x11RestockSuggestion\x12\x19\n\x11inventory_item_id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0c\n\x04unit\x18\x03 \x01(\t\x12\x18\n\x10quantity_on_hand\x18\x04 \x01(\t\x12\x15\n\rreorder_level\x18\x05 \x01(\t\x12\x1b\n\x13\x61verage_daily_usage\x18\x06 \x01(\t\x12\x1a\n\x12suggested_quantity\x18\x07 \x01(\t\x12\x14\n\x0cstock_status\x18\x08 \x01(\t\"e\n\rOutletRestock\x12\x11\n\toutlet_id\x18\x01 \x01(\t\x12\x13\n\x0boutlet_name\x18\x02 \x01(\t\x12,\n\x05items\x18\x03 \x03(\x0b\x32\x1d.cashier.v1.RestockSuggestion\"^\n\x1dGetRestockSuggestionsResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12*\n\x07outlets\x18\x02 \x03(\x0b\x32\x19.cashier.v1.OutletRestock\"G\n\x13GetAnomaliesRequest\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x0c\n\x04\x64\x61te\x18\x03 \x01(\t\"w\n\x0e\x43\x61shierAnomaly\x12\x15\n\rstaff_user_id\x18\x01 \x01(\t\x12\x11\n\tfull_name\x18\x02 \x01(\t\x12\x0c\n\x04kind\x18\x03 \x01(\t\x12\r\n\x05value\x18\x04 \x01(\t\x12\x1e\n\x16\x62\x61seline_daily_average\x18\x05 \x01(\t\"v\n\x0fOutletAnomalies\x12\x11\n\toutlet_id\x18\x01 \x01(\t\x12\x13\n\x0boutlet_name\x18\x02 \x01(\t\x12\x0c\n\x04\x64\x61te\x18\x03 \x01(\t\x12-\n\tanomalies\x18\x04 \x03(\x0b\x32\x1a.cashier.v1.CashierAnomaly\"W\n\x14GetAnomaliesResponse\x12\x11\n\ttenant_id\x18\x01 \x01(\t\x12,\n\x07outlets\x18\x02 \x03(\x0b\x32\x1b.cashier.v1.OutletAnomalies2\xdf\x03\n\x0e\x43\x61shierService\x12W\n\x0eGetCatalogItem\x12!.cashier.v1.GetCatalogItemRequest\x1a\".cashier.v1.GetCatalogItemResponse\x12W\n\x0eGetOrderStatus\x12!.cashier.v1.GetOrderStatusRequest\x1a\".cashier.v1.GetOrderStatusResponse\x12Z\n\x0fGetSalesSummary\x12\".cashier.v1.GetSalesSummaryRequest\x1a#.cashier.v1.GetSalesSummaryResponse\x12l\n\x15GetRestockSuggestions\x12(.cashier.v1.GetRestockSuggestionsRequest\x1a).cashier.v1.GetRestockSuggestionsResponse\x12Q\n\x0cGetAnomalies\x12\x1f.cashier.v1.GetAnomaliesRequest\x1a .cashier.v1.GetAnomaliesResponseB#\n\x13\x63om.cashier.grpc.v1P\x01Z\ncashier/v1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,15 +33,41 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n\023com.cashier.grpc.v1P\001Z\ncashier/v1'
   _globals['_GETCATALOGITEMREQUEST']._serialized_start=37
-  _globals['_GETCATALOGITEMREQUEST']._serialized_end=109
-  _globals['_CATALOGITEM']._serialized_start=111
-  _globals['_CATALOGITEM']._serialized_end=205
-  _globals['_GETCATALOGITEMRESPONSE']._serialized_start=207
-  _globals['_GETCATALOGITEMRESPONSE']._serialized_end=290
-  _globals['_GETORDERSTATUSREQUEST']._serialized_start=292
-  _globals['_GETORDERSTATUSREQUEST']._serialized_end=356
-  _globals['_GETORDERSTATUSRESPONSE']._serialized_start=359
-  _globals['_GETORDERSTATUSRESPONSE']._serialized_end=506
-  _globals['_CASHIERSERVICE']._serialized_start=509
-  _globals['_CASHIERSERVICE']._serialized_end=703
+  _globals['_GETCATALOGITEMREQUEST']._serialized_end=126
+  _globals['_CATALOGITEM']._serialized_start=128
+  _globals['_CATALOGITEM']._serialized_end=242
+  _globals['_GETCATALOGITEMRESPONSE']._serialized_start=244
+  _globals['_GETCATALOGITEMRESPONSE']._serialized_end=327
+  _globals['_GETORDERSTATUSREQUEST']._serialized_start=329
+  _globals['_GETORDERSTATUSREQUEST']._serialized_end=410
+  _globals['_GETORDERSTATUSRESPONSE']._serialized_start=413
+  _globals['_GETORDERSTATUSRESPONSE']._serialized_end=573
+  _globals['_GETSALESSUMMARYREQUEST']._serialized_start=575
+  _globals['_GETSALESSUMMARYREQUEST']._serialized_end=673
+  _globals['_LABELTOTAL']._serialized_start=675
+  _globals['_LABELTOTAL']._serialized_end=752
+  _globals['_PRODUCTTOTAL']._serialized_start=755
+  _globals['_PRODUCTTOTAL']._serialized_end=900
+  _globals['_OUTLETSALESSUMMARY']._serialized_start=903
+  _globals['_OUTLETSALESSUMMARY']._serialized_end=1532
+  _globals['_GETSALESSUMMARYRESPONSE']._serialized_start=1534
+  _globals['_GETSALESSUMMARYRESPONSE']._serialized_end=1627
+  _globals['_GETRESTOCKSUGGESTIONSREQUEST']._serialized_start=1629
+  _globals['_GETRESTOCKSUGGESTIONSREQUEST']._serialized_end=1695
+  _globals['_RESTOCKSUGGESTION']._serialized_start=1698
+  _globals['_RESTOCKSUGGESTION']._serialized_end=1900
+  _globals['_OUTLETRESTOCK']._serialized_start=1902
+  _globals['_OUTLETRESTOCK']._serialized_end=2003
+  _globals['_GETRESTOCKSUGGESTIONSRESPONSE']._serialized_start=2005
+  _globals['_GETRESTOCKSUGGESTIONSRESPONSE']._serialized_end=2099
+  _globals['_GETANOMALIESREQUEST']._serialized_start=2101
+  _globals['_GETANOMALIESREQUEST']._serialized_end=2172
+  _globals['_CASHIERANOMALY']._serialized_start=2174
+  _globals['_CASHIERANOMALY']._serialized_end=2293
+  _globals['_OUTLETANOMALIES']._serialized_start=2295
+  _globals['_OUTLETANOMALIES']._serialized_end=2413
+  _globals['_GETANOMALIESRESPONSE']._serialized_start=2415
+  _globals['_GETANOMALIESRESPONSE']._serialized_end=2502
+  _globals['_CASHIERSERVICE']._serialized_start=2505
+  _globals['_CASHIERSERVICE']._serialized_end=2984
 # @@protoc_insertion_point(module_scope)

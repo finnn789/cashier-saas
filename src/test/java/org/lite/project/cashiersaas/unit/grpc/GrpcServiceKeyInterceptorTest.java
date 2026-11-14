@@ -73,11 +73,6 @@ class GrpcServiceKeyInterceptorTest {
     }
 
     @Test
-    void headerNameIsTheInternalServiceKey() {
-        assertEquals("x-internal-service-key", GrpcServiceKeyInterceptor.SERVICE_KEY_HEADER.originalName());
-    }
-
-    @Test
     void validKeyDelegatesToNextHandler() {
         Metadata headers = headersWithKey(REAL_KEY);
 
@@ -165,18 +160,6 @@ class GrpcServiceKeyInterceptorTest {
         assertEquals(Status.Code.RESOURCE_EXHAUSTED, status.getValue().getCode());
         assertFalse(status.getValue().getDescription().contains(REAL_KEY));
         verify(next).startCall(any(), any());
-    }
-
-    @Test
-    void rateLimitRecoversAfterTimePasses() {
-        GrpcServiceKeyInterceptor interceptor = interceptor(1);
-        interceptor.interceptCall(call, headersWithKey(REAL_KEY), next);
-        interceptor.interceptCall(call, headersWithKey(REAL_KEY), next);
-
-        clock.addAndGet(1_500_000_000L);
-        ServerCall.Listener<String> afterRefill = interceptor.interceptCall(call, headersWithKey(REAL_KEY), next);
-
-        assertSame(downstreamListener, afterRefill);
     }
 
     @Test

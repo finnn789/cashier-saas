@@ -11,6 +11,7 @@ import org.lite.project.cashiersaas.enums.PaymentMethod;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Getter
 @Entity
@@ -43,17 +44,21 @@ public class PaymentEntity extends BaseEntity {
     private String idempotencyKey;
     @Column(name = "request_fingerprint", nullable = false, length = 64)
     private String requestFingerprint;
-    @Column(length = 128)
-    private String reference;
+    @Column(name = "method_label", length = 40)
+    private String methodLabel;
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "received_by_staff_user_id", nullable = false)
     private StaffUserEntity receivedBy;
     @Column(nullable = false)
     private Instant paidAt;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cash_shift_id")
+    private CashShiftEntity cashShift;
 
     public static PaymentEntity settle(TenantEntity tenant, OutletEntity outlet, SalesOrderEntity order,
                                        PaymentMethod method, BigDecimal amountPaid, BigDecimal changeAmount, String receiptNumber,
-                                       String idempotencyKey, String fingerprint, String reference, StaffUserEntity receivedBy) {
+                                       String idempotencyKey, String fingerprint, String methodLabel, StaffUserEntity receivedBy,
+                                       CashShiftEntity cashShift) {
         PaymentEntity payment = new PaymentEntity();
         payment.tenant = tenant;
         payment.outlet = outlet;
@@ -64,9 +69,10 @@ public class PaymentEntity extends BaseEntity {
         payment.receiptNumber = receiptNumber;
         payment.idempotencyKey = idempotencyKey;
         payment.requestFingerprint = fingerprint;
-        payment.reference = reference;
+        payment.methodLabel = methodLabel;
         payment.receivedBy = receivedBy;
-        payment.paidAt = Instant.now();
+        payment.cashShift = cashShift;
+        payment.paidAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
         return payment;
     }
 }
