@@ -9,7 +9,7 @@ import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntit
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.Role;
-import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
+import org.lite.project.cashiersaas.exception.runtime.OutletOverAllowanceException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.MerchantAccessRepository;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -27,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -53,7 +53,7 @@ class MerchantAccessGuardTest {
         OutletEntity outlet = new OutletEntity();
         when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId),
                 eq(Set.of(Role.CASHIER)), any(Instant.class)))
-                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(membership, outlet)));
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(membership, outlet, true)));
 
         MerchantAccessContext context = guard.requireOutlet(cashier, outletId);
 
@@ -99,7 +99,7 @@ class MerchantAccessGuardTest {
         TenantMembershipEntity membership = TenantMembershipEntity.grantCashier(null, new TenantEntity());
         when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId),
                 eq(Set.of(Role.CASHIER)), any(Instant.class)))
-                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(membership, new OutletEntity())));
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(membership, new OutletEntity(), true)));
 
         assertThrows(ResourceNotFoundException.class, () -> guard.requireOwner(cashier, outletId));
         verify(accessRepository).findOutlet(eq(userId), eq(tenantId), eq(outletId),
@@ -107,18 +107,28 @@ class MerchantAccessGuardTest {
         verifyNoMoreInteractions(accessRepository);
     }
 
+
     @Test
-    void anOutletOverTheAllowanceIsRefusedAfterTheAccessCheckAndNeverForANonMember() {
-        TenantMembershipEntity membership = TenantMembershipEntity.grantCashier(null, new TenantEntity());
+    void anOverAllowanceOutletIsRefusedWithTheUsableOutletsExceptForOwnerManagementAndNeverForANonMember() {
+        UUID usableOutlet = UUID.randomUUID();
+        TenantPrincipal owner = new TenantPrincipal(userId, tenantId, outletId, UUID.randomUUID(), UUID.randomUUID(),
+                Set.of(Role.OWNERMERCHANT));
+        TenantMembershipEntity ownerMembership = TenantMembershipEntity.grantOwner(null, new TenantEntity());
+        TenantMembershipEntity cashierMembership = TenantMembershipEntity.grantCashier(null, new TenantEntity());
+        when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId),
+                eq(Set.of(Role.OWNERMERCHANT)), any(Instant.class)))
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(ownerMembership, new OutletEntity(), false)));
         when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId),
                 eq(Set.of(Role.CASHIER)), any(Instant.class)))
-                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(membership, new OutletEntity())))
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(cashierMembership, new OutletEntity(), false)))
                 .thenReturn(Optional.empty());
-        doThrow(new PlanUpgradeRequiredException("over allowance")).when(planEntitlementService)
-                .requireOutletUsable(eq(tenantId), eq(outletId), any(Instant.class));
+        when(planEntitlementService.usableOutletIds(eq(tenantId), any(Instant.class))).thenReturn(List.of(usableOutlet));
 
-        assertThrows(PlanUpgradeRequiredException.class, () -> guard.requireOutlet(cashier, outletId));
+        OutletOverAllowanceException refused = assertThrows(OutletOverAllowanceException.class,
+                () -> guard.requireOutlet(cashier, outletId));
+        assertEquals(List.of(usableOutlet), refused.getUsableOutletIds());
+        assertThrows(OutletOverAllowanceException.class, () -> guard.requireOwner(owner, outletId));
+        assertEquals(ownerMembership, guard.requireOwnerIgnoringAllowance(owner, outletId).getMembership());
         assertThrows(ResourceNotFoundException.class, () -> guard.requireOutlet(cashier, outletId));
-        verify(planEntitlementService).requireOutletUsable(eq(tenantId), eq(outletId), any(Instant.class));
     }
 }

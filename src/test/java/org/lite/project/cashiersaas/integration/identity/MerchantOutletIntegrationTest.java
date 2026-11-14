@@ -224,6 +224,45 @@ class MerchantOutletIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void anOutletWithAnOpenUnpaidOrderCannotBeDeactivatedUntilTheOrderIsCancelled() throws Exception {
+        MerchantFixture owner = pro("out-open", 1);
+        MerchantFixture second = addOutlet(owner, "Cabang", "Asia/Jakarta");
+        String order = api.createPosOrder(second, api.createProduct(second, api.createCategory(second, "Menu"),
+                "Kopi", "10000"), 1);
+
+        MvcResult refused = outletAction(owner, second.outletId(), "deactivate");
+        assertEquals(409, status(refused));
+        assertTrue(ApiTestSupport.read(refused, "$.message").contains("pesanan terbuka"));
+
+        api.send(post("/api/v1/cashier/outlets/" + second.outletId() + "/fnb/orders/" + order + "/cancel")
+                .header(AUTH, second.bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Salah pesan\"}"), 200);
+        assertEquals(200, status(outletAction(owner, second.outletId(), "deactivate")));
+    }
+
+    @Test
+    void withThreeActiveOutletsAndOneAddOnOnlyTheTwoOldestStayUsable() throws Exception {
+        MerchantFixture owner = pro("out-rank", 2);
+        MerchantFixture second = addOutlet(owner, "Cabang 2", "Asia/Jakarta");
+        MerchantFixture third = addOutlet(owner, "Cabang 3", "Asia/Jakarta");
+        String labels = "/fnb/payment-labels";
+        for (MerchantFixture shop : new MerchantFixture[]{owner, second, third}) {
+            assertEquals(200, status(api.call(get("/api/v1/cashier/outlets/" + shop.outletId() + labels)
+                    .header(AUTH, shop.bearer()))), "three outlets fit the allowance of three");
+        }
+
+        setExtraOutlets(owner, 1); // allowance 2: the third outlet is over it, the first two are not
+        assertEquals(200, status(api.call(get("/api/v1/cashier/outlets/" + owner.outletId() + labels).header(AUTH, owner.bearer()))));
+        assertEquals(200, status(api.call(get("/api/v1/cashier/outlets/" + second.outletId() + labels).header(AUTH, second.bearer()))));
+        MvcResult refused = api.call(get("/api/v1/cashier/outlets/" + third.outletId() + labels).header(AUTH, third.bearer()));
+        assertEquals(402, status(refused));
+        assertEquals("OUTLET_OVER_ALLOWANCE", ApiTestSupport.read(refused, "$.data.reason"));
+        assertEquals("2", ApiTestSupport.read(refused, "$.data.usableOutletIds.length()"));
+        MvcResult list = api.send(get(OUTLETS).header(AUTH, owner.bearer()), 200);
+        assertEquals("true", ApiTestSupport.read(list, "$.data.outlets[1].usable"));
+        assertEquals("false", ApiTestSupport.read(list, "$.data.outlets[2].usable"));
+    }
+
+    @Test
     void reactivationIsBoundByTheAllowanceAndAuditedWhenItSucceeds() throws Exception {
         MerchantFixture owner = pro("out-rea", 1);
         MerchantFixture second = addOutlet(owner, "Cabang", "Asia/Jakarta");

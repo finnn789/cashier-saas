@@ -57,7 +57,7 @@ public class FnbSalesReportService {
     /** Owner-only totals over every usable outlet the owner can access; each outlet reads the dates in its own zone. */
     @Transactional(readOnly = true)
     public FnbConsolidatedSalesReportResponse consolidated(TenantPrincipal principal, FnbSalesReportFilter filter) {
-        guard.requireOwner(principal, principal.getOutletId());
+        guard.requireOwnerIgnoringAllowance(principal, principal.getOutletId());
         Instant now = Instant.now();
         boolean full = planEntitlementService.effectivePlan(principal.getTenantId(), now) != PlanCode.FREETIER;
         FnbSalesReportFilter perOutlet = new FnbSalesReportFilter();

@@ -56,6 +56,33 @@ public class MerchantAccessRepository {
                 .innerJoin("access.outlet", "outlet")
                 .select("membership")
                 .select("outlet")
+                // Active outlets of the tenant ranked before this one by (createdAt, id); same order as PlanEntitlementService.
+                .selectSubquery("outletRank")
+                    .from(OutletEntity.class, "ranked")
+                    .select("count(ranked.id)")
+                    .where("ranked.tenant.id").eqExpression("outlet.tenant.id")
+                    .where("ranked.active").eq(true)
+                    .whereOr()
+                        .where("ranked.createdAt").ltExpression("outlet.createdAt")
+                        .whereAnd()
+                            .where("ranked.createdAt").eqExpression("outlet.createdAt")
+                            .where("ranked.id").ltExpression("outlet.id")
+                        .endAnd()
+                    .endOr()
+                .end()
+                // Add-on outlets of every active paid row; null (no paid row, FREETIER or trial) means an allowance of 1.
+                .selectSubquery("extraOutlets")
+                    .from(SubscriptionEntity.class, "addOn")
+                    .select("sum(addOn.extraOutlets)")
+                    .where("addOn.tenant.id").eqExpression("outlet.tenant.id")
+                    .where("addOn.planCode").in(List.of(PlanCode.PRO.name(), PlanCode.PREMIUM.name()))
+                    .where("addOn.status").eq(StatusConstants.ACTIVE)
+                    .where("addOn.startsAt").le(now)
+                    .whereOr()
+                        .where("addOn.endsAt").isNull()
+                        .where("addOn.endsAt").gt(now)
+                    .endOr()
+                .end()
                 .fetch("membership.tenant")
                 .where("access.tenant.id").eq(tenantId)
                 .where("membership.tenant.id").eq(tenantId)
@@ -70,8 +97,8 @@ public class MerchantAccessRepository {
                 .where("businessType.active").eq(true)
                 .where("outlet.active").eq(true), now)
                 .setMaxResults(1).getResultList().stream()
-                .map(row -> new OutletAccess(row.get(0, TenantMembershipEntity.class),
-                        row.get(1, OutletEntity.class)))
+                .map(row -> new OutletAccess(row.get(0, TenantMembershipEntity.class), row.get(1, OutletEntity.class),
+                        row.get(2, Long.class) < 1 + (row.get(3) == null ? 0L : ((Number) row.get(3)).longValue())))
                 .findFirst();
     }
 
@@ -115,5 +142,7 @@ public class MerchantAccessRepository {
     public static class OutletAccess {
         private final TenantMembershipEntity membership;
         private final OutletEntity outlet;
+        /** False when the active outlet is over the plan's outlet allowance (see PlanEntitlementService.usableOutletIds). */
+        private final boolean usable;
     }
 }

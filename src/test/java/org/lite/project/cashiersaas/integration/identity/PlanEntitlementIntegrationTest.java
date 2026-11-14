@@ -177,8 +177,17 @@ class PlanEntitlementIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(200, paymentLabelsStatus(second));
 
         expirePaidRows(owner); // the add-on lives and expires with its paid row
-        assertEquals(402, paymentLabelsStatus(second), "the newer outlet is over the allowance now");
-        assertEquals(402, selectMerchantStatus(login(ownerEmail(owner)), second));
+        MvcResult overAllowance = api.call(get("/api/v1/cashier/outlets/" + secondId + "/fnb/payment-labels")
+                .header(AUTH, second.bearer()));
+        assertEquals(402, status(overAllowance), "the newer outlet is over the allowance now");
+        assertEquals("OUTLET_OVER_ALLOWANCE", ApiTestSupport.read(overAllowance, "$.data.reason"));
+        assertEquals(owner.outletId().toString(), ApiTestSupport.read(overAllowance, "$.data.usableOutletIds[0]"));
+        assertEquals("1", ApiTestSupport.read(overAllowance, "$.data.usableOutletIds.length()"));
+        MvcResult refusedSelect = api.call(post("/api/v1/auth/select-merchant").header(AUTH, login(ownerEmail(owner)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"" + owner.tenantId() + "\",\"outletId\":\"" + secondId + "\"}"));
+        assertEquals(402, status(refusedSelect));
+        assertEquals("OUTLET_OVER_ALLOWANCE", ApiTestSupport.read(refusedSelect, "$.data.reason"));
         assertEquals("1", ApiTestSupport.read(api.send(get("/api/v1/auth/outlets")
                 .header(AUTH, login(ownerEmail(owner))), 200), "$.data.length()"), "the choices omit it");
         assertEquals(200, paymentLabelsStatus(owner), "the first outlet is always usable");
@@ -186,10 +195,33 @@ class PlanEntitlementIntegrationTest extends AbstractPostgresIntegrationTest {
         api.grantPlan(owner.tenantId(), PlanCode.PRO, null);
         api.jdbc().update(addOnSql, owner.tenantId());
         assertEquals(200, paymentLabelsStatus(second), "extending the add-on restores access to the same token");
+    }
 
+    @Test
+    void anOwnerWhoseTokenOutletIsOverTheAllowanceCanStillManageOutletsAndReadTheConsolidatedReport() throws Exception {
+        MerchantFixture owner = api.onboardOwner("plan-out-own", PlanCode.PRO);
+        api.jdbc().update("UPDATE subscriptions SET extra_outlets = 1 WHERE tenant_id = ? AND plan_code <> 'FREETIER'",
+                owner.tenantId());
+        UUID secondId = UUID.fromString(ApiTestSupport.read(api.send(post("/api/v1/merchant/outlets")
+                .header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Cabang\",\"timeZone\":\"Asia/Makassar\"}"), 201), "$.data.id"));
+        MvcResult selected = api.send(post("/api/v1/auth/select-merchant").header(AUTH, login(ownerEmail(owner)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"" + owner.tenantId() + "\",\"outletId\":\"" + secondId + "\"}"), 200);
+        MerchantFixture second = new MerchantFixture(owner.tenantId(), secondId, ApiTestSupport.read(selected, "$.data.accessToken"));
         expirePaidRows(owner);
-        assertEquals(200, status(api.call(post("/api/v1/merchant/outlets/" + secondId + "/deactivate")
-                .header(AUTH, owner.bearer()))), "deactivating is allowed while over the allowance");
+
+        assertEquals(402, paymentLabelsStatus(second), "an operational route on the over-allowance outlet is refused");
+        MvcResult list = api.send(get("/api/v1/merchant/outlets").header(AUTH, second.bearer()), 200);
+        assertEquals("false", ApiTestSupport.read(list, "$.data.outlets[1].usable"));
+        MvcResult report = api.send(get("/api/v1/merchant/reports/sales").header(AUTH, second.bearer()), 200);
+        assertEquals("1", ApiTestSupport.read(report, "$.data.outlets.length()"));
+        assertEquals(owner.outletId().toString(), ApiTestSupport.read(report, "$.data.outlets[0].outletId"));
+
+        // Deactivating the other outlet is how the owner picks what stays: the token outlet then ranks first.
+        assertEquals(200, status(api.call(post("/api/v1/merchant/outlets/" + owner.outletId() + "/deactivate")
+                .header(AUTH, second.bearer()))));
+        assertEquals(200, paymentLabelsStatus(second));
     }
 
     // ------------------------------------------------------------------ 402 on PRO features

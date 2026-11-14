@@ -7,6 +7,7 @@ import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.enums.PlanCode;
+import org.lite.project.cashiersaas.exception.runtime.OutletOverAllowanceException;
 import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.springframework.stereotype.Service;
@@ -74,8 +75,9 @@ public class PlanEntitlementService {
     /** 402 when the outlet is active but over the allowance. One active outlet is always usable, so it skips the subscription query. */
     public void requireOutletUsable(UUID tenantId, UUID outletId, Instant now) {
         List<UUID> active = activeOutletIds(tenantId);
-        if (active.size() > 1 && active.indexOf(outletId) >= allowedOutletCount(tenantId, now)) {
-            throw new PlanUpgradeRequiredException(OUTLET_OVER_ALLOWANCE_MESSAGE);
+        int allowed = active.size() > 1 ? allowedOutletCount(tenantId, now) : 1;
+        if (active.indexOf(outletId) >= allowed) {
+            throw new OutletOverAllowanceException(active.subList(0, allowed));
         }
     }
 

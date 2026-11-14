@@ -72,3 +72,16 @@ Reserved: `docs/ops/plan-activation.md` (new section: activate/extend/stop outle
 
 ## Verification (orchestrator)
 Review each diff against baseline `f9ed23d`, `mvnw -B -DskipTests compile test-compile`, then (user-requested) `mvnw -B verify` and Python `.venv` unit + integration.
+
+## Amendment A1 (user, 2026-11-15) — risk fixes 1-3
+Status: VERIFIED (verify 601 unit + 192 IT green). Baseline commit `97eafa2`.
+
+### F1 One round trip for the outlet allowance check
+Fold the over-allowance check of `MerchantAccessGuard.requireOutlet` into the existing `MerchantAccessRepository.findOutlet` query (subqueries: count of active outlets of the tenant ordered before this outlet by `(created_at, id)` must be < `1 + sum(extra_outlets)` of active PRO/PREMIUM rows at `now`; FREETIER/trial-only = 1). The guard must still distinguish "no access" (404) from "over allowance" (402): e.g. `findOutlet` returns the access plus a boolean `usable` column, guard throws on `!usable`. Remove the separate `requireOutletUsable` call from the guard (keep the method only if other callers still use it, else delete it). Same semantics as `PlanEntitlementService.usableOutletIds`; keep that method for lists.
+
+### F2 Owner is never locked out by an over-allowance token outlet
+- New `exception/runtime/OutletOverAllowanceException` mapped to 402 in `GlobalExceptionHandler`, body `ApiResponse` with message `PlanEntitlementService.OUTLET_OVER_ALLOWANCE_MESSAGE` and `data` = new DTO `dto/response/OutletOverAllowanceResponse` (`reason` = "OUTLET_OVER_ALLOWANCE", `usableOutletIds`). Thrown by the guard and `LoginService.selectMerchant` for over-allowance outlets. Plain plan 402s stay unchanged.
+- New guard method `requireOwnerIgnoringAllowance(principal, outletId)` (same checks as `requireOwner` minus the allowance). Used ONLY by owner outlet management (`OutletService` list/create/update/deactivate/reactivate) and the consolidated report (`FnbSalesReportService.consolidated`). Every operational route keeps the allowance check. Create/reactivate still enforce `requireOutletCapacity`.
+
+### F3 Deactivation with open unpaid orders
+`OutletService.deactivate` refuses (409, existing conflict exception) when the outlet has orders with status OPEN and payment not PAID: message "Outlet masih memiliki N pesanan terbuka. Selesaikan atau batalkan dulu." Reuse an existing order repository query/count if available.

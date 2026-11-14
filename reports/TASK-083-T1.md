@@ -51,3 +51,17 @@ Deliberately NOT added: unit tests that mock `EntityManager.createQuery` chains 
 ## 4. Risks for the orchestrator when running tests
 - New/edited IT assertions depend on: `audit_logs.entity_id` uuid equality with a `UUID` parameter, `payments.paid_at` being updatable, default payment-label count > 0, JSON paths `$.data.id`, `$.data.outlets[*]`, `$.data.totals.*`, `$.data.outlets[i].summary.*`, `$.message` for 402/409.
 - The lock test uses a real second connection from the Hikari pool; if the payment path ever locks outlet 1's row it fails by timeout (30 s), which is the intended signal.
+
+## Phase 3 (amendment A1: F1-F3), tests only, not compiled or run
+Fixed:
+- `CashierInsightGrpcHandlerTest`: `OutletAccess(..., true)`.
+- `MerchantAccessGuardTest`: `OutletAccess` gets the 3rd `usable` arg in all tests. The over-allowance test (the old one used `doThrow(requireOutletUsable)` and a verify that no longer apply, since the guard reads `usable` from `findOutlet`) was rewritten as `anOverAllowanceOutletIsRefusedWithTheUsableOutletsExceptForOwnerManagementAndNeverForANonMember`: `usable=false` -> `OutletOverAllowanceException` with `usableOutletIds` from the stubbed `usableOutletIds`, also for `requireOwner`; `requireOwnerIgnoringAllowance` passes; a non-member still gets 404 (no 402). One test replaces the old one, so no duplicate.
+- Checked: no other `OutletAccess` constructor or `requireOwner` mock on the outlet-management / consolidated paths exists in `src/test` (no unit test of `OutletService`).
+
+Extended (existing classes only):
+- `PlanEntitlementIntegrationTest.anOutletOverTheAllowanceAfterTheAddOnLapses...`: now asserts the 402 body `data.reason = OUTLET_OVER_ALLOWANCE` and `data.usableOutletIds` (length 1, the first outlet) on an operational route and on select-merchant. The old final "deactivate while over allowance via the first token" step was dropped (superseded by the next test).
+- New `PlanEntitlementIntegrationTest.anOwnerWhoseTokenOutletIsOverTheAllowanceCanStillManageOutletsAndReadTheConsolidatedReport` (F2, reuses the class helpers): with the over-allowance token outlet, operational route 402, `GET /api/v1/merchant/outlets` 200 (`usable=false` for it), consolidated report 200 (only the usable outlet), deactivating the other outlet 200, after which the token outlet is usable (200). Not a duplicate: no existing test uses an over-allowance token for owner routes.
+- `MerchantOutletIntegrationTest.anOutletWithAnOpenUnpaidOrderCannotBeDeactivatedUntilTheOrderIsCancelled` (F3): 409 "pesanan terbuka", then cancel the order, then 200. Kept separate from the open-shift test: that one needs a shift and the last-outlet assertions, merging would hide which rule refused.
+- `MerchantOutletIntegrationTest.withThreeActiveOutletsAndOneAddOnOnlyTheTwoOldestStayUsable` (F1 boundary on real Postgres): `extra_outlets=2`, 3 outlets all 200 (active == allowance); lowered to 1: outlets 1 and 2 stay 200, outlet 3 is 402 with `reason` and 2 usable ids; the list flags `usable` true/false for rank 2/3. This exercises the new `findOutlet` subqueries (rank vs `1 + sum(extra_outlets)`), including the UUID tie-break path only when timestamps tie.
+
+Not covered: the equal-`created_at` tie-break (cannot be forced through the API); the Blaze subquery risk in the A1 report is exercised by every guarded IT request, so the first IT run will show it.

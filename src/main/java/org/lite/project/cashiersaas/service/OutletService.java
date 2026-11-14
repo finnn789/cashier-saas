@@ -98,7 +98,7 @@ public class OutletService {
         return response(outlet, Instant.now());
     }
 
-    /** Always allowed, also while over the allowance, except for the last active outlet or one with an open shift. */
+    /** Always allowed, also while over the allowance, except for the last active outlet or one with an open shift or open unpaid orders. */
     @Transactional
     public MerchantOutletResponse deactivate(TenantPrincipal principal, UUID outletId) {
         orders.lockTenant(principal.getTenantId());
@@ -111,6 +111,11 @@ public class OutletService {
             }
             if (outletRepository.hasOpenShift(principal.getTenantId(), outlet.getId())) {
                 throw new OperationConflictException("Outlet masih memiliki shift terbuka. Tutup shift terlebih dahulu.");
+            }
+            int openOrders = orders.countOpenUnpaid(principal.getTenantId(), outlet.getId());
+            if (openOrders > 0) {
+                throw new OperationConflictException("Outlet masih memiliki " + openOrders
+                        + " pesanan terbuka. Selesaikan atau batalkan dulu.");
             }
             outlet.deactivate();
             record(context, outlet, AuditLogEntity.Action.OUTLET_DEACTIVATED, details(outlet));
@@ -135,7 +140,7 @@ public class OutletService {
     }
 
     private MerchantAccessContext requireOwner(TenantPrincipal principal) {
-        return merchantAccessGuard.requireOwner(principal, principal.getOutletId());
+        return merchantAccessGuard.requireOwnerIgnoringAllowance(principal, principal.getOutletId());
     }
 
     private OutletEntity findInTenant(TenantPrincipal principal, UUID outletId) {

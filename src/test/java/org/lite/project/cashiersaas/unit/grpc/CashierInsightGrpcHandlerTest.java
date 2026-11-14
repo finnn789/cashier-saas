@@ -87,7 +87,7 @@ class CashierInsightGrpcHandlerTest {
         when(policy.requireOwnerOutlets(tenantId, USER)).thenReturn(List.of(outletId));
         org.springframework.test.util.ReflectionTestUtils.setField(outlet, "id", outletId);
         when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId), eq(Set.of(Role.OWNERMERCHANT)), any()))
-                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(ownerMembership, outlet)));
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(ownerMembership, outlet, true)));
     }
 
     private static GetSalesSummaryRequest sales(String start, String end) {
