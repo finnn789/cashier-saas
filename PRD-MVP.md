@@ -1,8 +1,8 @@
 # Product Requirements Document — Kasir Cafe + Asisten AI Owner
 
-**Versi:** 2.1
+**Versi:** 2.2
 **Status:** Aktif
-**Tanggal:** 13 November 2026
+**Tanggal:** 14 November 2026
 **Menggantikan:** PRD v0.1 (13 September 2026) beserta catatan keputusan 16 September – 6 Oktober 2026 (ringkasannya ada di §17).
 **Fokus:** aplikasi kasir (POS) berbasis web untuk cafe/coffee shop kecil dengan satu outlet, ditambah asisten AI yang membantu owner mengambil keputusan.
 
@@ -138,6 +138,34 @@ Kolom **Status** mengikuti kode di branch aktif; detail bukti ada di `.ai/MEMORY
 - Tanya-jawab data penjualan ("omzet minggu ini vs minggu lalu", "menu paling untung").
 - AI hanya membaca. Data diambil dari backend Java (sumber kebenaran), tidak dari salinan.
 
+### 8.15 Paket Langganan dan Kuota AI *(keputusan 14 Nov 2026; enforcement belum ada)*
+Pembatasan dilakukan lewat fitur, bukan jumlah transaksi. Transaksi dan data tidak dibatasi di semua paket.
+
+| | Gratis | Pro ("Paling populer") | Premium |
+|---|---|---|---|
+| Harga bulanan | Rp0 | Rp59.000 | Rp119.000 |
+| Harga tahunan ("gratis 2 bulan") | — | Rp590.000 | Rp1.190.000 |
+| Outlet | 1 | 1 | 1 |
+| Pengguna | Owner saja (owner sebagai kasir) | Owner + kasir tanpa batas | Owner + kasir tanpa batas |
+| POS, menu, resep, stok, struk, shift & kas kecil | Ya | Ya | Ya |
+| Undang kasir, kelola staf, void/refund, audit kasir | Tidak | Ya | Ya |
+| Laporan | Ringkasan & produk terlaris, riwayat 30 hari | Lengkap (per jam/kasir/shift, HPP & laba, CSV), riwayat penuh | Lengkap |
+| Asisten AI Telegram | Tidak | Tidak | Ya: ringkasan harian (tidak memotong kuota) + 300 pertanyaan/bulan |
+| Top-up AI | — | — | +200 pertanyaan Rp29.000, berlaku sampai akhir periode |
+| Outlet tambahan | — | +Rp49.000/outlet/bulan setelah multi-outlet dibangun (pasca-pilot) | sama |
+
+- Premium mencakup seluruh isi Pro.
+- Kuota AI dihitung per pertanyaan, bukan kredit/token. Owner diberi tahu pada 80% dan 100% kuota.
+- Batas harian anti-penyalahgunaan: 40 pertanyaan per tenant per hari.
+- Secara internal, pemakaian token per tenant dicatat dari field `usage` respons LLM. Satu pertanyaan maksimal 4 panggilan LLM.
+- Model default: DeepSeek V4.1 Flash via OpenRouter (env `AI_MODEL`). Anggaran biaya Rp100 per pertanyaan. Batas atas dari kode: prompt 21.000 byte dan output 1.024 token per panggilan, sekitar Rp165 per pertanyaan.
+- Trial Premium 14 hari otomatis setelah 50 transaksi pertama di paket Gratis, satu kali per tenant.
+- Pemicu upgrade di UI: tombol "Undang kasir" di Gratis menampilkan tawaran Pro (bukan error); dashboard Gratis menampilkan kartu sekilas temuan AI yang terkunci.
+- Paket turun atau habis: data tetap utuh, tidak pernah dihapus.
+  - Kasir dinonaktifkan sampai paket kembali Pro.
+  - Bot AI menolak dengan pesan perpanjang.
+- Pembayaran langganan saat pilot: transfer manual dan aktivasi oleh SUPERADMIN. Integrasi tagihan otomatis menyusul.
+
 ## 9. Alur Utama
 
 1. Owner mendaftar → onboarding → mengatur menu, resep, bahan, dan staf.
@@ -208,11 +236,14 @@ Tenant, Outlet, StaffUser, TenantMembership, MembershipOutletAccess, Subscriptio
 
 ## 16. Keputusan yang Masih Terbuka
 
-- Model harga langganan dan batas Freetier vs berbayar (enforcement paket belum ada).
-- Jam kirim ringkasan AI harian (default: setelah shift terakhir ditutup, cadangan pukul 23.00 waktu outlet).
-- Printer thermal yang diprioritaskan untuk pilot (sementara cetak dari browser).
-- Batas diskon kasir (saat ini kasir tidak boleh memberi diskon).
-- Kapan multi-outlet dibuka (perlu mengganti lock per tenant menjadi per outlet).
+- Validasi harga paket (§8.15) di pilot M8: kesediaan bayar dan biaya token nyata per owner.
+- Kapan multi-outlet dibuka (perlu mengganti lock per tenant menjadi per outlet). Ditargetkan setelah pilot sebagai add-on per outlet.
+
+Diputuskan 14 Nov 2026:
+- Model harga dan batas paket ada di §8.15.
+- Ringkasan AI dikirim setelah shift terakhir ditutup, dengan cadangan pukul 23.00 waktu outlet. Hanya untuk Premium.
+- Printer: struk dicetak dari browser dengan tata letak 58 mm dan 80 mm. Pilot diuji dengan 1–2 printer USB/driver. ESC/POS dan Bluetooth langsung ditunda setelah pilot.
+- Batas diskon kasir tetap 0 (hanya owner). Batas diskon per kasir dipertimbangkan untuk Pro bila pilot memintanya.
 
 ## 17. Riwayat Keputusan (ringkas)
 
@@ -224,3 +255,4 @@ Tenant, Outlet, StaffUser, TenantMembership, MembershipOutletAccess, Subscriptio
 - 12 Nov 2026: pivot menjadi kasir cafe + asisten AI owner; QR, dapur, meja, WebSocket dihapus; status OPEN/COMPLETED/CANCELLED; hold bill di server.
 - 13 Nov 2026: PRD v2 (dokumen ini); keputusan kontrol kasir grup A (`.ai/DECISIONS.md` "Flow controls A").
 - 13 Nov 2026 (v2.1): aplikasi hanya mencatat; QRIS bukan fitur pembayaran; pembayaran = tunai atau non-tunai berlabel; mock gateway dihapus; pengeluaran kas kecil dan modal awal otomatis masuk M5.
+- 14 Nov 2026 (v2.2): paket Gratis/Pro/Premium dan kuota AI per pertanyaan (§8.15); jam ringkasan AI, printer, dan batas diskon kasir diputuskan (§16).

@@ -2,6 +2,30 @@
 
 The PRD and explicit user instructions remain authoritative; this file records decisions captured during AI Services work.
 
+## Subscription plans and AI quota — 2026-11-14
+
+- Explicit user decision: Free = 1 outlet, owner only (owner runs the POS, no cashier invitations, no multi-outlet). Pro = staff/cashier invitations and cashier controls plus the full analytics dashboard. Premium = Pro + owner AI assistant. Multi-outlet is a later per-outlet add-on, not a Pro launch feature (the per-tenant lock must change first).
+- User accepted the orchestrator recommendation, with prices lowered to cover infrastructure and token cost:
+  - Pro Rp59.000/month or Rp590.000/year.
+  - Premium Rp119.000/month or Rp1.190.000/year.
+  - AI top-up: +200 questions for Rp29.000.
+  - Extra outlet: Rp49.000/month (after multi-outlet exists).
+- The AI is metered per question, not by credits or tokens.
+  - Premium includes 300 questions/month; daily summaries do not count.
+  - Users are warned at 80% and 100%.
+  - Hard cap: 40 questions per tenant per day.
+  - At most 4 LLM calls per question (today the LangGraph default recursion limit applies; must be capped).
+  - Per-tenant token usage is logged from the LLM `usage` field.
+- Default model: DeepSeek V4.1 Flash via OpenRouter (`AI_MODEL`). Cost budget Rp100/question; worst case about Rp165 under the current prompt (21000 bytes) and output (1024 tokens) limits.
+- Other PRD §16 items closed:
+  - AI summary time: after the last shift closes, fallback 23:00 outlet time, Premium only.
+  - Printing: browser printing with 58 mm and 80 mm layouts.
+  - Cashier discount limit stays 0.
+- Downgrade keeps all data: cashiers are deactivated and the bot refuses.
+- Pilot billing is manual transfer plus SUPERADMIN activation.
+- Free gets an automatic one-time 14-day Premium trial after its first 50 transactions.
+- Enforcement is not implemented yet (needs a task packet). Details are in `PRD-MVP.md` §8.15.
+
 ## F&B ingredient inventory and recipes — 2026-11-10
 
 - Scope change by explicit user instruction: `PRD-MVP.md` §5 listed "Inventori bahan baku dan resep" as post-MVP; it is now in scope (TASK-061). PRD text itself is not edited; this entry supersedes §5 for this item.

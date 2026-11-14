@@ -85,6 +85,12 @@ the code yourself. Direct code writing requires a new explicit task-specific use
 - Do not automatically run tests after implementation. When the end-to-end feature is ready, hand it back as `READY FOR TESTING` with the recommended unit/API scenarios. Execute tests yourself only after the user explicitly requests testing.
 - A feature implementation is ready for testing when its acceptance path is implemented, authorization and tenant boundaries are reviewed, and the result is summarized with remaining risks. Test completion additionally requires the user-requested relevant tests to pass.
 
+## Unit test writing rule (user, 2026-11-14)
+
+- Tests must not add decoupling layers: no new test base classes, helpers, builders, factories, fake adapters or wrapper interfaces. Production code is never changed only to make it testable (no extra interfaces, constructor parameters or visibility changes).
+- If a behaviour is already covered by an existing unit or integration test, do not add another one. Extend the existing test class instead of creating a new file, use the existing fixtures, write one test per behaviour, and parameterize variants.
+- No trivial tests (getters, constants, annotations, mocks asserting mocks). The duplicate/trivial categories removed in `reports/TEST-AUDIT-2026-11-14.md` must not return.
+
 ## Preferred reusable workflow
 
 Use the repository skill `$cashier-mvp-builder` for requests to implement, continue, test, or review the Cashier SaaS MVP, and `vertical-slice-code-pattern` for application changes. Their engineering rules remain applicable; historical single-session/no-agent implementation directions are superseded by the latest user instruction. The orchestrator prepares/reviews architecture and delegates code writing within reserved scopes. Test execution still requires the user's explicit request after implementation.
