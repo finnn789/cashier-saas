@@ -15,6 +15,7 @@ import org.lite.project.cashiersaas.entity.fnb.PaymentRefundEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.enums.PaymentMethod;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -36,12 +37,15 @@ public class FnbRefundService {
     private final FnbStockService stock;
     private final AuditLogRepository audit;
     private final DigestService digests;
+    private final PlanEntitlementService planEntitlementService;
 
     @Transactional
     public FnbRefundResponse refund(TenantPrincipal principal, UUID outletId, UUID orderId, String key, FnbRefundRequest request) {
         UUID tenantId = principal.getTenantId();
         orders.lockTenant(tenantId);
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        // Before the replay lookup on purpose: a downgraded tenant gets 402 even when retrying an earlier refund key.
+        planEntitlementService.require(tenantId, PlanCode.PRO);
         String idempotencyKey = FnbPosOrderService.validatedKey(key);
         String reason = request.getReason().trim();
         if (reason.isEmpty()) throw new InvalidOperationException("Alasan refund wajib diisi.");

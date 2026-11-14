@@ -1,6 +1,8 @@
 package org.lite.project.cashiersaas.grpc.service;
 
 import com.cashier.grpc.v1.CashierServiceGrpc;
+import com.cashier.grpc.v1.ConsumeAiQuestionRequest;
+import com.cashier.grpc.v1.ConsumeAiQuestionResponse;
 import com.cashier.grpc.v1.GetAnomaliesRequest;
 import com.cashier.grpc.v1.GetAnomaliesResponse;
 import com.cashier.grpc.v1.GetCatalogItemRequest;
@@ -11,6 +13,8 @@ import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
 import com.cashier.grpc.v1.GetSalesSummaryResponse;
+import com.cashier.grpc.v1.RecordAiUsageRequest;
+import com.cashier.grpc.v1.RecordAiUsageResponse;
 import io.grpc.stub.StreamObserver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +28,7 @@ public class CashierGrpcService extends CashierServiceGrpc.CashierServiceImplBas
     private final CashierCatalogGrpcHandler catalogHandler;
     private final CashierOrderGrpcHandler orderHandler;
     private final CashierInsightGrpcHandler insightHandler;
+    private final CashierAiUsageGrpcHandler aiUsageHandler;
 
     @Override
     public void getCatalogItem(GetCatalogItemRequest request, StreamObserver<GetCatalogItemResponse> responseObserver) {
@@ -48,5 +53,15 @@ public class CashierGrpcService extends CashierServiceGrpc.CashierServiceImplBas
     @Override
     public void getAnomalies(GetAnomaliesRequest request, StreamObserver<GetAnomaliesResponse> responseObserver) {
         insightHandler.getAnomalies(request, responseObserver);
+    }
+
+    @Override
+    public void consumeAiQuestion(ConsumeAiQuestionRequest request, StreamObserver<ConsumeAiQuestionResponse> responseObserver) {
+        aiUsageHandler.consumeAiQuestion(request, responseObserver);
+    }
+
+    @Override
+    public void recordAiUsage(RecordAiUsageRequest request, StreamObserver<RecordAiUsageResponse> responseObserver) {
+        aiUsageHandler.recordAiUsage(request, responseObserver);
     }
 }

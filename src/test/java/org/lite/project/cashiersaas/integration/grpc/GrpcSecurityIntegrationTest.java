@@ -640,6 +640,10 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
                 + "business_type_id, created_at, updated_at, version) "
                 + "VALUES (?, ?, 'IDR', 'Asia/Jakarta', 0, 0, ?, ?, now(), now(), 0)",
                 tenantId, name, status, businessTypeId);
+        // The AI RPCs need an effective PREMIUM plan; plan gating itself is tested in OwnerInsightIntegrationTest.
+        jdbc.update("INSERT INTO subscriptions (id, tenant_id, plan_code, status, starts_at, created_at, updated_at, "
+                + "version) VALUES (gen_random_uuid(), ?, 'PREMIUM', 'ACTIVE', now() - interval '1 minute', now(), now(), 0)",
+                tenantId);
     }
 
     private UUID seedOutlet(UUID tenantId, String name) {

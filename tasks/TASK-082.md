@@ -1,6 +1,11 @@
 # TASK-082: Plan enforcement — Free / Pro / Premium + AI quota (PRD v2.2 §8.15)
 
-Status: READY TO DELEGATE (prepared 2026-11-14, not started). Memory version: 81. Branch `fix/flow-controls-a`. Baseline is the commit at the moment wave 1 starts; the orchestrator writes it here first.
+Status: VERIFIED, NOT COMMITTED (2026-11-14; verify run 2 green 588 unit + 176 IT; Python unit 268 + integration 20 OK). Memory version: 82. Branch `fix/flow-controls-a`. Baseline commit: `24f5359` (working tree clean at wave 1 start).
+
+## Amendment A1 (orchestrator, wave 1 start)
+- grep found two more callers of `SubscriptionRepository.findActiveForTenant`: `service/AuthSessionService.java` (refresh) and `service/FreeTierOnboardingService.java` (onboarding complete). Both are added to the J1 reserved paths.
+- `AuthSessionService.refresh`: the session stays valid when at least one subscription row is active at `now`; for a CASHIER session additionally require `effectivePlan >= PRO`, else revoke (same `SessionInvalidException`). Access-token expiry is capped at the latest `endsAt` only when no active row is open-ended (the FREETIER base is open-ended, so owners get no cap; a cashier's token is capped at the end of the paid row or trial).
+- `FreeTierOnboardingService.complete`: use the active FREETIER row from the new list; behaviour otherwise unchanged.
 
 Global rules: identical to `tasks/TASK-076.md` "Global rules" 1-7, reports `reports/TASK-082-<id>.md`. Workers never run Maven, unittest/pytest, npm or the app; J3 may run `uv run python -m grpc_tools.protoc` (or `.venv\Scripts\python.exe -m grpc_tools.protoc`) for stub generation. Never edit V1..V10. Java paths are under `src/main/java/org/lite/project/cashiersaas/`, Python paths under `Ai-services/`.
 
@@ -73,6 +78,17 @@ Contract:
 - **Plan catalog:** all three plans available, with monthly and yearly prices as `BigDecimal` (59000/590000, 119000/1190000, FREETIER 0). Static numbers go in the existing constants style; no new config.
 - **`FnbPaymentService`:** after a successful pay (same transaction, after the order becomes COMPLETED/PAID), call `startTrialIfEligible`. Never on replay.
 
+## Wave 1 review (orchestrator, 2026-11-14)
+- J1 diff reviewed against the contract: only reserved paths + report touched. Accepted: `PlanCode` (with display name), `PlanEntitlementService` (trial counted as PAID and not CANCELLED, inside the pay transaction after flush; pay already holds the tenant lock, so two concurrent 50th payments cannot both start a trial), `SubscriptionRepository.findActiveAt`, `MerchantAccessRepository.requirePlanAccess` (bounded type parameter, not a wildcard), A1 callers, plan catalog prices, V11. Not compiled (Maven forbidden until the user asks).
+- Gap found by J1 → Amendment A2 / worker J4.
+
+## Amendment A2 — J4 login selection (wave 2, parallel with J2/J3)
+Reserved: `repository/MerchantSelectionRepository.java`, `service/LoginService.java`, `service/AuthSessionService.java` (selectMerchant + shared expiry logic only), `repository/MembershipOutletAccessRepository.java` (`listActiveChoices` only).
+- `MerchantSelectionRepository.findAccessible` must stop joining one arbitrary subscription row (`setMaxResults(1)` with FREETIER base + paid rows; an expired paid row keeps status ACTIVE, so an owner login could be refused). Drop the subscription from the selection; `LoginService.selectMerchant` uses `SubscriptionRepository.findActiveAt` instead.
+- Entitlement at login = same rule as refresh (A1): owner needs any active row; cashier needs an active PRO/PREMIUM row or running trial, otherwise the same refusal the login already gives for no subscription.
+- Access-token expiry cap: one private method in `AuthSessionService` used by both `selectMerchant` and `refresh` (move the A1 logic there, no duplicate).
+- `listActiveChoices`: a cashier's outlet choices only appear while the tenant entitles cashiers. Reuse the EXISTS from `MerchantAccessRepository.requirePlanAccess` (make it package-private static) if the query is Blaze; do not copy it.
+
 ## Wave 2 (parallel, after J1 is reviewed)
 
 ### J2 REST gating
@@ -110,6 +126,10 @@ message RecordAiUsageResponse {}
 - **`RecordAiUsage`:** adds tokens; never fails the caller (errors are logged without content).
 - Both RPCs: same service-key and tenant checks as the others; owner role only.
 
+## Wave 2 review (orchestrator, 2026-11-14)
+- J2, J3, J4 diffs reviewed; reserved paths respected; no wildcard/`@Deprecated`/record added (grep). Accepted deviations: quota month/day use `tenants.time_zone` (kept equal to the outlet zone by settings); `RecordAiUsage` checks only the tenant allowlist (no user_id in the message); constants 300/40 live in `AiUsageRepository`; refund 402 is checked before the idempotent replay; Free report window 30 days inclusive. J3 R1 removed a `List<?>`. J4 A2-1 updated `FreeTierOnboardingService` to the new `selectMerchant(List)` signature.
+- Wave 3 (P1) and wave 4 T1 + D1 started in parallel (disjoint paths); T2 starts after P1 review.
+
 ## Wave 3 — P1 Python (after J3)
 Reserved: `Ai-services/app/integrations/grpc/client.py`, `Ai-services/app/chat/service.py`, `Ai-services/app/ai/graph/workflow.py` or `nodes.py` (whichever holds the call), `Ai-services/app/chat/daily_summary.py`.
 - **Before the graph runs:** call `ConsumeAiQuestion`.
@@ -119,6 +139,12 @@ Reserved: `Ai-services/app/integrations/grpc/client.py`, `Ai-services/app/chat/s
 - **Token usage:** sum `usage_metadata` (input/output) of the AIMessages in the final state and call `RecordAiUsage` fire-and-forget (errors swallowed and logged without content).
 - **Daily summary:** the insight call also records its tokens. It never consumes a question.
 - **gRPC unavailable:** fail closed for `ConsumeAiQuestion` (generic "sedang tidak tersedia" reply). `RecordAiUsage` failures never fail the chat.
+
+## Wave 3 review (orchestrator, 2026-11-14)
+- P1 accepted: gate before graph/legacy path for TEXT only, fixed refusal texts not persisted as ASSISTANT, warn line only in the returned reply, `recursion_limit=7` (= 4 agent supersteps, worker-verified on a stub graph), usage summed and awaited (never raises).
+- Amendment A3: daily summary + legacy `ai.reply` token recording needs `Completion` to carry usage → P1 also reserves `app/ai/openrouter.py` (usage fields with defaults), `app/api/internal_daily_summaries.py`, `app/chat/daily_summary.py`.
+- OPEN USER DECISION: `ConsumeAiQuestion` is owner-only (packet), so a CASHIER chatting with the bot now gets the generic "Asisten sedang tidak tersedia" reply (before: catalog/order tools worked for cashiers). Either keep AI owner-only with a clearer message, or let cashiers consume the tenant quota.
+- Accepted shortcut: tokens of a run that hits the recursion limit are not recorded.
 
 ## Wave 4 (parallel)
 - **T1 Java tests.** Reserved: existing test classes of the touched services/handlers, plus new test classes only where none exists. IT goes in an existing IT class of the area, or one new `integration/identity/PlanEntitlementIntegrationTest.java`. Must cover:
@@ -133,6 +159,10 @@ Reserved: `Ai-services/app/integrations/grpc/client.py`, `Ai-services/app/chat/s
   - `docs/ops/plan-activation.md` (new): SQL for activate PRO/PREMIUM for N months, extend, top-up +200, check usage; each statement scoped by tenant id inside a transaction.
   - `docs/contracts/` the gRPC contract section.
   - the Postman collection: plans endpoint response and the 402 examples.
+
+## Wave 4 review (orchestrator, 2026-11-14)
+- T1 accepted: only src/test touched; new files limited to `unit/service/PlanEntitlementServiceTest` (no test class existed) and `integration/identity/PlanEntitlementIntegrationTest`; `ApiTestSupport.onboardOwner` now adds an open-ended PREMIUM row by default (fixture extension, `onboardOwner(label, PlanCode)` + `grantPlan`); 48 paid orders seeded via one SQL insert for the trial IT (justified in report). Gaps: plans endpoint, refresh revocation after downgrade, RecordAiUsage error paths.
+- T2 accepted: 6 existing unit files extended, no new classes/helpers. D1 accepted (runbook SQL not executed; Postman linted by worker).
 
 ## Orchestrator gate
 - Review each diff against this packet (reserved paths only; test rule above for T1/T2).

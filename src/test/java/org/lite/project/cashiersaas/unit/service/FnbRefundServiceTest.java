@@ -33,6 +33,7 @@ import org.lite.project.cashiersaas.service.FnbRefundService;
 import org.lite.project.cashiersaas.service.FnbShiftService;
 import org.lite.project.cashiersaas.service.FnbStockService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -70,6 +71,7 @@ class FnbRefundServiceTest {
     @Mock private FnbShiftService shifts;
     @Mock private FnbStockService stock;
     @Mock private AuditLogRepository audit;
+    @Mock private PlanEntitlementService planEntitlement;
     @Spy private DigestService digests = new DigestService();
     @InjectMocks private FnbRefundService service;
 

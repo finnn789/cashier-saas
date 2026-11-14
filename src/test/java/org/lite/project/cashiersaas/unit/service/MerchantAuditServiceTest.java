@@ -20,6 +20,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.MerchantAuditRepository;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
 import org.lite.project.cashiersaas.service.MerchantAuditService;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -47,6 +48,7 @@ import static org.mockito.Mockito.when;
 class MerchantAuditServiceTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private MerchantAuditRepository audits;
+    @Mock private PlanEntitlementService planEntitlement;
     @InjectMocks private MerchantAuditService service;
 
     private final UUID tenantId = UUID.randomUUID();

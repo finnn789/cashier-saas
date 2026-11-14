@@ -9,7 +9,9 @@ import org.lite.project.cashiersaas.dto.response.FnbSalesCsvResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesReportResponse;
 import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentMethod;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
 import org.springframework.stereotype.Service;
@@ -31,14 +33,21 @@ public class FnbSalesReportService {
     private static final int MAX_SIZE = 100;
     private static final int MAX_TOP = 50;
     private static final int MAX_CSV_ROWS = 10_000;
+    private static final long FREE_WINDOW_DAYS = 29;
     private final MerchantAccessGuard guard;
     private final FnbSalesReportRepository reports;
     private final FnbRefundRepository refunds;
+    private final PlanEntitlementService planEntitlementService;
 
     @Transactional(readOnly = true)
     public FnbSalesReportResponse report(TenantPrincipal principal, UUID outletId, FnbSalesReportFilter filter) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
-        return assemble(principal.getTenantId(), outletId, query(context, filter), filter.getOrderStatus(), filter.getPaymentMethod());
+        Query query = query(context, filter);
+        boolean full = planEntitlementService.effectivePlan(principal.getTenantId(), Instant.now()) != PlanCode.FREETIER;
+        if (!full && query.startDate.isBefore(LocalDate.now(query.zone).minusDays(FREE_WINDOW_DAYS))) {
+            throw new PlanUpgradeRequiredException(PlanCode.PRO);
+        }
+        return assemble(principal.getTenantId(), outletId, query, filter.getOrderStatus(), filter.getPaymentMethod(), full);
     }
 
     /** Owner-side read model for an already authorised context: no status/method filter, one transaction row. */
@@ -46,10 +55,11 @@ public class FnbSalesReportService {
     public FnbSalesReportResponse summarize(MerchantAccessContext context, LocalDate startDate, LocalDate endDate, int topProducts) {
         FnbSalesReportFilter filter = new FnbSalesReportFilter();
         filter.setStartDate(startDate); filter.setEndDate(endDate); filter.setPage(0); filter.setSize(1); filter.setTopProducts(topProducts);
-        return assemble(context.getTenant().getId(), context.getOutlet().getId(), query(context, filter), null, null);
+        return assemble(context.getTenant().getId(), context.getOutlet().getId(), query(context, filter), null, null, true);
     }
 
-    private FnbSalesReportResponse assemble(UUID tenantId, UUID outletId, Query query, OrderStatus status, PaymentMethod method) {
+    /** {@code full=false} (FREETIER) keeps summary, transactions, products and payment mix but empties hourly, cashiers and shifts. */
+    private FnbSalesReportResponse assemble(UUID tenantId, UUID outletId, Query query, OrderStatus status, PaymentMethod method, boolean full) {
         List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(tenantId, outletId,
                 query.start, query.end, status, method, query.page, query.size);
         boolean hasNext = rows.size() > query.size;
@@ -60,10 +70,16 @@ public class FnbSalesReportService {
                 reports.cancellations(tenantId, outletId, query.start, query.end),
                 reports.cost(tenantId, outletId, query.start, query.end, status, method),
                 refunds.totals(tenantId, outletId, query.start, query.end)));
-        value.setHourly(FnbSalesReportMapper.hourly(reports.hourly(tenantId, outletId, query.start,
-                query.end, query.zone.getId(), status, method)));
-        value.setCashiers(FnbSalesReportMapper.cashiers(reports.cashiers(tenantId, outletId, query.start, query.end, status, method)));
-        value.setShifts(FnbSalesReportMapper.shifts(reports.shifts(tenantId, outletId, query.start, query.end, status, method)));
+        if (full) {
+            value.setHourly(FnbSalesReportMapper.hourly(reports.hourly(tenantId, outletId, query.start,
+                    query.end, query.zone.getId(), status, method)));
+            value.setCashiers(FnbSalesReportMapper.cashiers(reports.cashiers(tenantId, outletId, query.start, query.end, status, method)));
+            value.setShifts(FnbSalesReportMapper.shifts(reports.shifts(tenantId, outletId, query.start, query.end, status, method)));
+        } else {
+            value.setHourly(List.of());
+            value.setCashiers(List.of());
+            value.setShifts(List.of());
+        }
         value.setTransactions(rows.stream().map(row -> FnbSalesReportMapper.transaction(row, query.zone)).toList());
         value.setTopProducts(FnbSalesReportMapper.products(reports.products(tenantId, outletId,
                 query.start, query.end, status, method, query.top)));
@@ -75,6 +91,7 @@ public class FnbSalesReportService {
     @Transactional(readOnly = true)
     public FnbSalesCsvResponse csv(TenantPrincipal principal, UUID outletId, FnbSalesReportFilter filter) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         Query query = query(context, filter);
         List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(principal.getTenantId(), outletId,
                 query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), 0, MAX_CSV_ROWS);

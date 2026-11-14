@@ -213,6 +213,8 @@ class DailySummaryEndpointTests(unittest.TestCase):
         self.assertIn("Ringkasan harian Kedai Senja - 07-11-2026", text)
         self.assertIn("Omzet bersih: Rp150.000", text)
         self.assertTrue(text.endswith("Catatan: Penjualan hari ini stabil."))
+        # The insight reports its token usage through this client for this tenant.
+        self.assertEqual(self.insight.await_args.args[1:], (self.grpc, TENANT))
         self.recipients.assert_awaited_once()
         self.assertEqual(self.recipients.await_args.args[1], UUID(TENANT))
         self.assertIn(("sales", TENANT, str(OWNER_A), "2026-11-07", "2026-11-07"), self.grpc.calls)

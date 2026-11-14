@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
@@ -14,11 +15,14 @@ import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,6 +30,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -44,6 +49,7 @@ class GrpcTenantAccessPolicyTest {
     private TenantRepository tenantRepository;
     private MembershipOutletAccessRepository outletAccessRepository;
     private TenantMembershipRepository membershipRepository;
+    private PlanEntitlementService planEntitlement;
     private GrpcTenantAccessPolicy policy;
 
     @BeforeEach
@@ -51,6 +57,7 @@ class GrpcTenantAccessPolicyTest {
         tenantRepository = mock(TenantRepository.class);
         outletAccessRepository = mock(MembershipOutletAccessRepository.class);
         membershipRepository = mock(TenantMembershipRepository.class);
+        planEntitlement = mock(PlanEntitlementService.class);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ACTIVE))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(INACTIVE))).thenReturn(false);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(UNKNOWN))).thenReturn(false);
@@ -64,7 +71,8 @@ class GrpcTenantAccessPolicyTest {
     }
 
     private GrpcTenantAccessPolicy policy(GrpcSecurityProperties properties) {
-        return new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository, membershipRepository, properties);
+        return new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository, membershipRepository,
+                planEntitlement, properties);
     }
 
     private static StatusRuntimeException rejection(GrpcTenantAccessPolicy policy, String raw) {
@@ -237,6 +245,21 @@ class GrpcTenantAccessPolicyTest {
         when(membershipRepository.findActive(USER, tenant)).thenReturn(Optional.of(membership(Role.OWNERMERCHANT)));
 
         assertEquals(List.of(OUTLET), policy.requireOwnerOutlets(tenant, "  " + USER + " "));
+    }
+
+    @ParameterizedTest
+    @EnumSource(PlanCode.class)
+    void onlyAnEffectivePremiumPlanPassesRequirePremium(PlanCode plan) {
+        UUID tenant = UUID.fromString(ACTIVE);
+        when(planEntitlement.effectivePlan(org.mockito.ArgumentMatchers.eq(tenant), any(Instant.class))).thenReturn(plan);
+
+        if (plan == PlanCode.PREMIUM) {
+            policy.requirePremium(tenant);
+            return;
+        }
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> policy.requirePremium(tenant));
+        assertEquals(Status.Code.FAILED_PRECONDITION, ex.getStatus().getCode());
+        assertEquals("PLAN_PREMIUM_REQUIRED", ex.getStatus().getDescription());
     }
 
     @Test

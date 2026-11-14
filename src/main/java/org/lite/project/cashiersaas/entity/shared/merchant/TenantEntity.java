@@ -7,6 +7,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import org.lite.project.cashiersaas.entity.shared.billing.BusinessTypeEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
@@ -23,6 +24,8 @@ import java.util.Objects;
 @Table(name = "tenants")
 @NoArgsConstructor
 public class TenantEntity extends MutableBaseEntity {
+    public static final Duration PREMIUM_TRIAL_DURATION = Duration.ofDays(14);
+
     @Column(nullable = false, length = 120)
     private String name;
     @Column(nullable = false, length = 3)
@@ -55,6 +58,8 @@ public class TenantEntity extends MutableBaseEntity {
     private Instant profileCompletedAt;
     @Column(name = "receipt_footer", length = 200)
     private String receiptFooter;
+    @Column(name = "premium_trial_started_at")
+    private Instant premiumTrialStartedAt;
 
     public static TenantEntity startFreeTier(StaffUserEntity owner, BusinessTypeEntity type, String key, String fingerprint) {
         TenantEntity tenant = new TenantEntity();
@@ -69,6 +74,16 @@ public class TenantEntity extends MutableBaseEntity {
 
     public boolean isActive() {
         return StatusConstants.ACTIVE.equals(status);
+    }
+
+    public void startPremiumTrial(Instant now) {
+        if (premiumTrialStartedAt == null) {
+            premiumTrialStartedAt = now;
+        }
+    }
+
+    public boolean isPremiumTrialActiveAt(Instant now) {
+        return premiumTrialStartedAt != null && now.isBefore(premiumTrialStartedAt.plus(PREMIUM_TRIAL_DURATION));
     }
 
     public boolean isFnbEnabled() {

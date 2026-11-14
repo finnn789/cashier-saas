@@ -17,6 +17,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.StaffUserRepository;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.MerchantSelectionRepository;
+import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.shared.AuthenticationConstants;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ public class LoginService {
     private final PasswordEncoder passwordEncoder;
     private final AuthSessionService authSessionService;
     private final MerchantSelectionRepository merchantSelectionRepository;
+    private final SubscriptionRepository subscriptionRepository;
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
@@ -79,11 +81,9 @@ public class LoginService {
         if (!membership.getTenant().isActive()) {
             throw new OperationConflictException(ErrorMessage.MERCHANT_INACTIVE.getMessage());
         }
-        var subscription = selection.getSubscription();
-        if (subscription == null || !subscription.isActiveAt(Instant.now())) {
-            throw new OperationConflictException(ErrorMessage.SUBSCRIPTION_INACTIVE.getMessage());
-        }
-        return toLoginResponse(authSessionService.selectMerchant(principal, membership, outlet, subscription));
+        // AuthSessionService checks the role-based entitlement and refuses with SUBSCRIPTION_INACTIVE.
+        return toLoginResponse(authSessionService.selectMerchant(principal, membership, outlet,
+                subscriptionRepository.findActiveAt(tenantId, Instant.now())));
     }
 
     @Transactional(readOnly = true)

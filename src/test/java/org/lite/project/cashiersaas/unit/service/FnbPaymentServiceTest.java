@@ -29,6 +29,7 @@ import org.lite.project.cashiersaas.service.FnbPaymentService;
 import org.lite.project.cashiersaas.service.FnbShiftService;
 import org.lite.project.cashiersaas.service.FnbStockService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -36,6 +37,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -69,6 +71,7 @@ class FnbPaymentServiceTest {
     @Mock private AuditLogRepository audit;
     @Mock private FnbStockService stock;
     @Mock private FnbShiftService shifts;
+    @Mock private PlanEntitlementService planEntitlement;
     @InjectMocks private FnbPaymentService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -227,6 +230,8 @@ class FnbPaymentServiceTest {
         assertEquals("QRIS", replay.getMethodLabel());
         verify(payments, times(1)).nextReceiptSequence(any(), any());
         verify(payments, times(1)).persist(any(PaymentEntity.class));
+        // The trial hook runs only on the first settle, never on the idempotent replay.
+        verify(planEntitlement, times(1)).startTrialIfEligible(eq(tenantId), any(Instant.class));
     }
 
     @Test

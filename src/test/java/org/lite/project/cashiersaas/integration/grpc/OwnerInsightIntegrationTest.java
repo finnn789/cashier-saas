@@ -2,8 +2,12 @@ package org.lite.project.cashiersaas.integration.grpc;
 
 import com.cashier.grpc.v1.CashierAnomaly;
 import com.cashier.grpc.v1.CashierServiceGrpc;
+import com.cashier.grpc.v1.ConsumeAiQuestionRequest;
+import com.cashier.grpc.v1.ConsumeAiQuestionResponse;
 import com.cashier.grpc.v1.GetAnomaliesRequest;
 import com.cashier.grpc.v1.GetAnomaliesResponse;
+import com.cashier.grpc.v1.GetCatalogItemRequest;
+import com.cashier.grpc.v1.GetOrderStatusRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
@@ -11,6 +15,7 @@ import com.cashier.grpc.v1.GetSalesSummaryResponse;
 import com.cashier.grpc.v1.LabelTotal;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import com.cashier.grpc.v1.ProductTotal;
+import com.cashier.grpc.v1.RecordAiUsageRequest;
 import com.cashier.grpc.v1.RestockSuggestion;
 import com.jayway.jsonpath.JsonPath;
 import io.grpc.ManagedChannel;
@@ -24,6 +29,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.integration.support.AbstractPostgresIntegrationTest;
 import org.lite.project.cashiersaas.integration.support.ApiTestSupport;
 import org.lite.project.cashiersaas.integration.support.MerchantFixture;
@@ -49,6 +58,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -410,6 +423,127 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         }
     }
 
+    // ------------------------------------------------------------------ plan gate and AI question quota (TASK-082)
+
+    @ParameterizedTest
+    @EnumSource(value = PlanCode.class, names = {"FREETIER", "PRO"})
+    void everyAiRpcIsRefusedBelowPremiumAndTheQuotaIsNotTouched(PlanCode plan) throws Exception {
+        MerchantFixture shop = api.onboardOwner("ins-plan-" + plan, plan);
+        UUID shopOwner = ownerUserId(shop);
+        String tenant = shop.tenantId().toString();
+
+        for (Executable call : new Executable[] {
+                () -> stub().getCatalogItem(GetCatalogItemRequest.newBuilder().setTenantId(tenant).setUserId(shopOwner.toString()).build()),
+                () -> stub().getOrderStatus(GetOrderStatusRequest.newBuilder().setTenantId(tenant).setUserId(shopOwner.toString())
+                        .setOrderNumber("X").build()),
+                () -> stub().getSalesSummary(salesRequest(shop.tenantId(), shopOwner, today().toString(), today().toString())),
+                () -> stub().getRestockSuggestions(restockRequest(shop.tenantId(), shopOwner)),
+                () -> stub().getAnomalies(anomalyRequest(shop.tenantId(), shopOwner, today().toString()))}) {
+            StatusRuntimeException refused = assertCode(Status.Code.FAILED_PRECONDITION, call);
+            assertEquals("PLAN_PREMIUM_REQUIRED", refused.getStatus().getDescription());
+        }
+
+        ConsumeAiQuestionResponse consume = consume(shop.tenantId(), shopOwner);
+        assertFalse(consume.getAllowed());
+        assertEquals("PLAN_PREMIUM_REQUIRED", consume.getReason());
+        assertEquals(0, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ?", shop.tenantId()));
+    }
+
+    @Test
+    void consumingAnAiQuestionIsOwnerOnlyAndADeniedCallerIsNeverCounted() {
+        jdbc.update("DELETE FROM ai_usage_periods WHERE tenant_id IN (?, ?)", owner.tenantId(), other.tenantId());
+
+        assertCode(Status.Code.PERMISSION_DENIED, () -> consume(owner.tenantId(), mainUserId));
+        assertCode(Status.Code.PERMISSION_DENIED, () -> consume(other.tenantId(), ownerUserId));
+        assertEquals(0, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id IN (?, ?)", owner.tenantId(), other.tenantId()));
+    }
+
+    /**
+     * Boundaries of the monthly (300 + bonus) and daily (40) limits, the 80% warning and the day reset, against the real
+     * upsert. A refused question changes nothing.
+     */
+    @ParameterizedTest(name = "used={0} bonus={1} dayQuestions={2} dayOffset={3}")
+    @CsvSource({
+            // used, bonus, dayQuestions, dayOffset, allowed, reason, usedAfter, limit, warn, dayQuestionsAfter
+            "238, 0, 0, 0, true, '', 239, 300, false, 1",
+            "239, 0, 0, 0, true, '', 240, 300, true, 1",
+            "299, 0, 0, 0, true, '', 300, 300, true, 1",
+            "300, 0, 0, 0, false, MONTHLY_QUOTA_EXHAUSTED, 300, 300, true, 0",
+            "300, 200, 0, 0, true, '', 301, 500, false, 1",
+            "10, 0, 39, 0, true, '', 11, 300, false, 40",
+            "10, 0, 40, 0, false, DAILY_CAP_REACHED, 10, 300, false, 40",
+            "10, 0, 40, -1, true, '', 11, 300, false, 1"})
+    void consumeAiQuestionAppliesTheMonthlyAndDailyLimits(int used, int bonus, int dayQuestions, int dayOffset,
+                                                          boolean allowed, String reason, int usedAfter, int limit,
+                                                          boolean warn, int dayQuestionsAfter) {
+        seedUsage(other.tenantId(), used, bonus, dayQuestions, today().plusDays(dayOffset));
+
+        ConsumeAiQuestionResponse response = consume(other.tenantId(), otherOwnerUserId);
+
+        assertEquals(allowed, response.getAllowed());
+        assertEquals(reason, response.getReason());
+        assertEquals(usedAfter, response.getUsed());
+        assertEquals(limit, response.getLimit());
+        assertEquals(warn, response.getWarn());
+        Map<String, Object> row = jdbc.queryForMap("SELECT questions_used, day_questions, day_date FROM ai_usage_periods "
+                + "WHERE tenant_id = ?", other.tenantId());
+        assertEquals(usedAfter, ((Number) row.get("questions_used")).intValue());
+        assertEquals(dayQuestionsAfter, ((Number) row.get("day_questions")).intValue());
+        if (allowed) {
+            assertEquals(today(), ((java.sql.Date) row.get("day_date")).toLocalDate(), "an allowed question stamps today");
+        }
+    }
+
+    @Test
+    void theFirstQuestionOfAMonthCreatesTheUsageRow() {
+        jdbc.update("DELETE FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId());
+
+        ConsumeAiQuestionResponse response = consume(other.tenantId(), otherOwnerUserId);
+
+        assertTrue(response.getAllowed());
+        assertEquals(1, response.getUsed());
+        assertEquals(1, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ? AND questions_used = 1 AND day_questions = 1 "
+                + "AND period_month = ?", other.tenantId(), java.sql.Date.valueOf(today().withDayOfMonth(1))));
+    }
+
+    @ParameterizedTest(name = "used={0} dayQuestions={1} -> {2}")
+    @CsvSource({"299, 0, MONTHLY_QUOTA_EXHAUSTED", "10, 39, DAILY_CAP_REACHED"})
+    void twoConcurrentQuestionsOnTheLastSlotAdmitExactlyOne(int used, int dayQuestions, String refusedReason) throws Exception {
+        seedUsage(other.tenantId(), used, 0, dayQuestions, today());
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<ConsumeAiQuestionResponse>> results = List.of(
+                    pool.submit(() -> { start.await(); return consume(other.tenantId(), otherOwnerUserId); }),
+                    pool.submit(() -> { start.await(); return consume(other.tenantId(), otherOwnerUserId); }));
+            start.countDown();
+            List<ConsumeAiQuestionResponse> responses = List.of(results.get(0).get(30, TimeUnit.SECONDS), results.get(1).get(30, TimeUnit.SECONDS));
+
+            assertEquals(1, responses.stream().filter(ConsumeAiQuestionResponse::getAllowed).count());
+            assertEquals(List.of(refusedReason), responses.stream().filter(r -> !r.getAllowed()).map(ConsumeAiQuestionResponse::getReason).toList());
+            assertEquals(used + 1, count("SELECT questions_used FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
+            assertEquals(dayQuestions + 1, count("SELECT day_questions FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void recordedTokensAccumulateOnTheMonthRowWithoutCountingAQuestion() {
+        seedUsage(other.tenantId(), 7, 0, 3, today());
+
+        stub().recordAiUsage(RecordAiUsageRequest.newBuilder().setTenantId(other.tenantId().toString())
+                .setInputTokens(100).setOutputTokens(50).build());
+        stub().recordAiUsage(RecordAiUsageRequest.newBuilder().setTenantId(other.tenantId().toString())
+                .setInputTokens(20).setOutputTokens(10).build());
+
+        Map<String, Object> row = jdbc.queryForMap("SELECT questions_used, input_tokens, output_tokens FROM ai_usage_periods "
+                + "WHERE tenant_id = ?", other.tenantId());
+        assertEquals(7, ((Number) row.get("questions_used")).intValue());
+        assertEquals(120L, ((Number) row.get("input_tokens")).longValue());
+        assertEquals(60L, ((Number) row.get("output_tokens")).longValue());
+    }
+
     // ------------------------------------------------------------------ read-only
 
     @Test
@@ -635,6 +769,20 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         Metadata headers = new Metadata();
         headers.put(SERVICE_KEY_HEADER, serviceKey);
         return stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+    }
+
+    private ConsumeAiQuestionResponse consume(UUID tenantId, UUID userId) {
+        return stub().consumeAiQuestion(ConsumeAiQuestionRequest.newBuilder().setTenantId(tenantId.toString())
+                .setUserId(userId.toString()).build());
+    }
+
+    /** Replaces the tenant's usage row of the current outlet month with the given counters. */
+    private void seedUsage(UUID tenantId, int used, int bonus, int dayQuestions, LocalDate dayDate) {
+        jdbc.update("DELETE FROM ai_usage_periods WHERE tenant_id = ?", tenantId);
+        jdbc.update("INSERT INTO ai_usage_periods (tenant_id, period_month, questions_used, bonus_questions, day_date, "
+                + "day_questions, input_tokens, output_tokens, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, now())",
+                tenantId, java.sql.Date.valueOf(today().withDayOfMonth(1)), used, bonus, java.sql.Date.valueOf(dayDate),
+                dayQuestions);
     }
 
     private static GetSalesSummaryRequest salesRequest(UUID tenantId, UUID userId, String start, String end) {

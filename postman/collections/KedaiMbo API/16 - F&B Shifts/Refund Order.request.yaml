@@ -16,3 +16,4 @@ body:
       "reason": "Pelanggan komplain"
     }
 order: 7000
+examples: ./.resources/Refund Order.resources/examples/

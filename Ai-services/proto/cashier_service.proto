@@ -10,6 +10,8 @@ service CashierService {
   rpc GetSalesSummary (GetSalesSummaryRequest) returns (GetSalesSummaryResponse);
   rpc GetRestockSuggestions (GetRestockSuggestionsRequest) returns (GetRestockSuggestionsResponse);
   rpc GetAnomalies (GetAnomaliesRequest) returns (GetAnomaliesResponse);
+  rpc ConsumeAiQuestion (ConsumeAiQuestionRequest) returns (ConsumeAiQuestionResponse);
+  rpc RecordAiUsage (RecordAiUsageRequest) returns (RecordAiUsageResponse);
 }
 
 message GetCatalogItemRequest {
@@ -158,3 +160,25 @@ message GetAnomaliesResponse {
   string tenant_id = 1;
   repeated OutletAnomalies outlets = 2;
 }
+
+message ConsumeAiQuestionRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+// reason: "" | "PLAN_PREMIUM_REQUIRED" | "MONTHLY_QUOTA_EXHAUSTED" | "DAILY_CAP_REACHED"; limit = 300 + bonus; warn = used >= 80% of limit
+message ConsumeAiQuestionResponse {
+  bool allowed = 1;
+  string reason = 2;
+  int32 used = 3;
+  int32 limit = 4;
+  bool warn = 5;
+}
+
+message RecordAiUsageRequest {
+  string tenant_id = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+}
+
+message RecordAiUsageResponse {}

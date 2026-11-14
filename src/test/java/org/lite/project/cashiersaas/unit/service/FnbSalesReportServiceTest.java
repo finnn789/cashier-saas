@@ -12,6 +12,8 @@ import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentMethod;
+import org.lite.project.cashiersaas.enums.PlanCode;
+import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository.RefundTotals;
@@ -20,17 +22,26 @@ import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.CostRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.SummaryRow;
 import org.lite.project.cashiersaas.service.FnbSalesReportService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,6 +52,7 @@ class FnbSalesReportServiceTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbSalesReportRepository reports;
     @Mock private FnbRefundRepository refunds;
+    @Mock private PlanEntitlementService planEntitlement;
     @InjectMocks private FnbSalesReportService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -71,6 +83,7 @@ class FnbSalesReportServiceTest {
     @Test
     void refundsAreQueriedByDateRangeOnlyWhileSalesDataKeepsTheOrderAndMethodFilters() {
         when(guard.requireOwner(owner, outletId)).thenReturn(context);
+        when(planEntitlement.effectivePlan(eq(tenantId), any(Instant.class))).thenReturn(PlanCode.PRO);
         when(reports.summary(tenantId, outletId, start, end, null, PaymentMethod.MANUAL_NON_CASH))
                 .thenReturn(new SummaryRow(bd("0"), bd("0"), bd("0"), bd("0"), 0L, bd("0"), bd("0"), bd("0")));
         when(reports.cost(tenantId, outletId, start, end, null, PaymentMethod.MANUAL_NON_CASH))
@@ -91,5 +104,43 @@ class FnbSalesReportServiceTest {
         assertEquals(0, response.getCashiers().size());
         assertEquals(0, response.getShifts().size());
         assertEquals(0L, response.getSummary().getRefundCount());
+    }
+
+    private FnbSalesReportFilter lastDays(int days) {
+        FnbSalesReportFilter filter = new FnbSalesReportFilter();
+        filter.setStartDate(LocalDate.now(ZoneId.of("Asia/Jakarta")).minusDays(days));
+        filter.setEndDate(LocalDate.now(ZoneId.of("Asia/Jakarta")));
+        return filter;
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {30, 60})
+    void freeTierIsRefusedAStartDateOlderThanTwentyNineDaysBeforeOutletToday(int days) {
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
+        when(planEntitlement.effectivePlan(eq(tenantId), any(Instant.class))).thenReturn(PlanCode.FREETIER);
+
+        assertThrows(PlanUpgradeRequiredException.class, () -> service.report(owner, outletId, lastDays(days)));
+        verify(reports, never()).transactions(any(), any(), any(), any(), any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void freeTierInsideTheWindowKeepsTheSummaryButEmptiesHourlyCashiersAndShifts() {
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
+        when(planEntitlement.effectivePlan(eq(tenantId), any(Instant.class))).thenReturn(PlanCode.FREETIER);
+        when(reports.summary(eq(tenantId), eq(outletId), any(Instant.class), any(Instant.class), any(), any()))
+                .thenReturn(new SummaryRow(bd("0"), bd("0"), bd("0"), bd("0"), 0L, bd("0"), bd("0"), bd("0")));
+        when(reports.cost(eq(tenantId), eq(outletId), any(Instant.class), any(Instant.class), any(), any()))
+                .thenReturn(new CostRow(bd("0"), 0L));
+        when(refunds.totals(eq(tenantId), eq(outletId), any(Instant.class), any(Instant.class)))
+                .thenReturn(new RefundTotals(0L, bd("0")));
+
+        FnbSalesReportResponse response = service.report(owner, outletId, lastDays(29));
+
+        assertEquals(0, response.getHourly().size());
+        assertEquals(0, response.getCashiers().size());
+        assertEquals(0, response.getShifts().size());
+        verify(reports, never()).hourly(any(), any(), any(), any(), any(), any(), any());
+        verify(reports, never()).cashiers(any(), any(), any(), any(), any(), any());
+        verify(reports, never()).shifts(any(), any(), any(), any(), any(), any());
     }
 }

@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
 import org.lite.project.cashiersaas.entity.fnb.DailySummaryDispatchEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -36,16 +37,25 @@ public class DailySummaryDispatchRepository {
     }
 
     /** PENDING/FAILED rows below the attempt cap whose last attempt (or creation, if never tried) is older than the cutoff. */
-    public List<UUID> retryable(int maxAttempts, Instant olderThan, LocalDate minBusinessDate, int limit) {
+    public List<UUID> retryable(int maxAttempts, Instant olderThan, LocalDate minBusinessDate, int limit, Instant now) {
         return entityManager.createQuery("select d.id from DailySummaryDispatchEntity d "
                         + "where d.status in (:pending, :failed) and d.attempts < :maxAttempts "
                         + "and d.businessDate >= :minBusinessDate "
-                        + "and coalesce(d.lastAttemptAt, d.createdAt) < :olderThan order by d.createdAt", UUID.class)
+                        + "and coalesce(d.lastAttemptAt, d.createdAt) < :olderThan and " + premium("d.tenant")
+                        + " order by d.createdAt", UUID.class)
                 .setParameter("pending", DailySummaryDispatchEntity.Status.PENDING)
                 .setParameter("failed", DailySummaryDispatchEntity.Status.FAILED)
                 .setParameter("maxAttempts", maxAttempts).setParameter("olderThan", olderThan)
                 .setParameter("minBusinessDate", minBusinessDate)
+                .setParameter("now", now).setParameter("trialCutoff", now.minus(TenantEntity.PREMIUM_TRIAL_DURATION))
                 .setMaxResults(limit).getResultList();
+    }
+
+    /** Effective PREMIUM at :now: an active PREMIUM subscription row or a running trial (same rule as PlanEntitlementService). */
+    private static String premium(String tenant) {
+        return "(exists (select 1 from SubscriptionEntity s where s.tenant = " + tenant + " and s.planCode = 'PREMIUM' "
+                + "and s.status = 'ACTIVE' and s.startsAt <= :now and (s.endsAt is null or s.endsAt > :now)) "
+                + "or " + tenant + ".premiumTrialStartedAt > :trialCutoff)";
     }
 
     public long countOpenShifts(UUID tenantId, UUID outletId) {
@@ -55,11 +65,13 @@ public class DailySummaryDispatchRepository {
                 .setParameter("open", CashShiftEntity.Status.OPEN).getSingleResult();
     }
 
-    /** Active outlets of active F&B tenants (the fallback sweep filters by local time in memory). */
-    public List<OutletRef> activeFnbOutlets() {
+    /** Active outlets of active, effectively PREMIUM F&B tenants (the fallback sweep filters by local time in memory). */
+    public List<OutletRef> activeFnbOutlets(Instant now) {
         return entityManager.createQuery("select o.id, o.tenant.id, o.timeZone from OutletEntity o "
                         + "where o.active = true and o.tenant.status = 'ACTIVE' "
-                        + "and o.tenant.businessType.active = true and o.tenant.businessType.code = 'FNB'", Object[].class)
+                        + "and o.tenant.businessType.active = true and o.tenant.businessType.code = 'FNB' and "
+                        + premium("o.tenant"), Object[].class)
+                .setParameter("now", now).setParameter("trialCutoff", now.minus(TenantEntity.PREMIUM_TRIAL_DURATION))
                 .getResultList().stream().map(row -> new OutletRef((UUID) row[1], (UUID) row[0], (String) row[2])).toList();
     }
 

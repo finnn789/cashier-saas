@@ -16,6 +16,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.grpc.mapper.GrpcCatalogMapper;
 import org.lite.project.cashiersaas.grpc.mapper.GrpcOrderMapper;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
@@ -24,6 +25,7 @@ import org.lite.project.cashiersaas.grpc.service.CashierOrderGrpcHandler;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
@@ -78,8 +80,10 @@ class CashierGrpcHandlerRejectionTest {
                 .thenReturn(List.of());
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ALLOWED))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(OTHER))).thenReturn(false);
+        PlanEntitlementService plans = mock(PlanEntitlementService.class);
+        when(plans.effectivePlan(any(), any())).thenReturn(PlanCode.PREMIUM);
         GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository,
-                mock(TenantMembershipRepository.class), properties);
+                mock(TenantMembershipRepository.class), plans, properties);
 
         catalogHandler = new CashierCatalogGrpcHandler(entityManager, criteriaBuilderFactory, catalogMapper, policy);
         orderHandler = new CashierOrderGrpcHandler(entityManager, criteriaBuilderFactory, orderMapper, policy);

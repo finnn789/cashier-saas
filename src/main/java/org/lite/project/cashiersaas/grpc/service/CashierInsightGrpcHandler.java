@@ -112,6 +112,7 @@ public class CashierInsightGrpcHandler {
         try {
             UUID tenantUuid = tenantAccessPolicy.requireAllowedTenant(rawTenantId);
             List<UUID> outletIds = tenantAccessPolicy.requireOwnerOutlets(tenantUuid, rawUserId);
+            tenantAccessPolicy.requirePremium(tenantUuid);
             Function<List<MerchantAccessContext>, R> builder = validate.apply(tenantUuid);
             UUID userId = UUID.fromString(rawUserId.trim());
             List<MerchantAccessContext> contexts = new ArrayList<>();

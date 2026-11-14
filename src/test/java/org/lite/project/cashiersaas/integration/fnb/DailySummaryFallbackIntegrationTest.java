@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.integration.support.AbstractPostgresIntegrationTest;
 import org.lite.project.cashiersaas.integration.support.ApiTestSupport;
 import org.lite.project.cashiersaas.integration.support.MerchantFixture;
@@ -162,6 +163,19 @@ class DailySummaryFallbackIntegrationTest extends AbstractPostgresIntegrationTes
         assertEquals("PENDING", stale.get("status"), "rows older than today minus 2 days are not retried");
         assertEquals(0, ((Number) stale.get("attempts")).intValue());
         assertEquals(0, callsFor(newYork, "2031-03-28").size());
+    }
+
+    @Test
+    void aTenantBelowPremiumGetsNoFallbackRowAndItsPendingRowIsNotRetried() throws Exception {
+        MerchantFixture free = api.onboardOwner("fb-free", PlanCode.FREETIER);
+        insertDispatch(free, "2031-05-01", "SHIFT_CLOSED", "PENDING", 0);
+
+        runAt("2031-05-02T16:30:00Z"); // 23:30 in Jakarta; the row of the 1st is inside the 2-day retry window
+
+        assertEquals(0, rows(free, "2031-05-02"), "the sweep skips tenants without an effective PREMIUM plan");
+        assertEquals("PENDING", jdbc.queryForObject("SELECT status FROM daily_summary_dispatches WHERE outlet_id = ?",
+                String.class, free.outletId()));
+        assertEquals(0, callsFor(free, "2031-05-01").size() + callsFor(free, "2031-05-02").size());
     }
 
     @Test

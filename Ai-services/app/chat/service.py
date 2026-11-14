@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.errors import GraphRecursionError
 
 from app.ai.graph.error_codes import classify_llm_error
 from app.ai.graph.workflow import build_chat_graph
@@ -24,9 +25,28 @@ from app.chat import members
 from app.chat.members import MemberMatch, VerifiedMembership
 from app.chat.repositories import ChannelRepository
 from app.core.database import Database
+from app.integrations.grpc.client import CashierGrpcClient
+from app.integrations.grpc.config import load_grpc_settings
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+# TASK-082: at most 4 LLM calls per question. The graph is agent -> tools -> agent ...
+# and LangGraph runs `recursion_limit` supersteps (verified: limit 5/6 = 3 agent runs,
+# 7 = 4). Agent runs sit on supersteps 0, 2, 4, 6, so 7 allows exactly 4 agent runs and
+# stops before the tools step that would follow the 4th one (a 5th agent would be step 8).
+MAX_AGENT_STEPS = 7
+_QUOTA_REFUSALS = {
+    'PLAN_PREMIUM_REQUIRED': (
+        'Asisten AI hanya tersedia di paket Premium. Silakan perpanjang atau upgrade paket Anda.'
+    ),
+    'MONTHLY_QUOTA_EXHAUSTED': (
+        'Kuota pertanyaan AI bulan ini sudah habis. Silakan top-up +200 pertanyaan.'
+    ),
+    'DAILY_CAP_REACHED': 'Batas harian 40 pertanyaan AI sudah tercapai. Coba lagi besok.',
+}
+QUOTA_UNAVAILABLE_MESSAGE = 'Asisten sedang tidak tersedia, coba lagi nanti.'
+TOO_COMPLEX_MESSAGE = 'Pertanyaannya terlalu rumit, coba dipersempit.'
 
 # Identity outcomes. VERIFIED and FALLBACK carry a tenant usable by `handle`.
 VERIFIED = 'VERIFIED'
@@ -103,9 +123,11 @@ class ChatService:
         graph: Any | None = None,
         ai_settings: Any | None = None,
         fallback_tenant_id: UUID | None = None,
+        grpc_client: CashierGrpcClient | None = None,
     ) -> None:
         if fallback_tenant_id is not None and not isinstance(fallback_tenant_id, UUID):
             raise ValueError('FALLBACK_TENANT_INVALID')
+        self.grpc_client = grpc_client or CashierGrpcClient(load_grpc_settings())
         self.database = database
         self.channel_repository = channel_repository
         # Development only: used for a user with NO verified membership, never otherwise.
@@ -396,6 +418,26 @@ class ChatService:
                 else 'unconfigured'
             )
             logger.info('AI path selected', extra={'event': 'ai_path_selected', 'path': ai_path})
+            quota_note = ''
+            if ai_path != 'unconfigured':
+                # One question is consumed here; a failure of the check refuses (fail closed).
+                quota = await self.grpc_client.consume_ai_question(
+                    tenant_id=str(tenant_id),
+                    user_id=str(java_user_id) if java_user_id else '',
+                )
+                if quota is None:
+                    return self._finish(started, 'quota_unavailable', QUOTA_UNAVAILABLE_MESSAGE)
+                if not quota.get('allowed'):
+                    return self._finish(
+                        started,
+                        'quota_refused',
+                        _QUOTA_REFUSALS.get(quota.get('reason'), QUOTA_UNAVAILABLE_MESSAGE),
+                    )
+                if quota.get('warn'):
+                    quota_note = (
+                        f'\n\nKuota AI: {quota.get("used")}/{quota.get("limit")}'
+                        ' pertanyaan bulan ini.'
+                    )
             if self.graph is not None:
                 if (
                     self.ai is not None
@@ -422,16 +464,23 @@ class ChatService:
                 )
                 graph_started = time.perf_counter()
                 try:
-                    graph_state = await self.graph.ainvoke({
-                        'messages': formatted_messages,
-                        'tenant_id': str(tenant_id),
-                        'java_user_id': str(java_user_id) if java_user_id else None,
-                        'user_id': user_id,
-                        'conversation_id': str(conversation_id),
-                        'display_name': display_name,
-                    })
+                    graph_state = await self.graph.ainvoke(
+                        {
+                            'messages': formatted_messages,
+                            'tenant_id': str(tenant_id),
+                            'java_user_id': str(java_user_id) if java_user_id else None,
+                            'user_id': user_id,
+                            'conversation_id': str(conversation_id),
+                            'display_name': display_name,
+                        },
+                        config={'recursion_limit': MAX_AGENT_STEPS},
+                    )
                 except AIError as error:
                     return self._finish_error(started, error.code, 'ai_graph_error_code')
+                except GraphRecursionError:
+                    # The question stays consumed. Partial usage is not recorded: the error
+                    # carries no state (shortcut: no checkpointer, so tokens of this run are lost).
+                    return self._finish(started, 'too_complex', TOO_COMPLEX_MESSAGE)
                 except Exception as exc:
                     logger.error(
                         'Chat graph execution failed: %s',
@@ -452,6 +501,20 @@ class ChatService:
                     },
                 )
                 if isinstance(graph_state, dict):
+                    usage = [
+                        getattr(msg, 'usage_metadata', None) or {}
+                        for msg in graph_state.get('messages') or []
+                        if isinstance(msg, AIMessage)
+                    ]
+                    input_tokens = sum(int(item.get('input_tokens') or 0) for item in usage)
+                    output_tokens = sum(int(item.get('output_tokens') or 0) for item in usage)
+                    if input_tokens or output_tokens:
+                        # Awaited (never raises, bounded by the gRPC timeout): no orphan task.
+                        await self.grpc_client.record_ai_usage(
+                            tenant_id=str(tenant_id),
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                        )
                     # Any non-empty error code means the graph failed: never persist a reply.
                     error_code = graph_state.get('error_code')
                     if isinstance(error_code, str) and error_code:
@@ -498,7 +561,7 @@ class ChatService:
                         'reply_chars': len(final_answer),
                     },
                 )
-                return self._finish(started, 'reply', final_answer)
+                return self._finish(started, 'reply', final_answer + quota_note)
 
             elif self.ai is not None:
                 prompt = build_prompt(display_name, username, pairs, content)
@@ -528,6 +591,11 @@ class ChatService:
                         await asyncio.sleep(delay)
                 if completion is None:
                     raise RuntimeError('AI_COMPLETION_MISSING')
+                await self.grpc_client.record_ai_usage(
+                    tenant_id=str(tenant_id),
+                    input_tokens=completion.input_tokens,
+                    output_tokens=completion.output_tokens,
+                )
 
                 if completion.tool_calls and self.tools:
                     tool_messages = list(prompt)
@@ -582,6 +650,11 @@ class ChatService:
                         try:
                             second_completion = await self.ai.reply(tool_messages)
                             completion = second_completion
+                            await self.grpc_client.record_ai_usage(
+                                tenant_id=str(tenant_id),
+                                input_tokens=second_completion.input_tokens,
+                                output_tokens=second_completion.output_tokens,
+                            )
                             break
                         except AIError as error:
                             if not error.retryable or attempt == 3:
@@ -617,7 +690,7 @@ class ChatService:
                         'reply_chars': len(completion.content or ''),
                     },
                 )
-                return self._finish(started, 'reply', completion.content)
+                return self._finish(started, 'reply', (completion.content or '') + quota_note)
             else:
                 return self._finish_error(started, 'AI_NOT_CONFIGURED', 'ai_not_configured')
 

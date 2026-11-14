@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import org.lite.project.cashiersaas.entity.shared.MutableBaseEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.shared.StatusConstants;
 
 @Getter
@@ -28,10 +29,14 @@ public class SubscriptionEntity extends MutableBaseEntity {
     public static SubscriptionEntity activateFreeTier(TenantEntity tenant) {
         SubscriptionEntity subscription = new SubscriptionEntity();
         subscription.tenant = tenant;
-        subscription.planCode = "FREETIER";
+        subscription.planCode = PlanCode.FREETIER.name();
         subscription.status = StatusConstants.ACTIVE;
         subscription.startsAt = Instant.now();
         return subscription;
+    }
+
+    public PlanCode getPlan() {
+        return PlanCode.valueOf(planCode);
     }
 
     public boolean isActiveAt(Instant instant) {

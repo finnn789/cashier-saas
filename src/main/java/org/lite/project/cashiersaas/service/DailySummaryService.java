@@ -7,6 +7,7 @@ import org.lite.project.cashiersaas.component.DailySummaryRequestedEvent;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
 import org.lite.project.cashiersaas.entity.fnb.DailySummaryDispatchEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.repository.DailySummaryDispatchRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class DailySummaryService {
     private final DailySummaryClient client;
     private final ApplicationEventPublisher events;
     private final TransactionTemplate transactions;
+    private final PlanEntitlementService planEntitlementService;
 
     /** Runs inside the shift-close transaction, after the close was flushed. */
     public void onShiftClosed(MerchantAccessContext context, CashShiftEntity shift) {
@@ -44,6 +46,9 @@ public class DailySummaryService {
         UUID outletId = context.getOutlet().getId();
         if (dispatches.countOpenShifts(tenantId, outletId) > 0) {
             return;
+        }
+        if (planEntitlementService.effectivePlan(tenantId, Instant.now()) != PlanCode.PREMIUM) {
+            return; // daily AI summaries are a Premium feature (a running trial counts)
         }
         LocalDate businessDate = shift.getOpenedAt().atZone(zone(context.getOutlet().getTimeZone())).toLocalDate();
         dispatches.insertIfAbsent(tenantId, outletId, businessDate, DailySummaryDispatchEntity.Trigger.SHIFT_CLOSED)
@@ -62,9 +67,9 @@ public class DailySummaryService {
         Instant olderThan = now.minus(RETRY_AFTER_MINUTES, ChronoUnit.MINUTES);
         LocalDate minBusinessDate = now.atZone(ZoneOffset.UTC).toLocalDate().minusDays(2);
         List<UUID> retryable = transactions.execute(
-                status -> dispatches.retryable(MAX_ATTEMPTS, olderThan, minBusinessDate, RETRY_LIMIT));
-        // shortcut: loads every active F&B outlet per sweep and filters by local time in memory, upgrade when outlets reach thousands.
-        for (DailySummaryDispatchRepository.OutletRef outlet : dispatches.activeFnbOutlets()) {
+                status -> dispatches.retryable(MAX_ATTEMPTS, olderThan, minBusinessDate, RETRY_LIMIT, now));
+        // shortcut: loads every active PREMIUM F&B outlet per sweep and filters by local time in memory, upgrade when outlets reach thousands.
+        for (DailySummaryDispatchRepository.OutletRef outlet : dispatches.activeFnbOutlets(now)) {
             ZonedDateTime local = now.atZone(zone(outlet.getTimeZone()));
             if (local.toLocalTime().isBefore(FALLBACK_TIME)) {
                 continue;

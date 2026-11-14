@@ -2,12 +2,15 @@ package org.lite.project.cashiersaas.grpc.policy;
 
 import io.grpc.Status;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,18 +23,22 @@ import java.util.UUID;
 public class GrpcTenantAccessPolicy {
 
     static final String TENANT_NOT_PERMITTED_MESSAGE = "Tenant is not permitted for this service";
+    public static final String PLAN_PREMIUM_REQUIRED = "PLAN_PREMIUM_REQUIRED";
 
     private final TenantRepository tenantRepository;
     private final MembershipOutletAccessRepository outletAccessRepository;
     private final TenantMembershipRepository membershipRepository;
+    private final PlanEntitlementService planEntitlementService;
     private final int defaultLimit;
     private final int maxLimit;
 
     public GrpcTenantAccessPolicy(TenantRepository tenantRepository, MembershipOutletAccessRepository outletAccessRepository,
-                                  TenantMembershipRepository membershipRepository, GrpcSecurityProperties properties) {
+                                  TenantMembershipRepository membershipRepository, PlanEntitlementService planEntitlementService,
+                                  GrpcSecurityProperties properties) {
         this.tenantRepository = tenantRepository;
         this.outletAccessRepository = outletAccessRepository;
         this.membershipRepository = membershipRepository;
+        this.planEntitlementService = planEntitlementService;
         this.defaultLimit = properties.getDefaultCatalogLimit();
         this.maxLimit = properties.getMaxCatalogLimit();
     }
@@ -85,6 +92,18 @@ public class GrpcTenantAccessPolicy {
             throw Status.PERMISSION_DENIED.withDescription(TENANT_NOT_PERMITTED_MESSAGE).asRuntimeException();
         }
         return outletIds;
+    }
+
+    /** True when the tenant's effective plan (a running trial included) is PREMIUM. Call after the tenant and role checks. */
+    public boolean hasPremium(UUID tenantId) {
+        return planEntitlementService.effectivePlan(tenantId, Instant.now()).compareTo(PlanCode.PREMIUM) >= 0;
+    }
+
+    /** The AI assistant is a Premium feature: FAILED_PRECONDITION "PLAN_PREMIUM_REQUIRED" below it. */
+    public void requirePremium(UUID tenantId) {
+        if (!hasPremium(tenantId)) {
+            throw Status.FAILED_PRECONDITION.withDescription(PLAN_PREMIUM_REQUIRED).asRuntimeException();
+        }
     }
 
     public int clampLimit(int requested) {

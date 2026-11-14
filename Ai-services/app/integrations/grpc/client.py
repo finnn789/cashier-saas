@@ -327,6 +327,28 @@ class CashierGrpcClient:
             cashier_service_pb2.GetAnomaliesRequest(tenant_id=tenant_id, user_id=user_id, date=date),
         )
 
+    async def consume_ai_question(self, *, tenant_id: str, user_id: str) -> dict[str, Any] | None:
+        """Owner-only quota check + count of one AI question.
+
+        Dict {allowed, reason, used, limit, warn} on success; None on any gRPC or
+        configuration error, so the caller can fail closed.
+        """
+        return await self._call_insight(
+            "ConsumeAiQuestion",
+            cashier_service_pb2.ConsumeAiQuestionRequest(tenant_id=tenant_id, user_id=user_id),
+        )
+
+    async def record_ai_usage(
+        self, *, tenant_id: str, input_tokens: int, output_tokens: int
+    ) -> None:
+        """Report LLM token usage; never raises (errors are logged by the shared RPC helper)."""
+        await self._call_insight(
+            "RecordAiUsage",
+            cashier_service_pb2.RecordAiUsageRequest(
+                tenant_id=tenant_id, input_tokens=input_tokens, output_tokens=output_tokens
+            ),
+        )
+
     async def __aenter__(self) -> "CashierGrpcClient":
         await self.get_channel()
         return self

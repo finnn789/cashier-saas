@@ -203,6 +203,50 @@ class InsightClientTests(unittest.IsolatedAsyncioTestCase):
                 result = await getattr(client, method)(tenant_id=TENANT, user_id=USER, **kwargs)
                 self.assertIsNone(result)
 
+    async def test_consume_ai_question_maps_the_quota_decision(self) -> None:
+        client = _client()
+        client._stub.ConsumeAiQuestion = AsyncMock(
+            return_value=pb.ConsumeAiQuestionResponse(
+                allowed=False, reason="DAILY_CAP_REACHED", used=40, limit=300, warn=True
+            )
+        )
+
+        result = await client.consume_ai_question(tenant_id=TENANT, user_id=USER)
+
+        request = client._stub.ConsumeAiQuestion.await_args.args[0]
+        self.assertEqual((request.tenant_id, request.user_id), (TENANT, USER))
+        self.assertEqual(
+            result,
+            {"allowed": False, "reason": "DAILY_CAP_REACHED", "used": 40, "limit": 300, "warn": True},
+        )
+
+    async def test_consume_ai_question_returns_none_on_rpc_error_so_the_caller_fails_closed(self) -> None:
+        client = _client()
+        client._stub.ConsumeAiQuestion = AsyncMock(
+            side_effect=_rpc_error(grpc.StatusCode.PERMISSION_DENIED)
+        )
+        with self.assertLogs(CLIENT_LOGGER, level="WARNING"):
+            self.assertIsNone(await client.consume_ai_question(tenant_id=TENANT, user_id=USER))
+
+    async def test_record_ai_usage_sends_tenant_and_token_counts(self) -> None:
+        client = _client()
+        client._stub.RecordAiUsage = AsyncMock(return_value=pb.RecordAiUsageResponse())
+
+        await client.record_ai_usage(tenant_id=TENANT, input_tokens=1200, output_tokens=345)
+
+        request = client._stub.RecordAiUsage.await_args.args[0]
+        self.assertEqual(
+            (request.tenant_id, request.input_tokens, request.output_tokens), (TENANT, 1200, 345)
+        )
+
+    async def test_record_ai_usage_swallows_errors(self) -> None:
+        for error in (_rpc_error(grpc.StatusCode.UNAVAILABLE), RuntimeError("boom")):
+            with self.subTest(error=type(error).__name__):
+                client = _client()
+                client._stub.RecordAiUsage = AsyncMock(side_effect=error)
+                with self.assertLogs(CLIENT_LOGGER, level="WARNING"):
+                    await client.record_ai_usage(tenant_id=TENANT, input_tokens=1, output_tokens=1)
+
     async def test_empty_service_key_fails_closed_without_calling_backend(self) -> None:
         for method, rpc, kwargs, _, _ in CASES:
             with self.subTest(method=method):

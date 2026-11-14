@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -44,6 +45,7 @@ public class FnbPaymentService {
     private final AuditLogRepository audit;
     private final FnbStockService stock;
     private final FnbShiftService shifts;
+    private final PlanEntitlementService planEntitlement;
 
     @Transactional
     public FnbPaymentResponse pay(TenantPrincipal principal, UUID outletId, UUID orderId, FnbPaymentRequest request) {
@@ -74,6 +76,7 @@ public class FnbPaymentService {
         payments.persist(payment);
         orders.flush();
         List<String> stockWarnings = stock.consumeForPaidOrder(context, order);
+        planEntitlement.startTrialIfEligible(context.getTenant().getId(), Instant.now());
         audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(), AuditLogEntity.Action.FNB_PAYMENT_RECORDED, order.getId(), null, "method=" + method + ";paymentId=" + payment.getId()));
         FnbPaymentResponse response = FnbPaymentMapper.payment(payment);
         response.setStockWarnings(stockWarnings);
