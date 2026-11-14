@@ -1,10 +1,12 @@
 # Project memory
 
-Memory version: 76
-Updated: 2026-11-13 (Asia/Jakarta)
+Memory version: 77
+Updated: 2026-11-14 (Asia/Jakarta)
 
 ## Evidence-qualified state
 
+- TASK-079 — M6 VERIFIED (user-requested `mvnw -B verify` run 3 BUILD SUCCESS 523 unit + 127 IT; runs 1-2 failed on test-only issues fixed by W4/W5, no production change), NOT COMMITTED (2026-11-14): M6 unit cost/COGS, batch stock count, inactive ingredient fix, owner reports (hour/cashier/shift, COGS, refunds), V9; packet `tasks/TASK-079.md`, decisions "M6 data owner". Canonical 76 -> 77.
+- TASK-076/077/078 committed as `b383d90` on `fix/flow-controls-a` (2026-11-14, not pushed).
 - TASK-078 — M5 VERIFIED (`mvnw -B verify` 473 unit + 121 IT green), NOT COMMITTED (2026-11-14); details in TASKS.md.
 - PRD v2.1 (2026-11-13): record-only cashier, QRIS not a payment feature, non-cash labels, mock gateway to be removed, petty cash in M5; see DECISIONS "PRD v2.1".
 - PRD v2 (2026-11-13): `PRD-MVP.md` rewritten for the pivot with milestones M4-M8; see `.ai/DECISIONS.md` "PRD v2".

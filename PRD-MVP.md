@@ -202,7 +202,7 @@ Tenant, Outlet, StaffUser, TenantMembership, MembershipOutletAccess, Subscriptio
 | M3 POS dan pembayaran | Pesanan, hold bill, diskon, bayar, struk dasar, laporan dasar, audit viewer, pivot status | Selesai (branch `refactor/pivot-cashier-ai`, belum di-merge ke main) |
 | M4 Kontrol kasir | TASK-076 (staf, password, flag mock, aturan cancel, audit checkout, gRPC scoping); shift dan kas; void/refund (TASK-077) | Terimplementasi dan lolos `mvnw verify`, belum di-commit |
 | M5 Pencatatan sederhana dan struk | Hapus mock gateway; label non-tunai dari owner; pengeluaran kas kecil di shift; modal awal otomatis; nomor struk berurutan + struk lengkap (nama usaha, logo, footer, tanda REFUND); nama pelanggan opsional + catatan pesanan; filter daftar pesanan; UI kasir cepat | Backend terimplementasi dan lolos `mvnw verify` (TASK-078), belum di-commit; UI via `prompts/m5-ui-cashier.md` |
-| M6 Data owner | Harga pokok, stok opname, bahan nonaktif tidak dipotong, laporan per jam/kasir/shift, HPP/laba kotor | Belum |
+| M6 Data owner | Harga pokok, stok opname, bahan nonaktif tidak dipotong, laporan per jam/kasir/shift, HPP/laba kotor | Backend selesai dan terverifikasi (TASK-079) |
 | M7 Asisten AI | Ringkasan harian, saran restock, anomali, tanya-jawab penjualan (read-only) | Belum |
 | M8 Pilot | 3 cafe pilot, 100+ transaksi nyata, umpan balik | Belum |
 

@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/inventory/stock-counts"
+method: POST
+headers:
+  Content-Type: application/json
+  Accept: application/json
+body:
+  type: json
+  content: '{"idempotencyKey": "{{$guid}}", "note": "Opname akhir bulan", "lines": [{"inventoryItemId": "{{inventoryItemId}}", "countedQuantity": 950.000}]}'
+scripts:
+  - type: afterResponse
+    code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); pm.expect(res.success).to.be.true; pm.expect(res.data.lines).to.be.an('array');
+    language: text/javascript
+description: |-
+  Hanya OWNER (CASHIER = 403). Satu transaksi untuk banyak bahan: idempotencyKey wajib (maks 128), note opsional (maks 500), lines 1-200 berisi inventoryItemId + countedQuantity (>= 0, maks 3 desimal). Bahan kembar = 400; bahan tidak ada/nonaktif/outlet lain = 404. Selisih (hitung - stok sistem) dicatat sebagai mutasi ADJUSTMENT dengan alasan "Stok opname" (+ ": note"); selisih 0 tidak membuat mutasi (movementId null). Key sama + isi sama = hasil lama (tetap 201); key sama + isi berbeda = 409. Respons: lines[{inventoryItemId, name, unit, previousQuantity, countedQuantity, difference, movementId}]. Opname tidak mengubah harga rata-rata.
+order: 5000

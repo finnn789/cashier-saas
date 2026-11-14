@@ -3,8 +3,10 @@ package org.lite.project.cashiersaas.repository;
 import com.blazebit.persistence.CriteriaBuilder;
 import com.blazebit.persistence.CriteriaBuilderFactory;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import jakarta.persistence.Tuple;
 import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -90,6 +93,8 @@ public class FnbSalesReportRepository {
                 .with("item.productNameSnapshot")
                 .with("SUM(item.quantity)")
                 .with("COALESCE(SUM(item.lineTotal), 0)")
+                .with("COALESCE(SUM(item.costAmount), 0)")
+                .with("COUNT(CASE WHEN item.costAmount IS NULL THEN 1 END)")
                 .end()
                 .groupBy("item.product.id")
                 .groupBy("item.productNameSnapshot")
@@ -113,6 +118,90 @@ public class FnbSalesReportRepository {
                 .groupBy("payment.methodLabel")
                 .orderByAsc("payment.method")
                 .orderByAsc("payment.methodLabel")
+                .getResultList();
+    }
+
+    public CostRow cost(UUID tenantId, UUID outletId, Instant start, Instant end,
+                        OrderStatus status, PaymentMethod method) {
+        return paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .innerJoinOn(OrderItemEntity.class, "item")
+                .on("item.salesOrder.id").eqExpression("salesOrder.id")
+                .on("item.tenant.id").eq(tenantId)
+                .on("item.outlet.id").eq(outletId)
+                .end()
+                .selectNew(CostRow.class)
+                .with("COALESCE(SUM(item.costAmount), 0)")
+                .with("COUNT(CASE WHEN item.costAmount IS NULL THEN 1 END)")
+                .end()
+                .getSingleResult();
+    }
+
+    /** Native only for the zone-aware hour grouping; applies the same filters as paidSalesQuery. */
+    public List<HourlyRow> hourly(UUID tenantId, UUID outletId, Instant start, Instant end, String zone,
+                                  OrderStatus status, PaymentMethod method) {
+        StringBuilder sql = new StringBuilder("SELECT CAST(extract(hour FROM (p.paid_at AT TIME ZONE :zone)) AS integer) AS h, "
+                + "COUNT(p.id), COALESCE(SUM(o.subtotal - o.discount_amount), 0) "
+                + "FROM payments p JOIN sales_orders o ON o.id = p.sales_order_id "
+                + "WHERE p.tenant_id = :tenantId AND p.outlet_id = :outletId AND o.tenant_id = :tenantId AND o.outlet_id = :outletId "
+                + "AND p.paid_at >= :start AND p.paid_at < :end AND o.payment_status = 'PAID' AND o.status <> 'CANCELLED'");
+        if (status != null) sql.append(" AND o.status = :status");
+        if (method != null) sql.append(" AND p.method = :method");
+        sql.append(" GROUP BY h ORDER BY h");
+        Query nativeQuery = entityManager.createNativeQuery(sql.toString())
+                .setParameter("zone", zone).setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("start", start).setParameter("end", end);
+        if (status != null) nativeQuery.setParameter("status", status.name());
+        if (method != null) nativeQuery.setParameter("method", method.name());
+        List<HourlyRow> rows = new ArrayList<>();
+        for (Object result : nativeQuery.getResultList()) {
+            Object[] columns = (Object[]) result;
+            rows.add(new HourlyRow(((Number) columns[0]).intValue(), ((Number) columns[1]).longValue(),
+                    new BigDecimal(columns[2].toString())));
+        }
+        return rows;
+    }
+
+    public List<CashierRow> cashiers(UUID tenantId, UUID outletId, Instant start, Instant end,
+                                     OrderStatus status, PaymentMethod method) {
+        return paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .innerJoin("payment.receivedBy", "receiver")
+                .selectNew(CashierRow.class)
+                .with("receiver.id")
+                .with("receiver.fullName")
+                .with("COUNT(payment.id)")
+                .with("COALESCE(SUM(salesOrder.subtotal - salesOrder.discountAmount), 0)")
+                .with("COALESCE(SUM(payment.amountPaid - payment.changeAmount), 0)")
+                .end()
+                .groupBy("receiver.id")
+                .groupBy("receiver.fullName")
+                .orderByDesc("SUM(salesOrder.subtotal - salesOrder.discountAmount)")
+                .orderByAsc("receiver.fullName")
+                .getResultList();
+    }
+
+    public List<ShiftRow> shifts(UUID tenantId, UUID outletId, Instant start, Instant end,
+                                 OrderStatus status, PaymentMethod method) {
+        return paidSalesQuery(tenantId, outletId, start, end, status, method)
+                .leftJoinOn("payment.cashShift", "cashShift")
+                .on("cashShift.tenant.id").eq(tenantId)
+                .on("cashShift.outlet.id").eq(outletId)
+                .end()
+                .leftJoin("cashShift.openedBy", "opener")
+                .selectNew(ShiftRow.class)
+                .with("cashShift.id")
+                .with("opener.fullName")
+                .with("cashShift.openedAt")
+                .with("cashShift.closedAt")
+                .with("cashShift.status")
+                .with("COUNT(payment.id)")
+                .with("COALESCE(SUM(salesOrder.subtotal - salesOrder.discountAmount), 0)")
+                .end()
+                .groupBy("cashShift.id")
+                .groupBy("opener.fullName")
+                .groupBy("cashShift.openedAt")
+                .groupBy("cashShift.closedAt")
+                .groupBy("cashShift.status")
+                .orderBy("cashShift.openedAt", false, false)
                 .getResultList();
     }
 
@@ -202,12 +291,76 @@ public class FnbSalesReportRepository {
         public final String name;
         public final long quantity;
         public final BigDecimal grossSales;
+        public final BigDecimal cost;
+        public final long itemsWithoutCost;
 
-        public ProductRow(UUID productId, String name, Long quantity, BigDecimal grossSales) {
+        public ProductRow(UUID productId, String name, Long quantity, BigDecimal grossSales,
+                          BigDecimal cost, Long itemsWithoutCost) {
             this.productId = productId;
             this.name = name;
             this.quantity = quantity;
             this.grossSales = grossSales;
+            this.cost = cost;
+            this.itemsWithoutCost = itemsWithoutCost;
+        }
+    }
+
+    public static class CostRow {
+        public final BigDecimal cost;
+        public final long itemsWithoutCost;
+
+        public CostRow(BigDecimal cost, Long itemsWithoutCost) {
+            this.cost = cost;
+            this.itemsWithoutCost = itemsWithoutCost;
+        }
+    }
+
+    public static class HourlyRow {
+        public final int hour;
+        public final long count;
+        public final BigDecimal netSales;
+
+        public HourlyRow(int hour, long count, BigDecimal netSales) {
+            this.hour = hour;
+            this.count = count;
+            this.netSales = netSales;
+        }
+    }
+
+    public static class CashierRow {
+        public final UUID staffUserId;
+        public final String fullName;
+        public final long count;
+        public final BigDecimal netSales;
+        public final BigDecimal amountCollected;
+
+        public CashierRow(UUID staffUserId, String fullName, Long count, BigDecimal netSales, BigDecimal amountCollected) {
+            this.staffUserId = staffUserId;
+            this.fullName = fullName;
+            this.count = count;
+            this.netSales = netSales;
+            this.amountCollected = amountCollected;
+        }
+    }
+
+    public static class ShiftRow {
+        public final UUID shiftId;
+        public final String cashierName;
+        public final Instant openedAt;
+        public final Instant closedAt;
+        public final CashShiftEntity.Status status;
+        public final long count;
+        public final BigDecimal netSales;
+
+        public ShiftRow(UUID shiftId, String cashierName, Instant openedAt, Instant closedAt,
+                        CashShiftEntity.Status status, Long count, BigDecimal netSales) {
+            this.shiftId = shiftId;
+            this.cashierName = cashierName;
+            this.openedAt = openedAt;
+            this.closedAt = closedAt;
+            this.status = status;
+            this.count = count;
+            this.netSales = netSales;
         }
     }
 

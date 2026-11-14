@@ -4,8 +4,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbInventoryItemRequest;
+import org.lite.project.cashiersaas.dto.request.FnbStockCountRequest;
 import org.lite.project.cashiersaas.dto.request.FnbStockMovementRequest;
 import org.lite.project.cashiersaas.dto.response.FnbInventoryItemResponse;
+import org.lite.project.cashiersaas.dto.response.FnbStockCountResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStockMovementResponse;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.service.FnbInventoryService;
@@ -69,5 +71,13 @@ public class FnbInventoryController {
                                                                  @RequestParam(defaultValue = "0") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.success("Mutasi stok diambil.", service.movements(principal, outletId, id, page, size));
+    }
+
+    @PostMapping("/merchant/outlets/{outletId}/fnb/inventory/stock-counts")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<FnbStockCountResponse> stockCount(@AuthenticationPrincipal TenantPrincipal principal,
+                                                         @PathVariable UUID outletId,
+                                                         @Valid @RequestBody FnbStockCountRequest request) {
+        return ApiResponse.created("Stok opname dicatat.", service.stockCount(principal, outletId, request));
     }
 }

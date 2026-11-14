@@ -25,6 +25,11 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - Old product-scoped group/option/option-recipe endpoints are replaced, no compatibility routes. Migration V5 backfills and drops `option_groups.product_id`.
 - The inventory PR is not merged; Phase 2 is a stacked branch on `feature/fnb-inventory-recipe` (user decision, merge skipped).
 
+## M6 data owner — 2026-11-14
+
+- Explicit user decisions (TASK-079): cashiers may enter a purchase price on RESTOCK, but average cost and movement unit cost are visible to the owner only; per-menu gross profit = line totals − COGS (before order discount), total gross profit = net sales − COGS; stock count is one batch request per count.
+- Orchestrator design: moving average cost on `inventory_balances`, `unit_cost` snapshot on every movement, per-item `order_items.cost_amount` (null = unknown cost) because SALE movements are merged per ingredient across menus; inactive ingredients are not deducted. Migration V9.
+
 ## PRD v2.1 — record-only cashier — 2026-11-13
 
 - Explicit user decision: the app only RECORDS transactions; QRIS is not a payment feature (no QRIS display, no gateway, no EDC). Payment methods = cash and non-cash; non-cash requires an owner-defined label (e.g. "QRIS", "Transfer BCA") stored as a text snapshot.

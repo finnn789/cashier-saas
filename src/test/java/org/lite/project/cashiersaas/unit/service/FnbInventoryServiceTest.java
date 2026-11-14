@@ -288,6 +288,7 @@ class FnbInventoryServiceTest {
     void updateItemAllowsUnitChangeWhenNoMovementExists() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "500");
         InventoryBalanceEntity balance = balanceOf(item, "0");
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movements(tenantId, outletId, itemId, 0, 1)).thenReturn(List.of());
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
@@ -312,6 +313,7 @@ class FnbInventoryServiceTest {
     void updateItemWithUnchangedUnitNeverQueriesMovements() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "500");
         InventoryBalanceEntity balance = balanceOf(item, "300");
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
 
@@ -344,6 +346,7 @@ class FnbInventoryServiceTest {
     void deactivateItemMarksItemInactiveAndReturnsIt() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "500");
         InventoryBalanceEntity balance = balanceOf(item, "40");
+        when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
 
@@ -369,6 +372,7 @@ class FnbInventoryServiceTest {
     // ---------------------------------------------------------------- 4. items
 
     private List<InventoryItemEntity> listFixture() {
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         UUID ok = UUID.randomUUID();
         UUID none = UUID.randomUUID();
         UUID low = UUID.randomUUID();
@@ -740,6 +744,7 @@ class FnbInventoryServiceTest {
     @Test
     void movementsAcceptBoundaryPagingValues() {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movements(tenantId, outletId, itemId, 0, 1)).thenReturn(List.of());
         when(inventory.movements(tenantId, outletId, itemId, 1_000_000, 50)).thenReturn(List.of());
@@ -752,6 +757,7 @@ class FnbInventoryServiceTest {
 
     @Test
     void movementsOfUnknownItemAreNotFoundWithoutQueryingHistory() {
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> service.movements(cashier, outletId, itemId, 0, 10));
@@ -771,6 +777,7 @@ class FnbInventoryServiceTest {
         InventoryMovementEntity restock = existingMovement(item, InventoryMovementEntity.Type.RESTOCK, "500",
                 "Stok awal", "init:" + itemId, "fp2");
         ReflectionTestUtils.setField(sale, "id", UUID.randomUUID());
+        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movements(tenantId, outletId, itemId, 2, 20)).thenReturn(List.of(sale, restock));
 

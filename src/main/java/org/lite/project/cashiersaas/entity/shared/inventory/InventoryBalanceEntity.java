@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.UUID;
 import org.lite.project.cashiersaas.entity.shared.MutableBaseEntity;
 
@@ -23,6 +24,8 @@ public class InventoryBalanceEntity extends MutableBaseEntity {
     private InventoryItemEntity inventoryItem;
     @Column(name="quantity_on_hand",nullable=false,precision=14,scale=3)
     private BigDecimal quantityOnHand;
+    @Column(name="average_unit_cost",precision=19,scale=4)
+    private BigDecimal averageUnitCost;
 
     public static InventoryBalanceEntity create(UUID tenantId, UUID outletId, InventoryItemEntity item) {
         InventoryBalanceEntity balance = new InventoryBalanceEntity();
@@ -35,6 +38,17 @@ public class InventoryBalanceEntity extends MutableBaseEntity {
 
     public void apply(BigDecimal delta) {
         quantityOnHand = quantityOnHand.add(delta);
+    }
+
+    // Moving average: reset to the price when stock is empty/negative or no average exists yet; no price leaves the average unchanged.
+    public void receive(BigDecimal quantity, BigDecimal unitCost) {
+        if (unitCost != null) {
+            averageUnitCost = quantityOnHand.signum() <= 0 || averageUnitCost == null
+                    ? unitCost.setScale(4, RoundingMode.HALF_UP)
+                    : quantityOnHand.multiply(averageUnitCost).add(quantity.multiply(unitCost))
+                            .divide(quantityOnHand.add(quantity), 4, RoundingMode.HALF_UP);
+        }
+        apply(quantity);
     }
 
     public Status status() {

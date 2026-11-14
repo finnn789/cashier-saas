@@ -238,6 +238,56 @@ non-cash totals with bank statements; the CSV has a `Payment Label` column after
 over 10,000 rows is rejected; no partial export is silently returned. Fields are quoted,
 quotes escaped and leading spreadsheet formula prefixes neutralized.
 
+## M6: unit cost, COGS, stock count and owner reports (migration V9)
+
+Not compiled or run end to end at the time of writing (TASK-079); recorded here as the contract.
+
+Unit cost. `inventory_balances.average_unit_cost` (scale 4), `inventory_movements.unit_cost` (scale 4) and
+`order_items.cost_amount` (scale 2) are nullable; old rows are not backfilled.
+
+- Moving average on `RESTOCK` with price `c` and quantity `q`, before-balance on hand `s` and average `a`:
+  `a' = c` when `s <= 0` or `a` is null, otherwise `a' = (s*a + q*c) / (s + q)` (scale 4, HALF_UP). Only a priced
+  RESTOCK changes the average. A RESTOCK without a price leaves the average unchanged and records the current
+  average as the movement `unitCost`. WASTE and a positive ADJUSTMENT (including stock count) never change it.
+- Movement `unitCost`: RESTOCK = the entered price (or the current average when none was sent); SALE, WASTE,
+  ADJUSTMENT = the balance average at that moment (may be null); SALE_REVERSAL = the `unitCost` of the SALE it reverses.
+- `unitCost` on the movement request is only valid for RESTOCK (`400 "Harga beli hanya untuk restock."`).
+  Both OWNER and CASHIER may send a purchase price. It is part of the request fingerprint only when present,
+  so old idempotency keys keep replaying.
+- Cost visibility: `averageUnitCost` (ingredient responses) and `unitCost` (movement responses) are returned only
+  to OWNERMERCHANT; they are null for CASHIER on every inventory response.
+- Inactive ingredients are never deducted on payment and add no cost, even when a recipe line still references them.
+
+COGS per order item. On payment, `cost_amount` of each item = sum over the product recipe lines and that item's
+option recipe lines (active ingredients only) of `quantityPerUnit x item quantity x average cost`. It is null when
+the item has no active recipe line, or any used ingredient has no balance or no average ("item without cost").
+A replayed payment does not overwrite an existing cost.
+
+Stock count (owner only): `POST /api/v1/merchant/outlets/{outletId}/fnb/inventory/stock-counts`, one transaction
+for many ingredients. Body `{idempotencyKey (max 128), note? (max 500), lines: [{inventoryItemId, countedQuantity >= 0}]}`
+(1-200 lines; duplicate ingredient: `400`; unknown, inactive or foreign ingredient: `404`). Each line with a
+difference becomes an ADJUSTMENT of (counted - on hand) with reason `Stok opname` (plus `: note` when given); a zero
+difference creates no movement (`movementId` null). Response `{lines: [{inventoryItemId, name, unit, previousQuantity,
+countedQuantity, difference, movementId}]}`, HTTP 201. Idempotency: a per-line key is derived from the request key and
+the ingredient id; the same key with the same content (lines and note) replays the previous result (also 201), different
+content is `409 "Kunci idempotensi telah digunakan."`. Known limits: an all-zero count leaves no movement, so its
+replay is re-evaluated against current stock; a replay after an ingredient was deactivated returns `404`; lines without
+a movement are returned in a replay with previous = counted.
+
+Owner sales report additions (`GET /merchant/outlets/{outletId}/fnb/reports/sales`, same filters; the CSV is unchanged):
+
+- Summary: `costOfGoodsSold` (sum of non-null item costs), `grossProfit` = `netSales` (after order discount) - `costOfGoodsSold`,
+  `itemsWithoutCost` (included item rows with null cost), `refundCount` and `refundAmount` (refunds with `refundedAt`
+  in the range, outlet-wide, no status or method filter).
+- Per menu (`topProducts`): `costOfGoodsSold`, `grossProfit` = `grossSales` - `costOfGoodsSold` (line totals before order
+  discount, so the per-menu sum can exceed the total gross profit by the discounts), `itemsWithoutCost`. The UI should hint
+  "N item tanpa HPP" so a profit that ignores uncosted items is not misread; orders paid before V9 count as without cost.
+- `hourly`: `{hour 0-23 in the outlet zone, transactionCount, netSales}`, only hours with data, ascending.
+- `cashiers`: `{staffUserId, fullName, transactionCount, netSales, amountCollected}` by receiving member, ordered by
+  `netSales` descending.
+- `shifts`: `{shiftId, cashierName, openedAt, closedAt, status, transactionCount, netSales}` ordered by `openedAt`
+  descending; payments without a shift form one row with null shift fields.
+
 ## Recommended verification when explicitly requested
 
 Verify shift open/close math (cash, non-cash, change, refunds, petty cash), opening suggestion, label CRUD/limits/duplicates and the

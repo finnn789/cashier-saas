@@ -9,6 +9,7 @@ import org.lite.project.cashiersaas.dto.response.FnbSalesCsvResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesReportResponse;
 import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class FnbSalesReportService {
     private static final int MAX_CSV_ROWS = 10_000;
     private final MerchantAccessGuard guard;
     private final FnbSalesReportRepository reports;
+    private final FnbRefundRepository refunds;
 
     @Transactional(readOnly = true)
     public FnbSalesReportResponse report(TenantPrincipal principal, UUID outletId, FnbSalesReportFilter filter) {
@@ -44,7 +46,15 @@ public class FnbSalesReportService {
         value.setStartDate(query.startDate); value.setEndDate(query.endDate); value.setTimeZone(query.zone.getId());
         value.setSummary(FnbSalesReportMapper.summary(reports.summary(principal.getTenantId(), outletId, query.start,
                 query.end, filter.getOrderStatus(), filter.getPaymentMethod()),
-                reports.cancellations(principal.getTenantId(), outletId, query.start, query.end)));
+                reports.cancellations(principal.getTenantId(), outletId, query.start, query.end),
+                reports.cost(principal.getTenantId(), outletId, query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod()),
+                refunds.totals(principal.getTenantId(), outletId, query.start, query.end)));
+        value.setHourly(FnbSalesReportMapper.hourly(reports.hourly(principal.getTenantId(), outletId, query.start,
+                query.end, query.zone.getId(), filter.getOrderStatus(), filter.getPaymentMethod())));
+        value.setCashiers(FnbSalesReportMapper.cashiers(reports.cashiers(principal.getTenantId(), outletId,
+                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod())));
+        value.setShifts(FnbSalesReportMapper.shifts(reports.shifts(principal.getTenantId(), outletId,
+                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod())));
         value.setTransactions(rows.stream().map(row -> FnbSalesReportMapper.transaction(row, query.zone)).toList());
         value.setTopProducts(FnbSalesReportMapper.products(reports.products(principal.getTenantId(), outletId,
                 query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), query.top)));

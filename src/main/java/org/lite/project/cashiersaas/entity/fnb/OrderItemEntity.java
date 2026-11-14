@@ -9,6 +9,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @Getter
 @Entity
@@ -37,6 +38,12 @@ public class OrderItemEntity extends BaseEntity {
     private BigDecimal lineTotal;
     @Column(length = 500)
     private String note;
+    @Column(name = "cost_amount", precision = 19, scale = 2)
+    private BigDecimal costAmount;
+
+    public void recordCost(BigDecimal cost) {
+        this.costAmount = cost == null ? null : cost.setScale(2, RoundingMode.HALF_UP);
+    }
 
     public static OrderItemEntity snapshot(org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity tenant,
                                            org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity outlet,

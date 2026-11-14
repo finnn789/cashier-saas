@@ -6,9 +6,11 @@ headers:
   Accept: application/json
 body:
   type: json
-  content: '{"type": "RESTOCK", "quantity": 1000.000, "reason": "Belanja pasar pagi", "idempotencyKey": "{{$guid}}"}'
+  content: '{"type": "RESTOCK", "quantity": 1000.000, "unitCost": 120.5000, "reason": "Belanja pasar pagi", "idempotencyKey": "{{$guid}}"}'
 scripts:
   - type: afterResponse
     code: pm.test('Status code is 201 Created', () => pm.response.to.have.status(201)); var res = pm.response.json(); pm.expect(res.success).to.be.true; pm.expect(res.data.type).to.eql('RESTOCK'); pm.expect(Number(res.data.quantityDelta)).to.be.above(0); pm.collectionVariables.set('movementId', res.data.id);
     language: text/javascript
+description: |-
+  OWNER dan CASHIER. unitCost (opsional, >= 0, maks 4 desimal) = harga beli per satuan; hanya boleh untuk RESTOCK (tipe lain = 400 "Harga beli hanya untuk restock."). Dengan harga: rata-rata tertimbang bergerak (jika stok <= 0 atau rata-rata belum ada, rata-rata = harga). Tanpa harga: rata-rata tidak berubah dan mutasi mencatat rata-rata saat ini sebagai unitCost. unitCost/averageUnitCost di respons hanya terisi untuk OWNER (null untuk CASHIER).
 order: 1000

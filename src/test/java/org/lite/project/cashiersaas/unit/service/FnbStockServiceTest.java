@@ -34,6 +34,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -435,6 +436,229 @@ class FnbStockServiceTest {
         verify(inventory, never()).lock(doneBalance);
         assertDecimal("1010", freshBalance.getQuantityOnHand());
         verify(inventory, times(1)).persist(any(InventoryMovementEntity.class));
+    }
+
+    // ---------------------------------------------------------------- M6: unit cost / COGS
+
+    // 13
+    @Test
+    void inactiveIngredientIsNotDeductedAndAddsNoCostWhileActiveOneIs() {
+        ProductEntity product = product(UUID.randomUUID());
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");
+        InventoryItemEntity retired = ingredient(ingredientB, "Sirup Lama", "ml", "10");
+        retired.deactivate();
+        InventoryBalanceEntity beansBalance = balance(beans, "100", "2");
+        InventoryBalanceEntity retiredBalance = balance(retired, "100", "50");
+        OrderItemEntity line = line(UUID.randomUUID(), product, 2);
+        stubOrder(List.of(line), List.of());
+        when(inventory.productRecipes(tenantId, outletId, List.of(product.getId())))
+                .thenReturn(List.of(productRecipe(product, beans, "10.000"), productRecipe(product, retired, "5.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA))).thenReturn(List.of(beansBalance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        service.consumeForPaidOrder(context, order);
+
+        assertDecimal("80", beansBalance.getQuantityOnHand());
+        assertDecimal("100", retiredBalance.getQuantityOnHand());
+        verify(inventory, never()).lock(retiredBalance);
+        ArgumentCaptor<InventoryMovementEntity> captor = ArgumentCaptor.forClass(InventoryMovementEntity.class);
+        verify(inventory, times(1)).persist(captor.capture());
+        assertSame(beans, captor.getValue().getInventoryItem());
+        // 2 x 10 x 2 = 40; the inactive ingredient (average 50) is not part of the cost
+        assertDecimal("40", line.getCostAmount());
+    }
+
+    // 14
+    @Test
+    void recipeWithOnlyInactiveIngredientsTouchesNoStockAndLeavesCostNull() {
+        ProductEntity product = product(UUID.randomUUID());
+        InventoryItemEntity retired = ingredient(ingredientA, "Sirup Lama", "ml", "10");
+        retired.deactivate();
+        OrderItemEntity line = line(UUID.randomUUID(), product, 1);
+        stubOrder(List.of(line), List.of());
+        when(inventory.productRecipes(tenantId, outletId, List.of(product.getId())))
+                .thenReturn(List.of(productRecipe(product, retired, "5.000")));
+
+        List<String> warnings = service.consumeForPaidOrder(context, order);
+
+        assertTrue(warnings.isEmpty());
+        verify(inventory, never()).balances(any(UUID.class), any(UUID.class), any());
+        verify(inventory, never()).persist(any(InventoryMovementEntity.class));
+        assertNull(line.getCostAmount());
+    }
+
+    // 15
+    @Test
+    void saleMovementSnapshotsTheBalanceAverageAndNeverChangesIt() {
+        ProductEntity product = product(UUID.randomUUID());
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");
+        InventoryBalanceEntity balance = balance(beans, "100", "0.0123");
+        OrderItemEntity line = line(UUID.randomUUID(), product, 2);
+        stubOrder(List.of(line), List.of());
+        when(inventory.productRecipes(tenantId, outletId, List.of(product.getId())))
+                .thenReturn(List.of(productRecipe(product, beans, "18.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA))).thenReturn(List.of(balance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        service.consumeForPaidOrder(context, order);
+
+        ArgumentCaptor<InventoryMovementEntity> captor = ArgumentCaptor.forClass(InventoryMovementEntity.class);
+        verify(inventory).persist(captor.capture());
+        assertDecimal("0.0123", captor.getValue().getUnitCost());
+        assertEquals(new BigDecimal("0.0123"), balance.getAverageUnitCost());
+        // 36 x 0.0123 = 0.4428 -> scale 2 HALF_UP
+        assertEquals(new BigDecimal("0.44"), line.getCostAmount());
+    }
+
+    // 16
+    @Test
+    void costOfAnItemSumsProductAndItsOwnOptionRecipesOnly() {
+        ProductEntity espresso = product(UUID.fromString("10000000-0000-0000-0000-000000000001"));
+        ProductEntity latte = product(UUID.fromString("10000000-0000-0000-0000-000000000002"));
+        ProductOptionEntity extraShot = option(UUID.fromString("20000000-0000-0000-0000-000000000001"));
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");
+        InventoryItemEntity milk = ingredient(ingredientB, "Susu", "ml", "10");
+        InventoryBalanceEntity beansBalance = balance(beans, "1000", "2");
+        InventoryBalanceEntity milkBalance = balance(milk, "1000", "0.5");
+        OrderItemEntity first = line(UUID.fromString("30000000-0000-0000-0000-000000000001"), espresso, 3);
+        OrderItemEntity second = line(UUID.fromString("30000000-0000-0000-0000-000000000002"), latte, 2);
+        stubOrder(List.of(first, second), List.of(selected(first, extraShot)));
+        when(inventory.productRecipes(tenantId, outletId, List.of(espresso.getId(), latte.getId())))
+                .thenReturn(List.of(productRecipe(espresso, beans, "20.000"), productRecipe(latte, milk, "100.000")));
+        when(inventory.optionRecipes(tenantId, outletId, List.of(extraShot.getId())))
+                .thenReturn(List.of(optionRecipe(extraShot, beans, "5.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA, ingredientB)))
+                .thenReturn(List.of(beansBalance, milkBalance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        service.consumeForPaidOrder(context, order);
+
+        // first: 3 x (20 + 5) x 2 = 150; second: 2 x 100 x 0.5 = 100 (the option belongs to the first line only)
+        assertDecimal("150", first.getCostAmount());
+        assertDecimal("100", second.getCostAmount());
+    }
+
+    // 17
+    @Test
+    void costIsNullWhenAnyUsedIngredientHasNoAverageOrNoBalanceRow() {
+        ProductEntity noAverageProduct = product(UUID.fromString("10000000-0000-0000-0000-000000000001"));
+        ProductEntity mixedProduct = product(UUID.fromString("10000000-0000-0000-0000-000000000002"));
+        ProductEntity noBalanceProduct = product(UUID.fromString("10000000-0000-0000-0000-000000000003"));
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");      // balance, no average
+        InventoryItemEntity milk = ingredient(ingredientB, "Susu", "ml", "10");           // balance + average
+        InventoryItemEntity ghost = ingredient(ingredientC, "Es Batu", "g", "10");        // no balance row
+        InventoryBalanceEntity beansBalance = balance(beans, "1000");
+        InventoryBalanceEntity milkBalance = balance(milk, "1000", "0.5");
+        OrderItemEntity noAverage = line(UUID.fromString("30000000-0000-0000-0000-000000000001"), noAverageProduct, 1);
+        OrderItemEntity mixed = line(UUID.fromString("30000000-0000-0000-0000-000000000002"), mixedProduct, 1);
+        OrderItemEntity noBalance = line(UUID.fromString("30000000-0000-0000-0000-000000000003"), noBalanceProduct, 1);
+        stubOrder(List.of(noAverage, mixed, noBalance), List.of());
+        when(inventory.productRecipes(tenantId, outletId,
+                List.of(noAverageProduct.getId(), mixedProduct.getId(), noBalanceProduct.getId())))
+                .thenReturn(List.of(productRecipe(noAverageProduct, beans, "10.000"),
+                        productRecipe(mixedProduct, beans, "10.000"), productRecipe(mixedProduct, milk, "10.000"),
+                        productRecipe(noBalanceProduct, ghost, "10.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA, ingredientB, ingredientC)))
+                .thenReturn(List.of(beansBalance, milkBalance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        service.consumeForPaidOrder(context, order);
+
+        assertNull(noAverage.getCostAmount());
+        assertNull(mixed.getCostAmount(), "one used ingredient without a cost makes the whole item cost unknown");
+        assertNull(noBalance.getCostAmount());
+        ArgumentCaptor<InventoryMovementEntity> captor = ArgumentCaptor.forClass(InventoryMovementEntity.class);
+        // 3 SALE movements + 1 balance created on the fly for the ingredient without a balance row
+        verify(inventory, times(3)).persist(captor.capture());
+        // beans (no average), milk (0.5), ghost (new balance -> no average)
+        assertNull(captor.getAllValues().get(0).getUnitCost());
+        assertDecimal("0.5", captor.getAllValues().get(1).getUnitCost());
+        assertNull(captor.getAllValues().get(2).getUnitCost());
+    }
+
+    // 18
+    @Test
+    void itemWithoutAnyRecipeOrWithoutProductGetsNullCostWhileCostedItemsKeepTheirs() {
+        ProductEntity withRecipe = product(UUID.fromString("10000000-0000-0000-0000-000000000001"));
+        ProductEntity withoutRecipe = product(UUID.fromString("10000000-0000-0000-0000-000000000002"));
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");
+        InventoryBalanceEntity balance = balance(beans, "1000", "2");
+        OrderItemEntity costed = line(UUID.fromString("30000000-0000-0000-0000-000000000001"), withRecipe, 1);
+        OrderItemEntity bare = line(UUID.fromString("30000000-0000-0000-0000-000000000002"), withoutRecipe, 1);
+        OrderItemEntity deleted = line(UUID.fromString("30000000-0000-0000-0000-000000000003"), null, 1);
+        stubOrder(List.of(costed, bare, deleted), List.of());
+        when(inventory.productRecipes(tenantId, outletId, List.of(withRecipe.getId(), withoutRecipe.getId())))
+                .thenReturn(List.of(productRecipe(withRecipe, beans, "10.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA))).thenReturn(List.of(balance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        service.consumeForPaidOrder(context, order);
+
+        assertDecimal("20", costed.getCostAmount());
+        assertNull(bare.getCostAmount());
+        assertNull(deleted.getCostAmount());
+    }
+
+    // 19
+    @Test
+    void alreadyRecordedCostIsNeverOverwrittenOnAReplayedPayment() {
+        ProductEntity product = product(UUID.randomUUID());
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");
+        InventoryBalanceEntity balance = balance(beans, "100", "9");
+        OrderItemEntity line = line(UUID.randomUUID(), product, 1);
+        line.recordCost(new BigDecimal("12.345"));
+        stubOrder(List.of(line), List.of());
+        when(inventory.productRecipes(tenantId, outletId, List.of(product.getId())))
+                .thenReturn(List.of(productRecipe(product, beans, "10.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA))).thenReturn(List.of(balance));
+        when(inventory.movementByKey(tenantId, "sale:" + orderId + ":" + ingredientA))
+                .thenReturn(Optional.of(sale(beans, "-10.000")));
+
+        service.consumeForPaidOrder(context, order);
+
+        assertEquals(new BigDecimal("12.35"), line.getCostAmount());
+        assertDecimal("100", balance.getQuantityOnHand());
+        verify(inventory, never()).persist(any(InventoryMovementEntity.class));
+    }
+
+    // 20
+    @Test
+    void reversalCopiesTheSaleUnitCostAndLeavesTheAverageAlone() {
+        InventoryItemEntity beans = ingredient(ingredientA, "Biji Kopi", "g", "10");
+        InventoryItemEntity milk = ingredient(ingredientB, "Susu", "ml", "10");
+        InventoryBalanceEntity beansBalance = balance(beans, "90", "2");
+        InventoryBalanceEntity milkBalance = balance(milk, "90", "0.5");
+        InventoryMovementEntity beansSale = sale(beans, "-10.000", "1.7500"); // sold at an older average
+        InventoryMovementEntity milkSale = sale(milk, "-10.000", null);       // sold before any cost was known
+        ReflectionTestUtils.setField(beansSale, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(milkSale, "id", UUID.randomUUID());
+        when(inventory.saleMovements(tenantId, outletId, orderId)).thenReturn(List.of(beansSale, milkSale));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA, ingredientB)))
+                .thenReturn(List.of(beansBalance, milkBalance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        service.reverseForRefundedOrder(context, order);
+
+        ArgumentCaptor<InventoryMovementEntity> captor = ArgumentCaptor.forClass(InventoryMovementEntity.class);
+        verify(inventory, times(2)).persist(captor.capture());
+        assertEquals(InventoryMovementEntity.Type.SALE_REVERSAL, captor.getAllValues().get(0).getType());
+        assertDecimal("1.75", captor.getAllValues().get(0).getUnitCost());
+        assertNull(captor.getAllValues().get(1).getUnitCost());
+        assertEquals(new BigDecimal("2.0000"), beansBalance.getAverageUnitCost());
+        assertEquals(new BigDecimal("0.5000"), milkBalance.getAverageUnitCost());
+        assertDecimal("100", beansBalance.getQuantityOnHand());
+    }
+
+    private InventoryMovementEntity sale(InventoryItemEntity item, String delta, String unitCost) {
+        return InventoryMovementEntity.record(tenantId, outletId, item, orderId, InventoryMovementEntity.Type.SALE,
+                new BigDecimal(delta), "Penjualan ORD-1", "sale:" + orderId + ":" + item.getId(), "old", membershipId,
+                null, unitCost == null ? null : new BigDecimal(unitCost));
+    }
+
+    private InventoryBalanceEntity balance(InventoryItemEntity item, String onHand, String average) {
+        InventoryBalanceEntity balance = InventoryBalanceEntity.create(tenantId, outletId, item);
+        balance.receive(new BigDecimal(onHand), new BigDecimal(average)); // empty stock -> average becomes the price
+        return balance;
     }
 
     private InventoryMovementEntity sale(InventoryItemEntity item, String delta) {

@@ -768,7 +768,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     // ------------------------------------------------------------------ 13. deactivated ingredient
 
     @Test
-    void deactivatedIngredientLeavesListAndNewRecipesButExistingRecipeLineStillDeducts() throws Exception {
+    void deactivatedIngredientLeavesListAndNewRecipesAndIsNoLongerDeducted() throws Exception {
         MerchantFixture owner = api.onboardOwner("inv-deactivate");
         String category = api.createCategory(owner, "Minuman");
         String productId = api.createProduct(owner, category, "Kopi", PRICE);
@@ -791,7 +791,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(itemJson("Biji Kopi", "g", "10", null))));
         assertStatus(404, api.call(get(stockItems(owner) + "/" + kopi + "/movements").header(AUTH, owner.bearer())));
 
-        // Documented TASK-061 behaviour: the existing recipe line is kept and still deducts on payment.
+        // TASK-079: the recipe line stays on the product, but an inactive ingredient is never deducted on payment.
         assertEquals(1, recipeLinesOfProduct(productId));
         MvcResult recipe = api.send(get(productRecipeUrl(owner, productId)).header(AUTH, owner.bearer()), 200);
         assertEquals(List.of(kopi), readList(recipe, "$.data.lines[*].inventoryItemId"));
@@ -800,8 +800,8 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult paid = payCash(owner, orderId, "pay-" + UUID.randomUUID());
         assertTrue(warnings(paid).isEmpty(), warnings(paid).toString());
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        assertEquals(1, saleMovements(orderId), "the deactivated ingredient is still deducted");
-        assertDecimal("82", balance(kopi), "100 - 18");
+        assertEquals(0, saleMovements(orderId), "the deactivated ingredient is not deducted");
+        assertDecimal("100", balance(kopi), "balance untouched");
         assertLedgerMatchesBalance(kopi);
     }
 }
