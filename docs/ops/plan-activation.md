@@ -1,13 +1,13 @@
 # Runbook operator: aktivasi paket Pro/Premium dan top-up kuota AI
 
-Pemilik: orchestrator. Versi 1 (2026-11-14), TASK-082 (PRD v2.2 bagian 8.15, keputusan E1/E4).
+Pemilik: orchestrator. Versi 2 (2026-11-14), TASK-082 (PRD v2.2 bagian 8.15, keputusan E1/E4) dan TASK-083 (add-on outlet tambahan, `subscriptions.extra_outlets`, keputusan M1-M3).
 Untuk masa pilot: pembayaran lewat transfer manual dan paket diaktifkan oleh operator dengan SQL. Belum ada endpoint, tidak ada integrasi pembayaran, dan tidak ada login SUPERADMIN di kode.
 
 ## Aturan sebelum menjalankan apa pun
 
 1. **Verifikasi pembayaran dulu.** Jangan menjalankan SQL aktivasi atau top-up sebelum transfer diterima dan dicocokkan dengan tenant yang benar (nama usaha dan email pemilik). Catat bukti transfer di luar database.
 2. Jalankan hanya di database yang dituju (cek `\conninfo`). Setiap pernyataan di bawah dibungkus `BEGIN ... COMMIT` dan dibatasi oleh `:tenant_id`. Periksa hasil `SELECT` di dalam transaksi, lalu `COMMIT`; bila ada yang janggal, ketik `ROLLBACK;`.
-3. Jangan mengubah atau menghapus baris `FREETIER`, pesanan, shift, atau data lain. Runbook ini hanya menyentuh `subscriptions` (menambah/mengakhiri baris berbayar) dan `ai_usage_periods` (bonus top-up).
+3. Jangan mengubah atau menghapus baris `FREETIER`, pesanan, shift, atau data lain. Runbook ini hanya menyentuh `subscriptions` (menambah/mengakhiri baris berbayar dan mengubah `extra_outlets` pada baris berbayar aktif) dan `ai_usage_periods` (bonus top-up). Outlet tidak pernah dihapus atau dinonaktifkan oleh operator.
 4. Contoh memakai variabel psql. Isi dengan nilai nyata hanya di sesi Anda, jangan ditulis ke berkas ini atau ke chat:
 
 ```sql
@@ -163,9 +163,93 @@ LIMIT 12;
 
 Catatan: trial Premium 14 hari dimulai otomatis saat tenant FREETIER menyelesaikan pesanan berbayar ke-50 dan hanya sekali per tenant; operator tidak perlu (dan tidak boleh) menyetel `premium_trial_started_at` secara manual.
 
+## 7. Add-on outlet tambahan (Rp49.000/outlet/bulan)
+
+Jatah outlet aktif per tenant = `1 + jumlah extra_outlets` dari semua baris berbayar (PRO/PREMIUM) yang aktif pada saat ini. Kolom `subscriptions.extra_outlets` (Flyway V12, `int NOT NULL DEFAULT 0`, `CHECK (extra_outlets >= 0)`) diisi operator pada baris berbayar yang aktif setelah transfer Rp49.000 x jumlah outlet x bulan diterima dan dicocokkan (aturan 1).
+
+Prinsip:
+
+- **FREETIER tidak boleh punya outlet tambahan.** Add-on hanya ada di baris `PRO`/`PREMIUM`; tenant tanpa baris berbayar aktif selalu berjatah 1 outlet. Jangan pernah mengisi `extra_outlets` pada baris `FREETIER`.
+- **Add-on hidup dan berakhir bersama baris berbayarnya.** Tidak ada tanggal kedaluwarsa terpisah. Bila baris berbayar diperpanjang (bagian 3), add-on ikut diperpanjang; bila baris diakhiri atau kedaluwarsa, jatah kembali ke 1 + add-on baris lain yang masih aktif. Saat mengganti paket (bagian 4), salin nilai `extra_outlets` ke baris baru (isi kolom itu pada `INSERT`) atau add-on hilang.
+- **Penurunan jatah tidak menghapus data.** Outlet aktif diurutkan menurut `created_at, id`; outlet urutan 1 selalu bisa dipakai. Outlet dengan urutan di atas jatah menjadi "melebihi jatah": operasional (login/pilih outlet, kasir, laporan, AI) ditolak HTTP 402 dan tidak ikut laporan gabungan, tetapi datanya utuh. Pemulihan: pemilik menonaktifkan outlet lain (menonaktifkan selalu boleh) sehingga yang tersisa muat dalam jatah, atau operator memperpanjang/menaikkan add-on, dan akses pulih otomatis tanpa perubahan data.
+- Jangan mengubah `outlets.active` dari SQL; pemilik mengelolanya lewat aplikasi (nonaktif ditolak bila outlet aktif terakhir atau masih ada shift terbuka).
+
+Isi `extra` dengan jumlah outlet tambahan TOTAL yang dibayar (bukan selisih):
+
+```sql
+\set extra 1
+```
+
+### 7a. Aktifkan atau ubah jumlah outlet tambahan
+
+Berlaku untuk mengaktifkan N outlet tambahan pertama kali maupun mengganti jumlahnya (naik atau turun). Nilai `:extra` menggantikan nilai lama.
+
+```sql
+BEGIN;
+
+UPDATE subscriptions
+SET extra_outlets = :extra, updated_at = now(), version = version + 1
+WHERE tenant_id = :'tenant_id' AND plan_code IN ('PRO', 'PREMIUM') AND status = 'ACTIVE'
+  AND starts_at <= now() AND ends_at > now()
+RETURNING id, plan_code, ends_at, extra_outlets;   -- harus tepat 1 baris, kalau 0 atau 2+ lakukan ROLLBACK
+
+COMMIT;
+```
+
+Bila 0 baris: tenant belum punya paket berbayar aktif. Aktifkan PRO/PREMIUM dulu (bagian 2), lalu ulangi 7a. Konfirmasi dengan 7c.
+
+### 7b. Hentikan add-on outlet (kembali ke 0)
+
+```sql
+BEGIN;
+
+UPDATE subscriptions
+SET extra_outlets = 0, updated_at = now(), version = version + 1
+WHERE tenant_id = :'tenant_id' AND plan_code IN ('PRO', 'PREMIUM') AND status = 'ACTIVE'
+  AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) AND extra_outlets > 0
+RETURNING id, plan_code, ends_at, extra_outlets;   -- harus tepat 1 baris
+
+COMMIT;
+```
+
+Outlet yang melebihi jatah baru langsung tidak bisa dipakai (402) tetapi tidak dihapus. Beri tahu pemilik agar menonaktifkan outlet yang tidak dipakai, atau perpanjang add-on.
+
+### 7c. Periksa jatah outlet dan outlet yang bisa dipakai
+
+```sql
+-- Jatah: 1 + jumlah extra_outlets baris berbayar yang aktif sekarang
+SELECT 1 + COALESCE(SUM(extra_outlets), 0) AS jatah_outlet
+FROM subscriptions
+WHERE tenant_id = :'tenant_id' AND plan_code IN ('PRO', 'PREMIUM') AND status = 'ACTIVE'
+  AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now());
+
+-- Outlet aktif menurut urutan created_at, id; dapat_dipakai = urutan <= jatah
+WITH jatah AS (
+  SELECT 1 + COALESCE(SUM(extra_outlets), 0) AS n
+  FROM subscriptions
+  WHERE tenant_id = :'tenant_id' AND plan_code IN ('PRO', 'PREMIUM') AND status = 'ACTIVE'
+    AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())
+)
+SELECT row_number() OVER (ORDER BY o.created_at, o.id) AS urutan,
+       o.id AS outlet_id, o.name, o.time_zone, o.created_at,
+       (row_number() OVER (ORDER BY o.created_at, o.id)) <= (SELECT n FROM jatah) AS dapat_dipakai
+FROM outlets o
+WHERE o.tenant_id = :'tenant_id' AND o.active
+ORDER BY urutan;
+
+-- Ringkas: jatah vs outlet aktif
+SELECT (SELECT count(*) FROM outlets WHERE tenant_id = :'tenant_id' AND active) AS outlet_aktif,
+       (SELECT 1 + COALESCE(SUM(extra_outlets), 0) FROM subscriptions
+        WHERE tenant_id = :'tenant_id' AND plan_code IN ('PRO', 'PREMIUM') AND status = 'ACTIVE'
+          AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())) AS jatah_outlet;
+```
+
+Catatan: trial Premium 14 hari tidak menambah jatah outlet; jatahnya tetap 1 tanpa baris berbayar. Bila `outlet_aktif` lebih besar dari `jatah_outlet`, outlet berurutan di atas jatah sedang tidak bisa dipakai (402), dan itu perilaku yang benar.
+
 ## Pemecahan masalah
 
 - Pemilik/kasir tidak melihat perubahan: token akses lama berlaku sampai masa berlakunya habis; minta pengguna refresh atau login ulang. Token kasir dibatasi sampai `ends_at` baris berbayar.
 - Kasir ditolak setelah paket habis: ini perilaku yang benar (E2). Mengaktifkan PRO/PREMIUM kembali memulihkan akses tanpa mengubah keanggotaan.
 - Respons HTTP 402 `Fitur ini tersedia di paket Pro.` berarti paket efektif di bawah yang dibutuhkan fitur itu; cek bagian 6.
+- Respons HTTP 402 `Outlet tambahan memerlukan add-on outlet (Rp49.000/outlet/bulan).` saat membuat/mengaktifkan outlet atau memakai outlet berurutan di atas jatah: cek bagian 7c, lalu aktifkan/naikkan add-on (7a) setelah pembayaran atau minta pemilik menonaktifkan outlet.
 - Constraint `ck_subscriptions_plan_code` menolak `plan_code` selain `FREETIER`, `PRO`, `PREMIUM`.

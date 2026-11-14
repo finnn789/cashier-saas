@@ -137,7 +137,7 @@ class FnbRefundServiceTest {
         FnbRefundResponse response = service.refund(principal, outletId, orderId, KEY, request("  Salah pesanan  "));
 
         InOrder lockFirst = inOrder(orders, guard);
-        lockFirst.verify(orders).lockTenant(tenantId);
+        lockFirst.verify(orders).lockOutlet(tenantId, outletId);
         lockFirst.verify(guard).requireOwner(principal, outletId);
         lockFirst.verify(orders).byId(tenantId, outletId, orderId);
         assertEquals(PaymentStatus.REFUNDED, order.getPaymentStatus());
@@ -171,7 +171,7 @@ class FnbRefundServiceTest {
                 () -> service.refund(principal, outletId, orderId, KEY, request("alasan")));
 
         InOrder inOrder = inOrder(orders, guard);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(guard).requireOwner(principal, outletId);
         verify(orders, never()).byId(any(UUID.class), any(UUID.class), any(UUID.class));
         verifyNoInteractions(payments, refunds, shifts, stock, audit);

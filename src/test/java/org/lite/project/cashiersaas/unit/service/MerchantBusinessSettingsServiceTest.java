@@ -101,6 +101,7 @@ class MerchantBusinessSettingsServiceTest {
     void normalizedUpdateChangesTenantAndOutletAndAuditsActorBeforeAndAfter() throws Exception {
         Fixture fixture = fixture();
         when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        when(orders.countActiveOutlets(tenantId)).thenReturn(1L);
         MerchantBusinessSettingsRequest request = validRequest();
         request.setBusinessName("  Kopi Baru  ");
         request.setAddress("  Jalan Baru  ");
@@ -137,9 +138,25 @@ class MerchantBusinessSettingsServiceTest {
         assertEquals("Kopi Lama", details.path("before").path("businessName").asText());
         assertEquals("Kopi Baru", details.path("after").path("businessName").asText());
         verify(orders).lockTenant(tenantId);
+        verify(orders).countActiveOutlets(tenantId);
         verify(guard).requireOwner(owner, outletId);
         verify(settings, never()).hasCurrencyUse(any());
         verifyNoMoreInteractions(orders, guard, settings, auditLogs);
+    }
+
+    @Test
+    void timeZoneChangeLeavesTheBillingZoneAloneWhenTheTenantHasSeveralActiveOutlets() {
+        Fixture fixture = fixture();
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        when(orders.countActiveOutlets(tenantId)).thenReturn(2L);
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setTimeZone("Asia/Makassar");
+
+        service.update(owner, outletId, request);
+
+        assertEquals("Asia/Jakarta", fixture.tenant().getTimeZone());
+        assertEquals("Asia/Makassar", fixture.outlet().getTimeZone());
+        verify(auditLogs).persist(any(AuditLogEntity.class));
     }
 
     @Test

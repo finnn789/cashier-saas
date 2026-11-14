@@ -64,7 +64,7 @@ public class FnbShiftService {
 
     @Transactional
     public FnbShiftResponse open(TenantPrincipal principal, UUID outletId, FnbShiftOpenRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         if (findOpenShift(context).isPresent()) throw new OperationConflictException("Anda masih memiliki shift terbuka.");
         CashShiftEntity shift = CashShiftEntity.open(context.getTenant(), context.getOutlet(), context.getMembership(),
@@ -86,7 +86,7 @@ public class FnbShiftService {
 
     @Transactional
     public FnbShiftResponse closeCurrent(TenantPrincipal principal, UUID outletId, FnbShiftCloseRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         CashShiftEntity shift = findOpenShift(context).orElseThrow(ResourceNotFoundException::new);
         return close(context, shift, request);
@@ -94,7 +94,7 @@ public class FnbShiftService {
 
     @Transactional
     public FnbShiftResponse forceClose(TenantPrincipal principal, UUID outletId, UUID shiftId, FnbShiftCloseRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         CashShiftEntity shift = shifts.byId(principal.getTenantId(), outletId, shiftId).orElseThrow(ResourceNotFoundException::new);
         return close(context, shift, request);
@@ -140,7 +140,7 @@ public class FnbShiftService {
         return response(shift, orders.countOpenUnpaid(principal.getTenantId(), outletId), true);
     }
 
-    // The callers already hold the tenant lock; the shift lock refreshes the row so a concurrent close is seen.
+    // The callers already hold the outlet lock; the shift lock refreshes the row so a concurrent close is seen.
     private FnbShiftResponse close(MerchantAccessContext context, CashShiftEntity shift, FnbShiftCloseRequest request) {
         shifts.lock(shift);
         FnbShiftRepository.CashSummary summary = shifts.cashSummary(shift.getId());
@@ -180,7 +180,7 @@ public class FnbShiftService {
     public FnbCashExpenseResponse recordExpense(TenantPrincipal principal, UUID outletId, String key,
                                                 FnbCashExpenseRequest request) {
         String idempotencyKey = FnbPosOrderService.validatedKey(key);
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         BigDecimal amount = request.getAmount().setScale(2, RoundingMode.UNNECESSARY);
         String description = request.getDescription().trim();

@@ -5,6 +5,8 @@ import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.FnbSalesReportMapper;
 import org.lite.project.cashiersaas.dto.request.FnbSalesReportFilter;
+import org.lite.project.cashiersaas.dto.response.FnbConsolidatedSalesReportResponse;
+import org.lite.project.cashiersaas.dto.response.FnbOutletSalesSummaryResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesCsvResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesReportResponse;
 import org.lite.project.cashiersaas.enums.OrderStatus;
@@ -13,7 +15,9 @@ import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository;
+import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
+import org.lite.project.cashiersaas.repository.MerchantAccessRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +26,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,16 +43,53 @@ public class FnbSalesReportService {
     private final FnbSalesReportRepository reports;
     private final FnbRefundRepository refunds;
     private final PlanEntitlementService planEntitlementService;
+    private final MerchantAccessRepository accessRepository;
 
     @Transactional(readOnly = true)
     public FnbSalesReportResponse report(TenantPrincipal principal, UUID outletId, FnbSalesReportFilter filter) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         Query query = query(context, filter);
         boolean full = planEntitlementService.effectivePlan(principal.getTenantId(), Instant.now()) != PlanCode.FREETIER;
+        requireWithinPlanWindow(full, query);
+        return assemble(principal.getTenantId(), outletId, query, filter.getOrderStatus(), filter.getPaymentMethod(), full);
+    }
+
+    /** Owner-only totals over every usable outlet the owner can access; each outlet reads the dates in its own zone. */
+    @Transactional(readOnly = true)
+    public FnbConsolidatedSalesReportResponse consolidated(TenantPrincipal principal, FnbSalesReportFilter filter) {
+        guard.requireOwner(principal, principal.getOutletId());
+        Instant now = Instant.now();
+        boolean full = planEntitlementService.effectivePlan(principal.getTenantId(), now) != PlanCode.FREETIER;
+        FnbSalesReportFilter perOutlet = new FnbSalesReportFilter();
+        perOutlet.setStartDate(filter.getStartDate()); perOutlet.setEndDate(filter.getEndDate());
+        perOutlet.setOrderStatus(filter.getOrderStatus()); perOutlet.setPaymentMethod(filter.getPaymentMethod());
+        perOutlet.setPage(0); perOutlet.setSize(1); perOutlet.setTopProducts(1);
+        List<FnbOutletSalesSummaryResponse> outlets = new ArrayList<>();
+        LocalDate startDate = null, endDate = null;
+        for (UUID outletId : planEntitlementService.usableOutletIds(principal.getTenantId(), now)) {
+            MerchantAccessRepository.OutletAccess access = accessRepository.findOutlet(principal.getUserId(),
+                    principal.getTenantId(), outletId, principal.getRoles(), now).orElse(null);
+            if (access == null || access.getMembership().getRole() != Role.OWNERMERCHANT) continue;
+            MerchantAccessContext context = new MerchantAccessContext(access.getMembership().getTenant(), access.getOutlet(), access.getMembership());
+            Query query = query(context, perOutlet);
+            requireWithinPlanWindow(full, query);
+            FnbOutletSalesSummaryResponse item = new FnbOutletSalesSummaryResponse();
+            item.setOutletId(outletId); item.setOutletName(access.getOutlet().getName()); item.setTimeZone(query.zone.getId());
+            item.setSummary(assemble(principal.getTenantId(), outletId, query, filter.getOrderStatus(), filter.getPaymentMethod(), false).getSummary());
+            outlets.add(item);
+            if (startDate == null || query.startDate.isBefore(startDate)) startDate = query.startDate;
+            if (endDate == null || query.endDate.isAfter(endDate)) endDate = query.endDate;
+        }
+        FnbConsolidatedSalesReportResponse value = new FnbConsolidatedSalesReportResponse();
+        value.setStartDate(startDate); value.setEndDate(endDate); value.setOutlets(outlets);
+        value.setTotals(FnbSalesReportMapper.sum(outlets.stream().map(FnbOutletSalesSummaryResponse::getSummary).toList()));
+        return value;
+    }
+
+    private void requireWithinPlanWindow(boolean full, Query query) {
         if (!full && query.startDate.isBefore(LocalDate.now(query.zone).minusDays(FREE_WINDOW_DAYS))) {
             throw new PlanUpgradeRequiredException(PlanCode.PRO);
         }
-        return assemble(principal.getTenantId(), outletId, query, filter.getOrderStatus(), filter.getPaymentMethod(), full);
     }
 
     /** Owner-side read model for an already authorised context: no status/method filter, one transaction row. */

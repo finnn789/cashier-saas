@@ -2,6 +2,11 @@
 
 The PRD and explicit user instructions remain authoritative; this file records decisions captured during AI Services work.
 
+## Multi-outlet — 2026-11-14 (TASK-083)
+
+- Explicit user instruction: multi-outlet comes into scope now (was post-pilot). Supersedes "Multi-outlet is a later per-outlet add-on" below and PRD §5/§16 wording.
+- Orchestrator decisions M1-M7 in `tasks/TASK-083.md`: FREETIER = 1 outlet; PRO/PREMIUM = 1 + `extra_outlets` of active paid rows (operator-activated add-on, Rp49.000/outlet/month, expires with the paid row, trial gives none); over-allowance outlets (ranked by created_at, id) are unusable (402) but never deleted, first outlet always usable; outlet lock replaces the tenant lock for operational writes (tenant lock only for business settings); AI quota stays on `tenants.time_zone` (billing zone), which follows business settings only while one outlet is active; consolidated owner report sums usable outlets, each in its own zone.
+
 ## Subscription plans and AI quota — 2026-11-14
 
 - Explicit user decision: Free = 1 outlet, owner only (owner runs the POS, no cashier invitations, no multi-outlet). Pro = staff/cashier invitations and cashier controls plus the full analytics dashboard. Premium = Pro + owner AI assistant. Multi-outlet is a later per-outlet add-on, not a Pro launch feature (the per-tenant lock must change first).

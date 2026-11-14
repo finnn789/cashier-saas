@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{targetOutletId}}"
+method: PUT
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Kedai Contoh Cabang 2 (Renovasi)",
+      "timeZone": "Asia/Makassar",
+      "address": "Jl. Cabang 2 No. 7",
+      "phoneNumber": "+6221123458"
+    }
+description: |-
+  Hanya OWNER. PUT mengganti name, timeZone, address, phoneNumber (validasi sama dengan Create Outlet). Outlet harus milik tenant (selain itu 404). Perubahan dicatat di audit log.
+order: 4000

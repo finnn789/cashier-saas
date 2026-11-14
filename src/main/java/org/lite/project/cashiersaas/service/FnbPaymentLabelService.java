@@ -33,7 +33,7 @@ public class FnbPaymentLabelService {
 
     @Transactional
     public FnbPaymentLabelResponse create(TenantPrincipal principal, UUID outletId, FnbPaymentLabelRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         if (labels.count(principal.getTenantId(), outletId) >= MAX_LABELS)
             throw new OperationConflictException("Jumlah label maksimal " + MAX_LABELS + ".");
@@ -48,7 +48,7 @@ public class FnbPaymentLabelService {
 
     @Transactional
     public FnbPaymentLabelResponse update(TenantPrincipal principal, UUID outletId, UUID labelId, FnbPaymentLabelRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         PaymentLabelEntity label = labels.byId(principal.getTenantId(), outletId, labelId).orElseThrow(ResourceNotFoundException::new);
         if (labels.existsName(principal.getTenantId(), outletId, request.getName(), labelId))

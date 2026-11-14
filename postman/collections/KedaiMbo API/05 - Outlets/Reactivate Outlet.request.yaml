@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{targetOutletId}}/reactivate"
+method: POST
+headers:
+  Accept: application/json
+description: |-
+  Hanya OWNER. Mengaktifkan kembali outlet nonaktif; tunduk pada jatah paket (1 + add-on outlet). Melebihi jatah = 402. Dicatat di audit log.
+order: 6000

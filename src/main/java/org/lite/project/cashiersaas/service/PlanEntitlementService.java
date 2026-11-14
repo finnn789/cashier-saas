@@ -13,12 +13,16 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class PlanEntitlementService {
     private static final long TRIAL_PAID_ORDER_THRESHOLD = 50L;
+    public static final String OUTLET_ADDON_REQUIRED_MESSAGE = "Outlet tambahan memerlukan add-on outlet (Rp49.000/outlet/bulan).";
+    public static final String OUTLET_OVER_ALLOWANCE_MESSAGE = "Outlet ini melebihi kuota outlet paket Anda. "
+            + "Tambahkan add-on outlet (Rp49.000/outlet/bulan) atau nonaktifkan outlet lain.";
 
     private final SubscriptionRepository subscriptions;
     private final EntityManager entityManager;
@@ -53,5 +57,39 @@ public class PlanEntitlementService {
         if (paidOrders >= TRIAL_PAID_ORDER_THRESHOLD) {
             tenant.startPremiumTrial(now);
         }
+    }
+
+    /** 1 on FREETIER or a trial without a paid row; otherwise 1 plus the add-on outlets of every active paid row. */
+    public int allowedOutletCount(UUID tenantId, Instant now) {
+        return 1 + subscriptions.findActiveAt(tenantId, now).stream()
+                .filter(row -> row.getPlan() != PlanCode.FREETIER).mapToInt(SubscriptionEntity::getExtraOutlets).sum();
+    }
+
+    /** Active outlets oldest first, cut to the allowance: the rest are over allowance and have no operational access. */
+    public List<UUID> usableOutletIds(UUID tenantId, Instant now) {
+        List<UUID> active = activeOutletIds(tenantId);
+        return active.subList(0, Math.min(active.size(), allowedOutletCount(tenantId, now)));
+    }
+
+    /** 402 when the outlet is active but over the allowance. One active outlet is always usable, so it skips the subscription query. */
+    public void requireOutletUsable(UUID tenantId, UUID outletId, Instant now) {
+        List<UUID> active = activeOutletIds(tenantId);
+        if (active.size() > 1 && active.indexOf(outletId) >= allowedOutletCount(tenantId, now)) {
+            throw new PlanUpgradeRequiredException(OUTLET_OVER_ALLOWANCE_MESSAGE);
+        }
+    }
+
+    /** Refuses one more active outlet when {@code activeOutlets} already fills the allowance (create and reactivate). */
+    public void requireOutletCapacity(UUID tenantId, long activeOutlets, Instant now) {
+        if (activeOutlets >= allowedOutletCount(tenantId, now)) {
+            throw effectivePlan(tenantId, now) == PlanCode.FREETIER
+                    ? new PlanUpgradeRequiredException(PlanCode.PRO)
+                    : new PlanUpgradeRequiredException(OUTLET_ADDON_REQUIRED_MESSAGE);
+        }
+    }
+
+    private List<UUID> activeOutletIds(UUID tenantId) {
+        return entityManager.createQuery("select o.id from OutletEntity o where o.tenant.id = :tenantId and o.active = true "
+                + "order by o.createdAt, o.id", UUID.class).setParameter("tenantId", tenantId).getResultList();
     }
 }

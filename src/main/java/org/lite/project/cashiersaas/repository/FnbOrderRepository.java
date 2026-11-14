@@ -10,6 +10,7 @@ import org.lite.project.cashiersaas.entity.fnb.QOrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.QSalesOrderEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.OrderStatus;
@@ -33,12 +34,25 @@ public class FnbOrderRepository {
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
-    // A tenant row lock serializes checkout with the same idempotency key.
+    // Tenant-level lock, kept only for tenant-wide settings (currency, tax, billing time zone).
     public void lockTenant(UUID tenantId) {
         TenantEntity tenant = criteriaBuilderFactory.create(entityManager, TenantEntity.class, "tenant")
                 .where("tenant.id").eq(tenantId).setMaxResults(1).getResultList().stream()
                 .findFirst().orElseThrow(ResourceNotFoundException::new);
         entityManager.refresh(tenant, LockModeType.PESSIMISTIC_WRITE);
+    }
+
+    // An outlet row lock serializes order/payment/shift work (and same-key checkout) within one outlet only.
+    public void lockOutlet(UUID tenantId, UUID outletId) {
+        OutletEntity outlet = criteriaBuilderFactory.create(entityManager, OutletEntity.class, "outlet")
+                .where("outlet.tenant.id").eq(tenantId).where("outlet.id").eq(outletId)
+                .setMaxResults(1).getResultList().stream().findFirst().orElseThrow(ResourceNotFoundException::new);
+        entityManager.refresh(outlet, LockModeType.PESSIMISTIC_WRITE);
+    }
+
+    public long countActiveOutlets(UUID tenantId) {
+        return entityManager.createQuery("select count(o) from OutletEntity o where o.tenant.id = :tenantId and o.active = true",
+                Long.class).setParameter("tenantId", tenantId).getSingleResult();
     }
 
     public Optional<SalesOrderEntity> byIdempotency(UUID tenant, String key) {

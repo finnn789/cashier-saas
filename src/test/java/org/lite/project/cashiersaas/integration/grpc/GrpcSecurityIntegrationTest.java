@@ -641,8 +641,9 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
                 + "VALUES (?, ?, 'IDR', 'Asia/Jakarta', 0, 0, ?, ?, now(), now(), 0)",
                 tenantId, name, status, businessTypeId);
         // The AI RPCs need an effective PREMIUM plan; plan gating itself is tested in OwnerInsightIntegrationTest.
-        jdbc.update("INSERT INTO subscriptions (id, tenant_id, plan_code, status, starts_at, created_at, updated_at, "
-                + "version) VALUES (gen_random_uuid(), ?, 'PREMIUM', 'ACTIVE', now() - interval '1 minute', now(), now(), 0)",
+        // extra_outlets = 1 keeps the second outlet of tenant A1 within the outlet allowance (TASK-083).
+        jdbc.update("INSERT INTO subscriptions (id, tenant_id, plan_code, status, starts_at, extra_outlets, created_at, updated_at, "
+                + "version) VALUES (gen_random_uuid(), ?, 'PREMIUM', 'ACTIVE', now() - interval '1 minute', 1, now(), now(), 0)",
                 tenantId);
     }
 

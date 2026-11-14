@@ -159,6 +159,39 @@ class PlanEntitlementIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals("0", ApiTestSupport.read(api.send(get("/api/v1/auth/outlets").header(AUTH, account), 200), "$.data.length()"));
     }
 
+    // ------------------------------------------------------------------ outlet add-on lapses (TASK-083)
+
+    @Test
+    void anOutletOverTheAllowanceAfterTheAddOnLapsesIsRefusedEverywhereWhileTheFirstOutletKeepsWorking() throws Exception {
+        MerchantFixture owner = api.onboardOwner("plan-out", PlanCode.PRO);
+        String addOnSql = "UPDATE subscriptions SET extra_outlets = 1 WHERE tenant_id = ? AND plan_code <> 'FREETIER' "
+                + "AND (ends_at IS NULL OR ends_at > now())";
+        api.jdbc().update(addOnSql, owner.tenantId());
+        MvcResult created = api.send(post("/api/v1/merchant/outlets").header(AUTH, owner.bearer())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Cabang\",\"timeZone\":\"Asia/Makassar\"}"), 201);
+        UUID secondId = UUID.fromString(ApiTestSupport.read(created, "$.data.id"));
+        MvcResult selected = api.send(post("/api/v1/auth/select-merchant").header(AUTH, login(ownerEmail(owner)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"" + owner.tenantId() + "\",\"outletId\":\"" + secondId + "\"}"), 200);
+        MerchantFixture second = new MerchantFixture(owner.tenantId(), secondId, ApiTestSupport.read(selected, "$.data.accessToken"));
+        assertEquals(200, paymentLabelsStatus(second));
+
+        expirePaidRows(owner); // the add-on lives and expires with its paid row
+        assertEquals(402, paymentLabelsStatus(second), "the newer outlet is over the allowance now");
+        assertEquals(402, selectMerchantStatus(login(ownerEmail(owner)), second));
+        assertEquals("1", ApiTestSupport.read(api.send(get("/api/v1/auth/outlets")
+                .header(AUTH, login(ownerEmail(owner))), 200), "$.data.length()"), "the choices omit it");
+        assertEquals(200, paymentLabelsStatus(owner), "the first outlet is always usable");
+
+        api.grantPlan(owner.tenantId(), PlanCode.PRO, null);
+        api.jdbc().update(addOnSql, owner.tenantId());
+        assertEquals(200, paymentLabelsStatus(second), "extending the add-on restores access to the same token");
+
+        expirePaidRows(owner);
+        assertEquals(200, status(api.call(post("/api/v1/merchant/outlets/" + secondId + "/deactivate")
+                .header(AUTH, owner.bearer()))), "deactivating is allowed while over the allowance");
+    }
+
     // ------------------------------------------------------------------ 402 on PRO features
 
     @ParameterizedTest(name = "{0} {1}")

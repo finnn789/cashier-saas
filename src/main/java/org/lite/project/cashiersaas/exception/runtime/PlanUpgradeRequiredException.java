@@ -6,4 +6,8 @@ public class PlanUpgradeRequiredException extends RuntimeException {
     public PlanUpgradeRequiredException(PlanCode requiredPlan) {
         super("Fitur ini tersedia di paket " + requiredPlan.getDisplayName() + ".");
     }
+
+    public PlanUpgradeRequiredException(String message) {
+        super(message);
+    }
 }

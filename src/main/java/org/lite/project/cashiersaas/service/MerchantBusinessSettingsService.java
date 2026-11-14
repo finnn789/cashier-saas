@@ -53,7 +53,9 @@ public class MerchantBusinessSettingsService {
         }
 
         boolean tenantChanged = tenant.updateBusinessSettings(values.businessName(), values.logoUrl(), values.currency(),
-                values.address(), values.phoneNumber(), values.taxRate(), values.serviceChargeRate(), values.timeZone());
+                values.address(), values.phoneNumber(), values.taxRate(), values.serviceChargeRate(),
+                // Billing zone follows the outlet only while it is the tenant's single active outlet.
+                orders.countActiveOutlets(tenant.getId()) == 1 ? values.timeZone() : tenant.getTimeZone());
         boolean outletChanged = outlet.updateBusinessSettings(values.outletName(), values.timeZone(), values.outletAddress(),
                 values.outletPhoneNumber());
         boolean footerChanged = tenant.changeReceiptFooter(values.receiptFooter());

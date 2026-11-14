@@ -50,7 +50,7 @@ public class FnbPaymentService {
     @Transactional
     public FnbPaymentResponse pay(TenantPrincipal principal, UUID outletId, UUID orderId, FnbPaymentRequest request) {
         if (request.getMethod() == null) throw new InvalidOperationException("Metode pembayaran wajib diisi.");
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         SalesOrderEntity order = current(principal, outletId, orderId);
         String fingerprint = fingerprint(request.getMethod(), request.getAmountTendered(), request.getLabelId());

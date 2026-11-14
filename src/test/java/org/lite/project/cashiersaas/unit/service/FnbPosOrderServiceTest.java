@@ -111,7 +111,7 @@ class FnbPosOrderServiceTest {
                 request(ServiceType.TAKEAWAY, " Siti ", 4));
 
         InOrder inOrder = inOrder(orders, pricing, audit);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(orders).byId(tenantId, outletId, orderId);
         inOrder.verify(pricing).price(eq(tenantId), eq(outletId), anyList(), eq(new BigDecimal("10")), eq(new BigDecimal("5")));
         inOrder.verify(orders).deleteLines(tenantId, outletId, order);

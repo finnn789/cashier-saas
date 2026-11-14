@@ -29,7 +29,7 @@ public class FnbOrderCancellationService {
     @Transactional
     public FnbCancellationResponse cancel(TenantPrincipal principal, UUID outletId, UUID orderId,
                                           FnbCancelOrderRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId)
                 .orElseThrow(ResourceNotFoundException::new);

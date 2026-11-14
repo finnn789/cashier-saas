@@ -24,8 +24,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -38,6 +41,7 @@ public class LoginService {
     private final AuthSessionService authSessionService;
     private final MerchantSelectionRepository merchantSelectionRepository;
     private final SubscriptionRepository subscriptionRepository;
+    private final PlanEntitlementService planEntitlementService;
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
@@ -81,6 +85,7 @@ public class LoginService {
         if (!membership.getTenant().isActive()) {
             throw new OperationConflictException(ErrorMessage.MERCHANT_INACTIVE.getMessage());
         }
+        planEntitlementService.requireOutletUsable(tenantId, outletId, Instant.now());
         // AuthSessionService checks the role-based entitlement and refuses with SUBSCRIPTION_INACTIVE.
         return toLoginResponse(authSessionService.selectMerchant(principal, membership, outlet,
                 subscriptionRepository.findActiveAt(tenantId, Instant.now())));
@@ -89,7 +94,12 @@ public class LoginService {
     @Transactional(readOnly = true)
     public List<MerchantOutletChoiceResponse> listChoices(AccountPrincipal principal) {
         StaffUserEntity user = requireActiveAccount(principal);
-        return accessRepository.listActiveChoices(user.getId(), Instant.now()).stream()
+        Instant now = Instant.now();
+        Map<UUID, Set<UUID>> usableByTenant = new HashMap<>();
+        return accessRepository.listActiveChoices(user.getId(), now).stream()
+                .filter(choice -> usableByTenant.computeIfAbsent(choice.getTenantId(),
+                        tenantId -> Set.copyOf(planEntitlementService.usableOutletIds(tenantId, now)))
+                        .contains(choice.getOutletId()))
                 .map(IdentityMapper::toChoice).toList();
     }
 

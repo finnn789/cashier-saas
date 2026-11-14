@@ -19,6 +19,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
@@ -63,6 +64,14 @@ class SecurityAuthorizationIntegrationTest extends AbstractPostgresIntegrationTe
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/public/fnb/menu/x"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void publicPlanCatalogShowsTheOutletAddOnPriceOnPaidPlansOnly() throws Exception {
+        mockMvc.perform(get("/api/v1/public/plans"))
+                .andExpect(jsonPath("$.data[?(@.code=='FREETIER')].outletAddOnMonthlyPrice").isEmpty())
+                .andExpect(jsonPath("$.data[?(@.code=='PRO')].outletAddOnMonthlyPrice").value(49000))
+                .andExpect(jsonPath("$.data[?(@.code=='PREMIUM')].outletAddOnMonthlyPrice").value(49000));
     }
 
     @Test

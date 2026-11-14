@@ -1,5 +1,6 @@
 package org.lite.project.cashiersaas.dto;
 
+import org.lite.project.cashiersaas.dto.response.MerchantOutletResponse;
 import org.lite.project.cashiersaas.dto.response.OutletResponse;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 
@@ -14,6 +15,18 @@ public final class CashierMapper {
         response.setTimeZone(outlet.getTimeZone());
         response.setAddress(outlet.getAddress());
         response.setPhoneNumber(outlet.getPhoneNumber());
+        return response;
+    }
+
+    public static MerchantOutletResponse toMerchantOutletResponse(OutletEntity outlet, boolean usable) {
+        MerchantOutletResponse response = new MerchantOutletResponse();
+        response.setId(outlet.getId());
+        response.setName(outlet.getName());
+        response.setTimeZone(outlet.getTimeZone());
+        response.setAddress(outlet.getAddress());
+        response.setPhoneNumber(outlet.getPhoneNumber());
+        response.setActive(outlet.isActive());
+        response.setUsable(usable);
         return response;
     }
 }

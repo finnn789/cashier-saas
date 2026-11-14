@@ -25,6 +25,9 @@ public class SubscriptionEntity extends MutableBaseEntity {
     private Instant startsAt;
     @Column(name="ends_at")
     private Instant endsAt;
+    /** Outlet add-on: outlets beyond the first that this paid row allows (0 on FREETIER). */
+    @Column(name="extra_outlets",nullable=false)
+    private int extraOutlets;
 
     public static SubscriptionEntity activateFreeTier(TenantEntity tenant) {
         SubscriptionEntity subscription = new SubscriptionEntity();

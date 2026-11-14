@@ -58,6 +58,7 @@ class GrpcTenantAccessPolicyTest {
         outletAccessRepository = mock(MembershipOutletAccessRepository.class);
         membershipRepository = mock(TenantMembershipRepository.class);
         planEntitlement = mock(PlanEntitlementService.class);
+        when(planEntitlement.usableOutletIds(any(), any(Instant.class))).thenReturn(List.of(OUTLET));
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ACTIVE))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(INACTIVE))).thenReturn(false);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(UNKNOWN))).thenReturn(false);
@@ -226,6 +227,22 @@ class GrpcTenantAccessPolicyTest {
 
         assertEquals(List.of(OUTLET), policy.requireMemberOutlets(tenant, "  " + USER.toString().toUpperCase() + " "));
         verifyNoInteractions(membershipRepository);
+    }
+
+    @Test
+    void outletsOverThePlanAllowanceAreDroppedFromMemberAndOwnerScopeAndAnOnlyOverAllowanceScopeIsDenied() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        UUID overAllowance = UUID.fromString("66666666-6666-6666-6666-666666666667");
+        when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of(OUTLET, overAllowance));
+        when(membershipRepository.findActive(USER, tenant)).thenReturn(Optional.of(membership(Role.OWNERMERCHANT)));
+
+        assertEquals(List.of(OUTLET), policy.requireMemberOutlets(tenant, USER.toString()));
+        assertEquals(List.of(OUTLET), policy.requireOwnerOutlets(tenant, USER.toString()));
+
+        when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of(overAllowance));
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class,
+                () -> policy.requireOwnerOutlets(tenant, USER.toString()));
+        assertEquals(Status.Code.PERMISSION_DENIED, ex.getStatus().getCode());
     }
 
     private TenantMembershipEntity membership(Role role) {

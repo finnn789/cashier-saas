@@ -38,7 +38,7 @@ Diferensiator: owner tidak perlu membaca laporan; asisten AI mengirim ringkasan,
 ## 5. Di Luar Cakupan
 
 - Pemesanan mandiri pelanggan lewat QR, halaman publik pelanggan, layar dapur (KDS), manajemen meja, real-time WebSocket (dihapus pada pivot 12 November 2026; polling 15 detik dipakai sebagai gantinya).
-- Multi-outlet tingkat lanjut dan laporan konsolidasi (satu tenant = satu outlet untuk rilis ini).
+- Multi-outlet tingkat lanjut (salin katalog antar outlet, transfer stok antar outlet, kasir lintas outlet). Multi-outlet dasar sudah dibangun (TASK-083): kelola outlet, lock per outlet, laporan konsolidasi, add-on outlet.
 - Loyalty, membership pelanggan, voucher kompleks.
 - Integrasi marketplace/delivery, akuntansi lengkap, payroll, reservasi.
 - Manajemen supplier dan purchase order (harga beli dicatat langsung saat restock, §8.6).
@@ -145,14 +145,14 @@ Pembatasan dilakukan lewat fitur, bukan jumlah transaksi. Transaksi dan data tid
 |---|---|---|---|
 | Harga bulanan | Rp0 | Rp59.000 | Rp119.000 |
 | Harga tahunan ("gratis 2 bulan") | — | Rp590.000 | Rp1.190.000 |
-| Outlet | 1 | 1 | 1 |
+| Outlet | 1 | 1 + add-on | 1 + add-on |
 | Pengguna | Owner saja (owner sebagai kasir) | Owner + kasir tanpa batas | Owner + kasir tanpa batas |
 | POS, menu, resep, stok, struk, shift & kas kecil | Ya | Ya | Ya |
 | Undang kasir, kelola staf, void/refund, audit kasir | Tidak | Ya | Ya |
 | Laporan | Ringkasan & produk terlaris, riwayat 30 hari | Lengkap (per jam/kasir/shift, HPP & laba, CSV), riwayat penuh | Lengkap |
 | Asisten AI Telegram | Tidak | Tidak | Ya: ringkasan harian (tidak memotong kuota) + 300 pertanyaan/bulan |
 | Top-up AI | — | — | +200 pertanyaan Rp29.000, berlaku sampai akhir periode |
-| Outlet tambahan | — | +Rp49.000/outlet/bulan setelah multi-outlet dibangun (pasca-pilot) | sama |
+| Outlet tambahan | — | +Rp49.000/outlet/bulan (aktivasi manual operator, TASK-083) | sama |
 
 - Premium mencakup seluruh isi Pro.
 - Kuota AI dihitung per pertanyaan, bukan kredit/token. Owner diberi tahu pada 80% dan 100% kuota.
@@ -237,7 +237,6 @@ Tenant, Outlet, StaffUser, TenantMembership, MembershipOutletAccess, Subscriptio
 ## 16. Keputusan yang Masih Terbuka
 
 - Validasi harga paket (§8.15) di pilot M8: kesediaan bayar dan biaya token nyata per owner.
-- Kapan multi-outlet dibuka (perlu mengganti lock per tenant menjadi per outlet). Ditargetkan setelah pilot sebagai add-on per outlet.
 
 Diputuskan 14 Nov 2026:
 - Model harga dan batas paket ada di §8.15.

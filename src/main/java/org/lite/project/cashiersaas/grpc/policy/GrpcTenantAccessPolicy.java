@@ -85,7 +85,10 @@ public class GrpcTenantAccessPolicy {
     }
 
     private List<UUID> requireOutlets(UUID tenantId, UUID userId, boolean ownerOnly) {
-        List<UUID> outletIds = outletAccessRepository.findActiveOutletIds(tenantId, userId);
+        // Over-allowance outlets (downgrade) are invisible to the AI scope, like an inactive outlet.
+        List<UUID> usable = planEntitlementService.usableOutletIds(tenantId, Instant.now());
+        List<UUID> outletIds = outletAccessRepository.findActiveOutletIds(tenantId, userId).stream()
+                .filter(usable::contains).toList();
         if (outletIds.isEmpty()
                 || (ownerOnly && membershipRepository.findActive(userId, tenantId)
                         .filter(membership -> membership.getRole() == Role.OWNERMERCHANT).isEmpty())) {

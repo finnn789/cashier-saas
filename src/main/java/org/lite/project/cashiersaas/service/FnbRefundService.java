@@ -42,7 +42,7 @@ public class FnbRefundService {
     @Transactional
     public FnbRefundResponse refund(TenantPrincipal principal, UUID outletId, UUID orderId, String key, FnbRefundRequest request) {
         UUID tenantId = principal.getTenantId();
-        orders.lockTenant(tenantId);
+        orders.lockOutlet(tenantId, outletId);
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         // Before the replay lookup on purpose: a downgraded tenant gets 402 even when retrying an earlier refund key.
         planEntitlementService.require(tenantId, PlanCode.PRO);

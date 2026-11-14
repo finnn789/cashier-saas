@@ -1,0 +1,33 @@
+$kind: http-example
+name: 402 Payment Required - jatah outlet habis
+request:
+  method: POST
+  url: "{{baseUrl}}/api/v1/merchant/outlets"
+  headers:
+    - key: Accept
+      value: "application/json"
+    - key: Content-Type
+      value: "application/json"
+  body:
+    type: json
+    content: |-
+      {
+        "name": "Kedai Contoh Cabang 3",
+        "timeZone": "Asia/Jakarta"
+      }
+response:
+  statusCode: 402
+  statusText: Payment Required
+  headers:
+    - key: Content-Type
+      value: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "success": false,
+        "code": 402,
+        "message": "Outlet tambahan memerlukan add-on outlet (Rp49.000/outlet/bulan).",
+        "timestamp": "2026-11-14T10:00:00"
+      }
+order: 2000

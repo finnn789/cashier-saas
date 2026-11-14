@@ -47,7 +47,7 @@ public class FnbPosOrderService {
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         String idempotencyKey = validatedKey(key);
         String fingerprint = fingerprint(request);
-        orders.lockTenant(context.getTenant().getId());
+        orders.lockOutlet(context.getTenant().getId(), outletId);
         context = guard.requireOutlet(principal, outletId);
         if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
             throw new ResourceNotFoundException();
@@ -78,7 +78,7 @@ public class FnbPosOrderService {
                                               FnbPosOrderRequest request) {
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         UUID tenantId = context.getTenant().getId();
-        orders.lockTenant(tenantId);
+        orders.lockOutlet(tenantId, outletId);
         context = guard.requireOutlet(principal, outletId);
         if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
             throw new ResourceNotFoundException();

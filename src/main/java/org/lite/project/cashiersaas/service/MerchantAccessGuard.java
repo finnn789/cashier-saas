@@ -16,12 +16,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MerchantAccessGuard {
     private final MerchantAccessRepository accessRepository;
+    private final PlanEntitlementService planEntitlementService;
 
     public MerchantAccessContext requireOutlet(TenantPrincipal principal, UUID outletId) {
         principal.requireOutlet(outletId);
+        Instant now = Instant.now();
         MerchantAccessRepository.OutletAccess access = accessRepository.findOutlet(
-                        principal.getUserId(), principal.getTenantId(), outletId, principal.getRoles(), Instant.now())
+                        principal.getUserId(), principal.getTenantId(), outletId, principal.getRoles(), now)
                 .orElseThrow(ResourceNotFoundException::new);
+        planEntitlementService.requireOutletUsable(principal.getTenantId(), outletId, now);
         TenantMembershipEntity membership = access.getMembership();
         return new MerchantAccessContext(membership.getTenant(), access.getOutlet(), membership);
     }

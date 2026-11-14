@@ -55,9 +55,11 @@ class PlanEntitlementServiceTest {
 
     private void activeRows(String... planCodes) {
         List<SubscriptionEntity> rows = new ArrayList<>();
-        for (String planCode : planCodes) {
+        for (String planCodeAndExtra : planCodes) {
+            String[] parts = planCodeAndExtra.split(":"); // "PRO:2" = a PRO row with two add-on outlets
             SubscriptionEntity row = SubscriptionEntity.activateFreeTier(tenant);
-            ReflectionTestUtils.setField(row, "planCode", planCode);
+            ReflectionTestUtils.setField(row, "planCode", parts[0]);
+            ReflectionTestUtils.setField(row, "extraOutlets", parts.length > 1 ? Integer.parseInt(parts[1]) : 0);
             rows.add(row);
         }
         when(subscriptions.findActiveAt(eq(tenantId), any(Instant.class))).thenReturn(rows);
@@ -73,6 +75,34 @@ class PlanEntitlementServiceTest {
         activeRows(rows.isEmpty() ? new String[0] : rows.split(";"));
 
         assertEquals(expected, service.effectivePlan(tenantId, NOW));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"FREETIER, 1", "'', 1", "PRO, 1", "PRO:2, 3", "PRO:1;PREMIUM:2, 4", "FREETIER;PRO:1, 2"})
+    void theOutletAllowanceIsOnePlusTheAddOnOutletsOfEveryActivePaidRow(String rows, int expected) {
+        activeRows(rows.isEmpty() ? new String[0] : rows.split(";"));
+
+        assertEquals(expected, service.allowedOutletCount(tenantId, NOW));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"FREETIER, 1, Fitur ini tersedia di paket Pro.",
+            "PRO, 1, Outlet tambahan memerlukan add-on outlet (Rp49.000/outlet/bulan).",
+            "PRO:1, 2, Outlet tambahan memerlukan add-on outlet (Rp49.000/outlet/bulan)."})
+    void creatingAnOutletBeyondTheAllowanceAnswers402NamingProOnFreetierAndTheAddOnOtherwise(
+            String rows, long activeOutlets, String message) {
+        activeRows(rows.split(";"));
+
+        PlanUpgradeRequiredException refused = assertThrows(PlanUpgradeRequiredException.class,
+                () -> service.requireOutletCapacity(tenantId, activeOutlets, NOW));
+        assertEquals(message, refused.getMessage());
+    }
+
+    @Test
+    void anOutletWithinTheAllowanceHasCapacity() {
+        activeRows("PRO:1");
+
+        assertDoesNotThrow(() -> service.requireOutletCapacity(tenantId, 1, NOW));
     }
 
     @ParameterizedTest

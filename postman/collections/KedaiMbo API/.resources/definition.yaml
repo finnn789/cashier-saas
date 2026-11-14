@@ -102,6 +102,9 @@ variables:
   - key: labelId
     value: ""
     secret: false
+  - key: targetOutletId
+    value: ""
+    secret: false
   - key: bearer_token_0vit
     secret: true
 scripts:

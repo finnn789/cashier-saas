@@ -48,6 +48,7 @@ class CashierGrpcHandlerRejectionTest {
     private static final String OTHER = "22222222-2222-2222-2222-222222222222";
     private static final String USER = "55555555-5555-5555-5555-555555555555";
     private static final String OUTSIDER = "66666666-6666-6666-6666-666666666666";
+    private static final UUID USER_OUTLET = UUID.fromString("77777777-7777-7777-7777-777777777771");
 
     private TenantRepository tenantRepository;
     private MembershipOutletAccessRepository outletAccessRepository;
@@ -75,13 +76,14 @@ class CashierGrpcHandlerRejectionTest {
         tenantRepository = mock(TenantRepository.class);
         outletAccessRepository = mock(MembershipOutletAccessRepository.class);
         when(outletAccessRepository.findActiveOutletIds(UUID.fromString(ALLOWED), UUID.fromString(USER)))
-                .thenReturn(List.of(UUID.randomUUID()));
+                .thenReturn(List.of(USER_OUTLET));
         when(outletAccessRepository.findActiveOutletIds(UUID.fromString(ALLOWED), UUID.fromString(OUTSIDER)))
                 .thenReturn(List.of());
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ALLOWED))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(OTHER))).thenReturn(false);
         PlanEntitlementService plans = mock(PlanEntitlementService.class);
         when(plans.effectivePlan(any(), any())).thenReturn(PlanCode.PREMIUM);
+        when(plans.usableOutletIds(any(), any())).thenReturn(List.of(USER_OUTLET));
         GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository,
                 mock(TenantMembershipRepository.class), plans, properties);
 

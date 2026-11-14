@@ -62,7 +62,11 @@ public class AuditLogEntity extends BaseEntity {
         SHIFT_CLOSED("CASH_SHIFT"),
         FNB_ORDER_REFUNDED("SALES_ORDER"),
         PAYMENT_LABEL_CHANGED("PAYMENT_LABEL"),
-        CASH_EXPENSE_RECORDED("CASH_EXPENSE");
+        CASH_EXPENSE_RECORDED("CASH_EXPENSE"),
+        OUTLET_CREATED("OUTLET"),
+        OUTLET_UPDATED("OUTLET"),
+        OUTLET_DEACTIVATED("OUTLET"),
+        OUTLET_REACTIVATED("OUTLET");
 
         private final String entityType;
 

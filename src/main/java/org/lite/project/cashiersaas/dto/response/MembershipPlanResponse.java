@@ -17,6 +17,7 @@ public class MembershipPlanResponse {
     private boolean available;
     private BigDecimal monthlyPrice;
     private BigDecimal yearlyPrice;
+    private BigDecimal outletAddOnMonthlyPrice;
 
     public static MembershipPlanResponse of(PlanCode plan, BigDecimal monthlyPrice, BigDecimal yearlyPrice) {
         MembershipPlanResponse response = new MembershipPlanResponse();
