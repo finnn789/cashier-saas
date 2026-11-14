@@ -208,9 +208,12 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.repository.find_duplicate_incoming.assert_not_awaited()
         self.ai.reply.assert_not_awaited()
 
-    async def test_hard_ai_error_is_ephemeral_after_user_commit(self) -> None:
+    async def test_hard_ai_error_is_ephemeral_after_user_commit_and_never_retries(self) -> None:
         self.ai.reply.side_effect = AIError("AI_TRANSPORT_UNKNOWN", retryable=False)
-        answer = await self.service.handle(**self.input)
+        sleep = AsyncMock()
+        with patch.object(service_module, "asyncio", SimpleNamespace(sleep=sleep)):
+            answer = await self.service.handle(**self.input)
+        sleep.assert_not_awaited()
         self.assertIn("hasil permintaan tidak diketahui", answer)
         self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
         self.assertEqual(self.events[-1], ("history", 1))
@@ -264,15 +267,6 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ai.reply.await_count, 3)
         self.assertEqual(self.repository.insert_message.await_count, 1)
         self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-
-    async def test_unknown_transport_never_retries(self) -> None:
-        self.ai.reply.side_effect = AIError("AI_TRANSPORT_UNKNOWN", retryable=False)
-        sleep = AsyncMock()
-        with patch.object(service_module, "asyncio", SimpleNamespace(sleep=sleep)):
-            await self.service.handle(**self.input)
-        sleep.assert_not_awaited()
-        self.ai.reply.assert_awaited_once()
-        self.repository.insert_message.assert_awaited_once()
 
     async def test_assistant_persistence_failure_propagates_after_user_commit(self) -> None:
         async def failed_insert(

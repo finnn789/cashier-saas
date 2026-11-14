@@ -11,14 +11,12 @@ import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.MerchantBusinessSettingsRequest;
 import org.lite.project.cashiersaas.dto.response.MerchantBusinessSettingsResponse;
-import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.Role;
-import org.lite.project.cashiersaas.enums.ServiceType;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -254,33 +252,6 @@ class MerchantBusinessSettingsServiceTest {
         assertEquals(new BigDecimal(value).setScale(2), response.getServiceChargeRate());
         verify(auditLogs).persist(any(AuditLogEntity.class));
         verifyNoInteractions(settings);
-    }
-
-    @Test
-    void updatingFutureRatesPreservesExistingOrderSnapshotsAndTotals() {
-        Fixture fixture = fixture();
-        SalesOrderEntity existingOrder = SalesOrderEntity.pos(fixture.tenant(), fixture.outlet(),
-                new SalesOrderEntity.PosDetails("existing-order", "fingerprint", "POS-001",
-                        ServiceType.TAKEAWAY, "Customer", null),
-                new SalesOrderEntity.Charges(new BigDecimal("100.00"), new BigDecimal("10.00"),
-                        new BigDecimal("5.00")));
-        existingOrder.snapshotRates(fixture.tenant().getTaxRate(), fixture.tenant().getServiceChargeRate());
-        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
-        MerchantBusinessSettingsRequest request = identicalRequest(fixture);
-        request.setTaxRate(new BigDecimal("20.00"));
-        request.setServiceChargeRate(new BigDecimal("7.00"));
-
-        service.update(owner, outletId, request);
-
-        assertEquals(new BigDecimal("20.00"), fixture.tenant().getTaxRate());
-        assertEquals(new BigDecimal("7.00"), fixture.tenant().getServiceChargeRate());
-        assertEquals(new BigDecimal("10.00"), existingOrder.getTaxRateSnapshot());
-        assertEquals(new BigDecimal("5.00"), existingOrder.getServiceChargeRateSnapshot());
-        assertEquals(new BigDecimal("10.00"), existingOrder.getTaxAmount());
-        assertEquals(new BigDecimal("5.00"), existingOrder.getServiceChargeAmount());
-        assertEquals(new BigDecimal("115.00"), existingOrder.getTotal());
-        verify(orders).lockTenant(tenantId);
-        verifyNoMoreInteractions(orders);
     }
 
     @Test

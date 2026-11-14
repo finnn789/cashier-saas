@@ -13,16 +13,12 @@ class DigestServiceTest {
     private final DigestService service = new DigestService();
 
     @Test
-    void digestIsStableAndProducesAStoredLengthDigest() {
+    void digestIsStableProducesAStoredLengthDigestAndDiffersForDifferentInput() {
         String value = "checkout-key-0001";
 
         assertEquals(service.digest(value), service.digest(value));
         assertEquals(64, service.digest(value).length());
         assertTrue(service.digest(value).matches("[0-9a-f]{64}"));
-    }
-
-    @Test
-    void digestDiffersForDifferentInput() {
         assertNotEquals(service.digest("checkout-key-0001"), service.digest("checkout-key-0002"));
     }
 }

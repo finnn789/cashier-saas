@@ -2,6 +2,9 @@ package org.lite.project.cashiersaas.unit.component;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.TenantJwtAuthenticationConverter;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.enums.Role;
@@ -44,18 +47,13 @@ class TenantJwtAuthenticationConverterTest {
         assertEquals(null, authentication.getCredentials());
     }
 
-    @Test
-    void rejectsMissingTenantIdClaim() {
-        Jwt jwt = jwt(Map.of("sub", UUID.randomUUID().toString(), "roles", List.of("CASHIER")));
-
-        BadCredentialsException exception = assertThrows(BadCredentialsException.class, () -> converter.convert(jwt));
-
-        assertEquals("JWT claim 'tenant_id' must be a UUID.", exception.getMessage());
-    }
-
-    @Test
-    void rejectsInvalidTenantIdClaim() {
-        Jwt jwt = jwt(Map.of("sub", UUID.randomUUID().toString(), "tenant_id", "not-a-uuid", "roles", List.of("CASHIER")));
+    @ParameterizedTest
+    @NullSource // the tenant_id claim is absent
+    @ValueSource(strings = "not-a-uuid")
+    void rejectsMissingOrInvalidTenantIdClaim(String tenantId) {
+        Map<String, Object> claims = new HashMap<>(Map.of("sub", UUID.randomUUID().toString(), "roles", List.of("CASHIER")));
+        if (tenantId != null) claims.put("tenant_id", tenantId);
+        Jwt jwt = jwt(claims);
 
         BadCredentialsException exception = assertThrows(BadCredentialsException.class, () -> converter.convert(jwt));
 

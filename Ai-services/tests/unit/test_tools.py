@@ -6,17 +6,26 @@ from unittest.mock import AsyncMock, Mock
 
 from app.ai.graph.tools_adapter import json_schema_to_pydantic_model
 from app.integrations.grpc.client import CashierGrpcClient
-from app.tools import CatalogSearchTool, OrderStatusTool, ToolRegistry, get_default_tool_registry
+from app.tools import CatalogSearchTool, OrderStatusTool, ToolRegistry
+from app.tools.insights import CashierAnomaliesTool, RestockSuggestionsTool, SalesSummaryTool
 
 
 class ToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_schema_hides_tenant_and_user(self) -> None:
-        for tool in (CatalogSearchTool(), OrderStatusTool()):
+        insight_tools = (SalesSummaryTool(), RestockSuggestionsTool(), CashierAnomaliesTool())
+        for tool in (CatalogSearchTool(), OrderStatusTool(), *insight_tools):
             schema = tool.to_openrouter_schema()
             self.assertEqual(schema["type"], "function")
             properties = schema["function"]["parameters"]["properties"]
             self.assertNotIn("tenant_id", properties)
             self.assertNotIn("user_id", properties)
+        self.assertEqual(
+            [tool.name for tool in insight_tools],
+            ["sales_summary", "restock_suggestions", "cashier_anomalies"],
+        )
+        self.assertEqual(SalesSummaryTool().parameters["required"], ["start_date", "end_date"])
+        self.assertEqual(CashierAnomaliesTool().parameters["required"], ["date"])
+        self.assertIn("dua kali", SalesSummaryTool().description)  # compare periods = two calls
 
     def test_adapter_schema_drops_tenant_and_user(self) -> None:
         model = json_schema_to_pydantic_model("t_args", {
@@ -68,13 +77,3 @@ class ToolsTests(unittest.IsolatedAsyncioTestCase):
             tenant_id="tenant-123",
         )
         self.assertIn("error", bad_json_res)
-
-    async def test_default_tool_registry(self) -> None:
-        registry = get_default_tool_registry()
-        self.assertIsNone(registry.get_tool("check_laptop_cpu_usage"))
-        self.assertIsNotNone(registry.get_tool("search_catalog_menu"))
-        self.assertIsNotNone(registry.get_tool("check_order_status"))
-        for name in ("sales_summary", "restock_suggestions", "cashier_anomalies"):
-            self.assertIsNotNone(registry.get_tool(name))
-        schemas = registry.get_openrouter_schemas()
-        self.assertEqual(len(schemas), 5)

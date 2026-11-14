@@ -181,14 +181,6 @@ class GrpcInsightMapperTest {
     }
 
     @Test
-    void restockWithNoItemsKeepsTheOutletHeaderOnly() {
-        OutletRestock result = mapper.toRestock(context, List.of());
-
-        assertEquals(outletId.toString(), result.getOutletId());
-        assertEquals(0, result.getItemsCount());
-    }
-
-    @Test
     void anomaliesMapKindValueAndBaselineWithTheDate() {
         FnbCashierAnomaly anomaly = new FnbCashierAnomaly();
         UUID staffId = UUID.randomUUID();

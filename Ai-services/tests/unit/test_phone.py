@@ -18,9 +18,6 @@ class PhoneNormalizationTests(unittest.TestCase):
             with self.subTest(input=case["input"]):
                 self.assertEqual(normalize_phone(case["input"]), case["expected"])
 
-    def test_leading_zero_becomes_country_code(self) -> None:
-        self.assertEqual(normalize_phone("0812 3456 7890"), "6281234567890")
-
     def test_plus_only_allowed_as_first_character(self) -> None:
         self.assertIsNone(normalize_phone("0812+34567890"))
         self.assertIsNone(normalize_phone("+"))

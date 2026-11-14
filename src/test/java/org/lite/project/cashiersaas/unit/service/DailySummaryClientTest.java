@@ -7,6 +7,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.lite.project.cashiersaas.configuration.AiServiceProperties;
 import org.lite.project.cashiersaas.service.DailySummaryClient;
 import org.slf4j.LoggerFactory;
@@ -14,11 +17,13 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -109,34 +114,35 @@ class DailySummaryClientTest {
         server.verify();
     }
 
-    @Test
-    void aServerErrorIsReportedAsFailedWithoutThrowing() {
-        server.expect(once(), requestTo(URL)).andRespond(withServerError());
+    static Stream<Arguments> failedResponses() {
+        return Stream.of(
+                Arguments.of("server error", withServerError()),
+                Arguments.of("client error", withStatus(HttpStatus.UNAUTHORIZED)),
+                Arguments.of("I/O error", withException(new IOException("connection reset"))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("failedResponses")
+    void aFailedResponseIsReportedAsFailedWithoutThrowing(String failure, ResponseCreator response) {
+        server.expect(once(), requestTo(URL)).andRespond(response);
 
         assertFalse(assertDoesNotThrow(() -> client(BASE_URL, API_KEY).send(tenantId, outletId, date)));
 
         server.verify(); // a single attempt: retries belong to the scheduler
     }
 
-    @Test
-    void aClientErrorIsReportedAsFailed() {
-        server.expect(once(), requestTo(URL)).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
-
-        assertFalse(client(BASE_URL, API_KEY).send(tenantId, outletId, date));
+    static Stream<Arguments> disabledConfigurations() {
+        return Stream.of(
+                Arguments.of("blank base URL", "", API_KEY, true),
+                Arguments.of("blank API key", BASE_URL, "  ", true),
+                Arguments.of("feature flag off", BASE_URL, API_KEY, false));
     }
 
-    @Test
-    void anIoErrorIsReportedAsFailedWithoutThrowing() {
-        server.expect(once(), requestTo(URL)).andRespond(withException(new IOException("connection reset")));
-
-        assertFalse(assertDoesNotThrow(() -> client(BASE_URL, API_KEY).send(tenantId, outletId, date)));
-
-        server.verify();
-    }
-
-    @Test
-    void aBlankBaseUrlDisablesTheClientAndSendsNothing() {
-        DailySummaryClient client = client("", API_KEY);
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("disabledConfigurations")
+    void aBlankBaseUrlOrApiKeyOrTheFeatureFlagOffDisablesTheClientAndSendsNothing(String reason, String baseUrl,
+                                                                                String apiKey, boolean featureEnabled) {
+        DailySummaryClient client = new DailySummaryClient(properties(baseUrl, apiKey), featureEnabled, restClient);
 
         assertFalse(client.isEnabled());
         assertFalse(client.send(tenantId, outletId, date));
@@ -144,35 +150,13 @@ class DailySummaryClientTest {
     }
 
     @Test
-    void aBlankApiKeyDisablesTheClientAndSendsNothing() {
-        DailySummaryClient client = client(BASE_URL, "  ");
-
-        assertFalse(client.isEnabled());
-        assertFalse(client.send(tenantId, outletId, date));
-        server.verify();
-    }
-
-    @Test
-    void theFeatureFlagOffDisablesTheClientEvenWithUrlAndKey() {
-        DailySummaryClient client = new DailySummaryClient(properties(BASE_URL, API_KEY), false, restClient);
-
-        assertFalse(client.isEnabled());
-        assertFalse(client.send(tenantId, outletId, date));
-        server.verify();
-    }
-
-    @Test
-    void theSpringConstructorBuildsNoHttpClientWhenTheBaseUrlIsBlank() {
-        DailySummaryClient client = new DailySummaryClient(properties("", API_KEY), true);
-
-        assertFalse(client.isEnabled());
-        assertFalse(client.send(tenantId, outletId, date));
-    }
-
-    @Test
-    void theSpringConstructorIsEnabledWithUrlAndKeyAndDisabledWhenTheFlagIsOff() {
+    void theSpringConstructorIsEnabledWithUrlAndKeyAndDisabledWhenTheFlagIsOffOrTheBaseUrlIsBlank() {
         assertTrue(new DailySummaryClient(properties(BASE_URL, API_KEY), true).isEnabled());
         assertFalse(new DailySummaryClient(properties(BASE_URL, API_KEY), false).isEnabled());
+        // blank base URL: the Spring constructor builds no HTTP client at all
+        DailySummaryClient blank = new DailySummaryClient(properties("", API_KEY), true);
+        assertFalse(blank.isEnabled());
+        assertFalse(blank.send(tenantId, outletId, date));
     }
 
     @Test

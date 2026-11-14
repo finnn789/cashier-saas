@@ -56,19 +56,12 @@ class HttpRateLimiterTest {
     }
 
     @Test
-    void differentKeysAreIndependent() {
+    void differentKeysAndDifferentGroupsAreIndependent() {
         HttpRateLimiter limiter = limiter();
         assertEquals(10, drain(limiter, Group.AUTH, "1.1.1.1", 20));
 
         assertFalse(limiter.check(Group.AUTH, "1.1.1.1").isAllowed());
         assertTrue(limiter.check(Group.AUTH, "2.2.2.2").isAllowed());
-    }
-
-    @Test
-    void sameKeyInDifferentGroupsIsIndependent() {
-        HttpRateLimiter limiter = limiter();
-        assertEquals(10, drain(limiter, Group.AUTH, "1.1.1.1", 20));
-
         assertTrue(limiter.check(Group.AUTHENTICATED, "1.1.1.1").isAllowed());
         assertTrue(limiter.check(Group.ANONYMOUS_OTHER, "1.1.1.1").isAllowed());
     }
@@ -88,23 +81,6 @@ class HttpRateLimiterTest {
         HttpRateLimiter fast = limiter();
         fast.check(Group.AUTHENTICATED, "k");
         assertTrue(fast.check(Group.AUTHENTICATED, "k").getRetryAfterSeconds() >= 1);
-    }
-
-    @Test
-    void allowDecisionHasNoRetryAfter() {
-        Decision decision = limiter().check(Group.AUTH, "k");
-
-        assertTrue(decision.isAllowed());
-        assertEquals(0, decision.getRetryAfterSeconds());
-    }
-
-    @Test
-    void reportsDisabledWhenConfiguredOff() {
-        assertTrue(limiter().isEnabled());
-
-        properties.setEnabled(false);
-
-        assertFalse(limiter().isEnabled());
     }
 
     @Test

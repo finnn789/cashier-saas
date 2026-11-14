@@ -58,42 +58,20 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.database.close()
         self.engine.dispose.assert_awaited_once()
 
-    async def test_migration_version_missing_rolls_back_and_closes(self) -> None:
-        self.connection.scalar.side_effect = [True, None]
-        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
-            await self.database.acquire(71)
-        self.assertEqual(self.begin.events, ["begin", "rollback"])
-        await self.database.close()
-        self.assertFalse(self.database.owned)
-        self.connection.close.assert_awaited_once()
-        self.engine.dispose.assert_awaited_once()
-
-    async def test_old_telegram_revision_is_rejected(self) -> None:
-        self.connection.scalar.side_effect = [True, "0001_telegram"]
-        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
-            await self.database.acquire(71)
-        self.assertEqual(self.begin.events, ["begin", "rollback"])
-        await self.database.close()
-        self.assertFalse(self.database.owned)
-
-    async def test_database_still_at_revision_0001_is_rejected(self) -> None:
-        self.assertNotEqual(EXPECTED_ALEMBIC_REVISION, "0001_channels")
-        self.connection.scalar.side_effect = [True, "0001_channels"]
-        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
-            await self.database.acquire(71)
-        self.assertEqual(self.begin.events, ["begin", "rollback"])
-        await self.database.close()
-        self.assertFalse(self.database.owned)
-
-    async def test_database_still_at_revision_0002_is_rejected(self) -> None:
-        # TASK-059-F: the shared-bot code needs the 0003 schema (tenant-scoped conversations).
-        self.assertEqual(EXPECTED_ALEMBIC_REVISION, "0003_shared_bot_tenants")
-        self.connection.scalar.side_effect = [True, "0002_tenant_members"]
-        with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
-            await self.database.acquire(71)
-        self.assertEqual(self.begin.events, ["begin", "rollback"])
-        await self.database.close()
-        self.assertFalse(self.database.owned)
+    async def test_missing_or_old_migration_revision_is_rejected(self) -> None:
+        # None = no version row; the shared-bot code needs the 0003 schema, so 0001/0002 fail.
+        for revision in (None, "0001_telegram", "0001_channels", "0002_tenant_members"):
+            with self.subTest(revision=revision):
+                self.setUp()
+                self.assertNotEqual(EXPECTED_ALEMBIC_REVISION, revision)
+                self.connection.scalar.side_effect = [True, revision]
+                with self.assertRaisesRegex(RuntimeError, "Migrasi AI belum sesuai"):
+                    await self.database.acquire(71)
+                self.assertEqual(self.begin.events, ["begin", "rollback"])
+                await self.database.close()
+                self.assertFalse(self.database.owned)
+                self.connection.close.assert_awaited_once()
+                self.engine.dispose.assert_awaited_once()
 
     async def test_transaction_commit_rollback_and_ping(self) -> None:
         await self.database.acquire(71)

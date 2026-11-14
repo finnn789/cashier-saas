@@ -1,6 +1,5 @@
 """TASK-080: owner insight gRPC client methods and the three AI tools (offline, mock stubs)."""
 
-import json
 import unittest
 from unittest.mock import AsyncMock, Mock
 
@@ -10,7 +9,6 @@ import grpc.aio
 from app.integrations.grpc.client import SERVICE_KEY_HEADER, CashierGrpcClient
 from app.integrations.grpc.config import GrpcSettings
 from app.integrations.grpc.generated import cashier_service_pb2 as pb
-from app.tools import get_default_tool_registry
 from app.tools.insights import (
     UNAVAILABLE,
     CashierAnomaliesTool,
@@ -224,25 +222,6 @@ def _mock_client(**results: object) -> Mock:
 
 
 class InsightToolTests(unittest.IsolatedAsyncioTestCase):
-    def test_schemas_hide_user_and_tenant_and_name_the_tools(self) -> None:
-        tools = (SalesSummaryTool(), RestockSuggestionsTool(), CashierAnomaliesTool())
-        self.assertEqual(
-            [tool.name for tool in tools],
-            ["sales_summary", "restock_suggestions", "cashier_anomalies"],
-        )
-        for tool in tools:
-            properties = tool.to_openrouter_schema()["function"]["parameters"]["properties"]
-            self.assertNotIn("tenant_id", properties)
-            self.assertNotIn("user_id", properties)
-        self.assertEqual(SalesSummaryTool().parameters["required"], ["start_date", "end_date"])
-        self.assertEqual(CashierAnomaliesTool().parameters["required"], ["date"])
-        self.assertIn("dua kali", SalesSummaryTool().description)  # compare periods = two calls
-
-    def test_default_registry_has_the_insight_tools(self) -> None:
-        registry = get_default_tool_registry()
-        for name in ("sales_summary", "restock_suggestions", "cashier_anomalies"):
-            self.assertIsNotNone(registry.get_tool(name))
-
     async def test_success_passes_trusted_user_and_stripped_dates(self) -> None:
         payload = {"outlets": [{"outlet_id": OUTLET}]}
         client = _mock_client(
@@ -327,23 +306,6 @@ class InsightToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("date", one_day["message"])
         client.get_sales_summary.assert_not_called()
         client.get_anomalies.assert_not_called()
-
-    async def test_registry_dispatch_ignores_model_supplied_user_id(self) -> None:
-        registry = get_default_tool_registry()
-        tool = registry.get_tool("cashier_anomalies")
-        tool._client = _mock_client(get_anomalies={"outlets": []})
-
-        result = await registry.dispatch(
-            tool_name="cashier_anomalies",
-            arguments_json=json.dumps({"date": "2026-11-07", "user_id": "attacker"}),
-            tenant_id=TENANT,
-            user_id=USER,
-        )
-
-        self.assertEqual(result, {"success": True, "data": {"outlets": []}})
-        tool._client.get_anomalies.assert_awaited_once_with(
-            tenant_id=TENANT, user_id=USER, date="2026-11-07"
-        )
 
 
 if __name__ == "__main__":

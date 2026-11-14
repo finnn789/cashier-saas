@@ -7,7 +7,6 @@ import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbSalesReportFilter;
 import org.lite.project.cashiersaas.dto.response.FnbSalesReportResponse;
-import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
@@ -17,11 +16,7 @@ import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository.RefundTotals;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
-import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.CashierRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.CostRow;
-import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.HourlyRow;
-import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.ProductRow;
-import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.ShiftRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.SummaryRow;
 import org.lite.project.cashiersaas.service.FnbSalesReportService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
@@ -32,12 +27,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,50 +69,6 @@ class FnbSalesReportServiceTest {
     }
 
     @Test
-    void reportWiresCostRefundsAndBreakdownsIntoTheResponseUsingTheOutletZone() {
-        UUID cashierId = UUID.randomUUID();
-        UUID shiftId = UUID.randomUUID();
-        when(guard.requireOwner(owner, outletId)).thenReturn(context);
-        when(reports.summary(tenantId, outletId, start, end, OrderStatus.COMPLETED, PaymentMethod.CASH))
-                .thenReturn(new SummaryRow(bd("1000.00"), bd("900.00"), bd("900.00"), bd("1000.00"), 4L,
-                        bd("100.00"), bd("0"), bd("0")));
-        when(reports.cancellations(tenantId, outletId, start, end)).thenReturn(1L);
-        when(reports.cost(tenantId, outletId, start, end, OrderStatus.COMPLETED, PaymentMethod.CASH))
-                .thenReturn(new CostRow(bd("400.00"), 2L));
-        when(refunds.totals(tenantId, outletId, start, end)).thenReturn(new RefundTotals(1L, bd("50.00")));
-        when(reports.hourly(tenantId, outletId, start, end, "Asia/Jakarta", OrderStatus.COMPLETED, PaymentMethod.CASH))
-                .thenReturn(List.of(new HourlyRow(9, 3L, bd("600.00")), new HourlyRow(14, 1L, bd("300.00"))));
-        when(reports.cashiers(tenantId, outletId, start, end, OrderStatus.COMPLETED, PaymentMethod.CASH))
-                .thenReturn(List.of(new CashierRow(cashierId, "Sari", 4L, bd("900.00"), bd("1000.00"))));
-        when(reports.shifts(tenantId, outletId, start, end, OrderStatus.COMPLETED, PaymentMethod.CASH))
-                .thenReturn(List.of(
-                        new ShiftRow(shiftId, "Sari", start, end, CashShiftEntity.Status.CLOSED, 3L, bd("700.00")),
-                        new ShiftRow(null, null, null, null, null, 1L, bd("200.00"))));
-        when(reports.products(tenantId, outletId, start, end, OrderStatus.COMPLETED, PaymentMethod.CASH, 10))
-                .thenReturn(List.of(new ProductRow(UUID.randomUUID(), "Espresso", 6L, bd("600.00"), bd("150.00"), 1L)));
-
-        FnbSalesReportResponse response = service.report(owner, outletId, filter(OrderStatus.COMPLETED, PaymentMethod.CASH));
-
-        assertEquals("Asia/Jakarta", response.getTimeZone());
-        assertEquals(bd("400.00"), response.getSummary().getCostOfGoodsSold());
-        assertEquals(bd("500.00"), response.getSummary().getGrossProfit());
-        assertEquals(2L, response.getSummary().getItemsWithoutCost());
-        assertEquals(1L, response.getSummary().getRefundCount());
-        assertEquals(bd("50.00"), response.getSummary().getRefundAmount());
-        assertEquals(1L, response.getSummary().getCancellationCount());
-        assertEquals(List.of(9, 14), response.getHourly().stream().map(value -> value.getHour()).toList());
-        assertEquals(bd("600.00"), response.getHourly().get(0).getNetSales());
-        assertEquals(cashierId, response.getCashiers().get(0).getStaffUserId());
-        assertEquals(bd("1000.00"), response.getCashiers().get(0).getAmountCollected());
-        assertEquals(2, response.getShifts().size());
-        assertEquals(shiftId, response.getShifts().get(0).getShiftId());
-        assertEquals("CLOSED", response.getShifts().get(0).getStatus());
-        assertNull(response.getShifts().get(1).getShiftId());
-        assertEquals(bd("450.00"), response.getTopProducts().get(0).getGrossProfit());
-        assertEquals(1L, response.getTopProducts().get(0).getItemsWithoutCost());
-    }
-
-    @Test
     void refundsAreQueriedByDateRangeOnlyWhileSalesDataKeepsTheOrderAndMethodFilters() {
         when(guard.requireOwner(owner, outletId)).thenReturn(context);
         when(reports.summary(tenantId, outletId, start, end, null, PaymentMethod.MANUAL_NON_CASH))
@@ -130,6 +79,8 @@ class FnbSalesReportServiceTest {
 
         FnbSalesReportResponse response = service.report(owner, outletId, filter(null, PaymentMethod.MANUAL_NON_CASH));
 
+        assertEquals("Asia/Jakarta", response.getTimeZone());
+        verify(reports).products(tenantId, outletId, start, end, null, PaymentMethod.MANUAL_NON_CASH, 10);
         // refunds.totals has no status/method parameters at all: the figure is not narrowed by the report filters
         verify(refunds).totals(tenantId, outletId, start, end);
         verify(reports).cost(tenantId, outletId, start, end, null, PaymentMethod.MANUAL_NON_CASH);

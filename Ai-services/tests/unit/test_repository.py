@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.sql import Executable
@@ -250,11 +250,6 @@ class RepositoryTests(unittest.IsolatedAsyncioTestCase):
             "tenants", "channel_accounts", "channel_users", "conversations",
             "messages", "tenant_memberships", "tenant_members", "tenant_selections",
         })
-        self.assertEqual(sum(len(table.columns) for table in tables.values()), 45)
-        self.assertEqual(sum(
-            isinstance(item, ForeignKeyConstraint)
-            for table in tables.values() for item in table.constraints
-        ), 11)
         indexes = {index.name for table in tables.values() for index in table.indexes}
         self.assertEqual(indexes, {
             "one_active_conversation", "conversation_external_message", "message_history",

@@ -129,7 +129,7 @@ class SetupTests(unittest.TestCase):
         self.root.handlers = self.saved_handlers
         self.root.setLevel(self.saved_level)
 
-    def test_setup_is_idempotent(self) -> None:
+    def test_setup_is_idempotent_and_reconfigure_does_not_duplicate_handlers(self) -> None:
         settings = LoggingSettings()
         setup_logging(settings)
         count = len(self.root.handlers)
@@ -138,7 +138,6 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(len(self.root.handlers), count)
         self.assertEqual(count, len(self.saved_handlers) + 1)
 
-    def test_reconfigure_does_not_duplicate_handlers(self) -> None:
         setup_logging(LoggingSettings(level="INFO"))
         count = len(self.root.handlers)
         setup_logging(LoggingSettings(level="DEBUG"))
@@ -167,23 +166,22 @@ class SetupTests(unittest.TestCase):
 
 
 class SettingsTests(unittest.TestCase):
-    def test_invalid_level_falls_back_to_info(self) -> None:
-        self.assertEqual(load_logging_settings({"LOG_LEVEL": "loud"}).level, "INFO")
-        self.assertEqual(load_logging_settings({"LOG_LEVEL": "debug"}).level, "DEBUG")
-
-    def test_defaults_and_bad_numbers(self) -> None:
-        settings = load_logging_settings(
-            {"LOG_MAX_BYTES": "abc", "LOG_BACKUP_COUNT": "-1", "LOG_FORMAT": "xml"}
-        )
-        self.assertEqual(settings.log_format, "json")
-        self.assertFalse(settings.file_enabled)
-        self.assertEqual(settings.log_dir, Path("logs"))
-        self.assertEqual(settings.max_bytes, 10485760)
-        self.assertEqual(settings.backup_count, 5)
-
-    def test_file_enabled_flag(self) -> None:
-        self.assertTrue(load_logging_settings({"LOG_FILE_ENABLED": "true"}).file_enabled)
-        self.assertFalse(load_logging_settings({"LOG_FILE_ENABLED": "nope"}).file_enabled)
+    def test_settings_parsing(self) -> None:
+        with self.subTest("invalid level falls back to info"):
+            self.assertEqual(load_logging_settings({"LOG_LEVEL": "loud"}).level, "INFO")
+            self.assertEqual(load_logging_settings({"LOG_LEVEL": "debug"}).level, "DEBUG")
+        with self.subTest("defaults and bad numbers"):
+            settings = load_logging_settings(
+                {"LOG_MAX_BYTES": "abc", "LOG_BACKUP_COUNT": "-1", "LOG_FORMAT": "xml"}
+            )
+            self.assertEqual(settings.log_format, "json")
+            self.assertFalse(settings.file_enabled)
+            self.assertEqual(settings.log_dir, Path("logs"))
+            self.assertEqual(settings.max_bytes, 10485760)
+            self.assertEqual(settings.backup_count, 5)
+        with self.subTest("file enabled flag"):
+            self.assertTrue(load_logging_settings({"LOG_FILE_ENABLED": "true"}).file_enabled)
+            self.assertFalse(load_logging_settings({"LOG_FILE_ENABLED": "nope"}).file_enabled)
 
 
 if __name__ == "__main__":

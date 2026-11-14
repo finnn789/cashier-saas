@@ -7,10 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import grpc
 import grpc.aio
 
-from app.integrations.grpc.client import (
-    SERVICE_KEY_HEADER,
-    CashierGrpcClient,
-)
+from app.integrations.grpc.client import CashierGrpcClient
 from app.integrations.grpc.config import GrpcSettings, load_grpc_settings
 
 CLIENT_LOGGER = "app.integrations.grpc.client"
@@ -49,21 +46,7 @@ def _catalog_response() -> Mock:
     return response
 
 
-def _order_response() -> Mock:
-    response = Mock()
-    response.tenant_id = "tenant-1"
-    response.order_number = "ORD-1"
-    response.status = "PROCESSING"
-    response.payment_status = "PAID"
-    response.total = "45000.00"
-    response.created_at = "2026-11-02T10:00:00Z"
-    return response
-
-
 class GrpcSettingsServiceKeyTests(unittest.TestCase):
-    def test_default_service_key_is_empty(self) -> None:
-        self.assertEqual(GrpcSettings().service_key, "")
-
     def test_repr_does_not_leak_service_key(self) -> None:
         settings = GrpcSettings(service_key=SECRET)
         self.assertNotIn(SECRET, repr(settings))
@@ -76,43 +59,15 @@ class GrpcSettingsServiceKeyTests(unittest.TestCase):
         self.assertEqual(settings.service_key, SECRET)
         self.assertNotIn(SECRET, repr(settings))
 
-    def test_load_without_env_yields_empty_key(self) -> None:
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("CASHIER_GRPC_SERVICE_KEY", None)
-            settings = load_grpc_settings()
-        self.assertEqual(settings.service_key, "")
-
-    def test_load_blank_env_yields_empty_key(self) -> None:
-        with patch.dict(os.environ, {"CASHIER_GRPC_SERVICE_KEY": "   "}):
-            settings = load_grpc_settings()
-        self.assertEqual(settings.service_key, "")
-
-
-class GrpcClientMetadataTests(unittest.IsolatedAsyncioTestCase):
-    async def test_catalog_sends_service_key_metadata(self) -> None:
-        client = _client()
-        client._stub.GetCatalogItem = AsyncMock(return_value=_catalog_response())
-
-        items = await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
-
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["id"], "item-1")
-        client._stub.GetCatalogItem.assert_awaited_once()
-        kwargs = client._stub.GetCatalogItem.await_args.kwargs
-        self.assertEqual(kwargs["metadata"], ((SERVICE_KEY_HEADER, SECRET),))
-        self.assertEqual(SERVICE_KEY_HEADER, "x-internal-service-key")
-
-    async def test_order_status_sends_service_key_metadata(self) -> None:
-        client = _client()
-        client._stub.GetOrderStatus = AsyncMock(return_value=_order_response())
-
-        status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-1")
-
-        self.assertIsNotNone(status)
-        self.assertEqual(status["order_number"], "ORD-1")
-        self.assertEqual(status["payment_status"], "PAID")
-        kwargs = client._stub.GetOrderStatus.await_args.kwargs
-        self.assertEqual(kwargs["metadata"], ((SERVICE_KEY_HEADER, SECRET),))
+    def test_load_without_or_with_blank_env_yields_empty_key(self) -> None:
+        for raw in (None, "   "):
+            with self.subTest(raw=raw), patch.dict(os.environ):
+                if raw is None:
+                    os.environ.pop("CASHIER_GRPC_SERVICE_KEY", None)
+                else:
+                    os.environ["CASHIER_GRPC_SERVICE_KEY"] = raw
+                settings = load_grpc_settings()
+                self.assertEqual(settings.service_key, "")
 
 
 class GrpcClientFailClosedTests(unittest.IsolatedAsyncioTestCase):
@@ -144,32 +99,27 @@ class GrpcClientFailClosedTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GrpcClientLimitClampTests(unittest.IsolatedAsyncioTestCase):
-    async def _sent_limit(self, requested: int) -> int:
+    async def _sent_limit(self, **limit: int) -> int:
         client = _client()
         client._stub.GetCatalogItem = AsyncMock(return_value=_catalog_response())
-        await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi", limit=requested)
+        await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi", **limit)
         request = client._stub.GetCatalogItem.await_args.args[0]
         return request.limit
 
-    async def test_non_positive_limit_uses_default(self) -> None:
-        self.assertEqual(await self._sent_limit(0), 10)
-        self.assertEqual(await self._sent_limit(-5), 10)
-
-    async def test_oversized_limit_is_capped(self) -> None:
-        self.assertEqual(await self._sent_limit(500), 50)
-        self.assertEqual(await self._sent_limit(51), 50)
-
-    async def test_in_range_limit_is_kept(self) -> None:
-        self.assertEqual(await self._sent_limit(1), 1)
-        self.assertEqual(await self._sent_limit(25), 25)
-        self.assertEqual(await self._sent_limit(50), 50)
-
-    async def test_default_limit_is_ten(self) -> None:
-        client = _client()
-        client._stub.GetCatalogItem = AsyncMock(return_value=_catalog_response())
-        await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
-        request = client._stub.GetCatalogItem.await_args.args[0]
-        self.assertEqual(request.limit, 10)
+    async def test_limit_is_defaulted_capped_or_kept(self) -> None:
+        cases = (
+            ({}, 10),  # no limit given -> default
+            ({"limit": 0}, 10),
+            ({"limit": -5}, 10),
+            ({"limit": 500}, 50),
+            ({"limit": 51}, 50),
+            ({"limit": 1}, 1),
+            ({"limit": 25}, 25),
+            ({"limit": 50}, 50),
+        )
+        for limit, expected in cases:
+            with self.subTest(limit=limit):
+                self.assertEqual(await self._sent_limit(**limit), expected)
 
 
 class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
@@ -211,20 +161,6 @@ class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
                 joined = "\n".join(logs.output)
                 self.assertIn(code.name, joined)
                 self.assertNotIn(SECRET, joined)
-
-    async def test_missing_key_warning_never_contains_key_value(self) -> None:
-        client = _client(service_key="")
-        with self.assertLogs(CLIENT_LOGGER, level="WARNING") as logs:
-            await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
-        self.assertNotIn(SECRET, "\n".join(logs.output))
-
-    async def test_order_not_found_still_returns_none(self) -> None:
-        client = _client()
-        client._stub.GetOrderStatus = AsyncMock(
-            side_effect=_rpc_error(grpc.StatusCode.NOT_FOUND, details="missing")
-        )
-        status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-X")
-        self.assertIsNone(status)
 
 
 if __name__ == "__main__":

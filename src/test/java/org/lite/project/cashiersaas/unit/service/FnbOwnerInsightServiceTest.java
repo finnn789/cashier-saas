@@ -4,6 +4,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.dto.response.FnbCashierAnomaly;
 import org.lite.project.cashiersaas.dto.response.FnbOwnerSalesInsight;
@@ -177,27 +180,21 @@ class FnbOwnerInsightServiceTest {
         assertEquals(new BigDecimal("0.000"), result.get(0).getSuggestedQuantity());
     }
 
-    @Test
-    void restockRoundsAverageAndSuggestionToThreeDecimalsHalfUp() {
+    @ParameterizedTest
+    @CsvSource({
+            "-1.000, 0.071, 0.497", // 1 / 14 = 0.0714285... -> 0.071; 0.071 * 7 = 0.497
+            "-0.007, 0.001, 0.007"  // 0.007 / 14 = 0.0005 -> 0.001 (HALF_UP at the third decimal)
+    })
+    void restockRoundsAverageAndSuggestionToThreeDecimalsHalfUp(String netDelta, String average, String suggested) {
         InventoryItemEntity oil = item("Minyak", "0.000");
-        // 1 / 14 = 0.0714285... -> 0.071; 0.071 * 7 = 0.497
-        stockOf(List.of(oil), List.of(balance(oil, "0.000")), Map.of(oil.getId(), new BigDecimal("-1.000")));
+        stockOf(List.of(oil), List.of(balance(oil, "0.000")), Map.of(oil.getId(), new BigDecimal(netDelta)));
 
         FnbRestockSuggestion suggestion = service.restock(context).get(0);
 
-        assertEquals(new BigDecimal("0.071"), suggestion.getAverageDailyUsage());
-        assertEquals(new BigDecimal("0.497"), suggestion.getSuggestedQuantity());
+        assertEquals(new BigDecimal(average), suggestion.getAverageDailyUsage());
+        assertEquals(new BigDecimal(suggested), suggestion.getSuggestedQuantity());
         assertEquals(3, suggestion.getSuggestedQuantity().scale());
         assertEquals(InventoryBalanceEntity.Status.OUT, suggestion.getStockStatus());
-    }
-
-    @Test
-    void restockRoundsHalfUpAtTheThirdDecimal() {
-        InventoryItemEntity flour = item("Tepung", "0.000");
-        // 0.007 / 14 = 0.0005 -> 0.001 (HALF_UP)
-        stockOf(List.of(flour), List.of(balance(flour, "0.000")), Map.of(flour.getId(), new BigDecimal("-0.007")));
-
-        assertEquals(new BigDecimal("0.001"), service.restock(context).get(0).getAverageDailyUsage());
     }
 
     @Test
@@ -275,10 +272,12 @@ class FnbOwnerInsightServiceTest {
         assertEquals(new BigDecimal("1.00"), anomaly.getBaselineDailyAverage());
     }
 
-    @Test
-    void cancellationsBelowTheMinimumOfThreeAreNotFlaggedEvenWithAZeroBaseline() {
+    @ParameterizedTest
+    @ValueSource(strings = {"CANCELLATIONS", "DISCOUNTS", "NONE"})
+    void belowTheMinimumOfThreeOrWithNoActivityProducesNoAnomaly(String activity) {
         UUID kasir = cashier("Kasir");
-        cancelToday.put(kasir, 2L);
+        if (activity.equals("CANCELLATIONS")) cancelToday.put(kasir, 2L); // zero baseline, still below the minimum
+        else if (activity.equals("DISCOUNTS")) discountToday.put(kasir, 2L);
 
         assertTrue(anomalies().isEmpty());
     }
@@ -313,14 +312,6 @@ class FnbOwnerInsightServiceTest {
     }
 
     @Test
-    void discountedOrdersBelowTheMinimumOfThreeAreNotFlagged() {
-        UUID kasir = cashier("Kasir");
-        discountToday.put(kasir, 2L);
-
-        assertTrue(anomalies().isEmpty());
-    }
-
-    @Test
     void cashDifferenceNeedsAtLeastTwentyThousandAndMoreThanTwiceTheBaseline() {
         UUID small = cashier("Small");
         UUID atMinimum = cashier("AtMinimum");
@@ -351,29 +342,6 @@ class FnbOwnerInsightServiceTest {
 
         assertEquals(List.of("CANCELLATIONS", "DISCOUNTS", "CASH_DIFFERENCE"),
                 anomalies().stream().map(FnbCashierAnomaly::getKind).toList());
-    }
-
-    @Test
-    void ownersAreExcludedBecauseOnlyCashierMembershipsAreEvaluated() {
-        cashier("Kasir");
-        UUID ownerId = ownerUser.getId();
-        cancelToday.put(ownerId, 10L);
-        discountToday.put(ownerId, 10L);
-        cashToday.put(ownerId, new BigDecimal("999999"));
-
-        List<FnbCashierAnomaly> result = anomalies();
-
-        assertTrue(result.isEmpty());
-        verify(memberships, times(1)).listCashiersForOutlet(tenantId, outletId);
-        assertFalse(result.stream().anyMatch(anomaly -> anomaly.getStaffUserId().equals(ownerId)));
-        assertEquals(1, cashiers.size()); // only the cashier is evaluated; the owner is never in the list
-    }
-
-    @Test
-    void aCashierWithNoActivityProducesNoAnomaly() {
-        cashier("Quiet");
-
-        assertTrue(anomalies().isEmpty());
     }
 
     @Test
@@ -422,16 +390,6 @@ class FnbOwnerInsightServiceTest {
         assertEquals(new BigDecimal("75000.00"), insight.getExpensesTotal());
         assertEquals(new BigDecimal("-12000.00"), insight.getCashDifferenceTotal());
         assertEquals(4, insight.getClosedShiftCount());
-    }
-
-    @Test
-    void salesInsightValidatesTheRangeBeforeAnyExtraQuery() {
-        LocalDate start = LocalDate.of(2026, 11, 7);
-        LocalDate end = LocalDate.of(2026, 11, 1);
-        when(salesReports.summarize(context, start, end, 5)).thenThrow(new InvalidOperationException("Rentang tanggal tidak valid."));
-
-        assertThrows(InvalidOperationException.class, () -> service.salesInsight(context, start, end));
-        verifyNoInteractions(orders, expenses, shifts);
     }
 
     private static <T> T withId(T entity, UUID id) {

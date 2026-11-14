@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
 import org.lite.project.cashiersaas.grpc.mapper.GrpcCatalogMapper;
@@ -106,27 +107,12 @@ class CashierGrpcHandlerRejectionTest {
         return ex;
     }
 
+    // An empty tenant and query is the proto default instance, i.e. the missing-field case.
     @ParameterizedTest
-    @ValueSource(strings = {"", "   "})
-    void catalogRejectsBlankTenant(String tenantId) {
+    @CsvSource(value = {"'',''", "'   ',''", "not-a-uuid,latte"})
+    void catalogRejectsBlankMissingOrInvalidTenant(String tenantId, String query) {
         catalogHandler.getCatalogItem(
-                GetCatalogItemRequest.newBuilder().setTenantId(tenantId).build(), catalogObserver);
-
-        catalogRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
-    @Test
-    void catalogRejectsMissingTenantField() {
-        catalogHandler.getCatalogItem(GetCatalogItemRequest.getDefaultInstance(), catalogObserver);
-
-        catalogRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
-    @Test
-    void catalogRejectsInvalidTenantUuid() {
-        catalogHandler.getCatalogItem(
-                GetCatalogItemRequest.newBuilder().setTenantId("not-a-uuid").setQuery("latte").build(),
-                catalogObserver);
+                GetCatalogItemRequest.newBuilder().setTenantId(tenantId).setQuery(query).build(), catalogObserver);
 
         catalogRejected(Status.Code.INVALID_ARGUMENT);
     }
@@ -194,17 +180,11 @@ class CashierGrpcHandlerRejectionTest {
 
         orderRejected(Status.Code.INVALID_ARGUMENT);
     }
-    @Test
-    void catalogRejectsMissingUserForAllowedTenant() {
-        catalogHandler.getCatalogItem(GetCatalogItemRequest.newBuilder().setTenantId(ALLOWED).build(), catalogObserver);
-
-        catalogRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
-    @Test
-    void catalogRejectsInvalidUserUuid() {
+    @ParameterizedTest
+    @ValueSource(strings = {"", "nope"})
+    void catalogRejectsMissingOrInvalidUserForAllowedTenant(String userId) {
         catalogHandler.getCatalogItem(
-                GetCatalogItemRequest.newBuilder().setTenantId(ALLOWED).setUserId("nope").build(), catalogObserver);
+                GetCatalogItemRequest.newBuilder().setTenantId(ALLOWED).setUserId(userId).build(), catalogObserver);
 
         catalogRejected(Status.Code.INVALID_ARGUMENT);
     }

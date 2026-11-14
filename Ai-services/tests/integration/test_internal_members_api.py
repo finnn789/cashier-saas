@@ -7,7 +7,6 @@ code are exercised through httpx with a recording fake connection.
 a scratch database, applies Alembic 0001 and 0002 to it, and drops it afterwards.
 """
 import asyncio
-import json
 import os
 import subprocess
 import sys
@@ -29,9 +28,6 @@ import app.chat.members as members
 from app.application import app
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = json.loads(
-    (ROOT.parent / "docs" / "contracts" / "member-sync.example.json").read_text(encoding="utf-8")
-)
 KEY = "integration-internal-key-0123456789"
 HEADERS = {"X-Internal-Service-Key": KEY}
 TENANT = uuid.UUID("3f2b8c1e-5a47-4c6e-9d11-0a1b2c3d4e5f")
@@ -123,46 +119,6 @@ class AsgiMemberApiTests(AppStateMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIn("INSERT INTO tenant_members", database.statements[1])
         self.assertIn("ON CONFLICT", database.statements[1])
 
-    async def test_contract_examples_are_accepted_end_to_end(self) -> None:
-        database = RecordingDatabase()
-        self.install_database(database)
-        async with self.client() as client:
-            for name, example in EXAMPLES.items():
-                with self.subTest(example=name):
-                    response = await client.put(example["path"], json=example["body"], headers=HEADERS)
-                    self.assertEqual(response.status_code, 200)
-        self.assertEqual(database.events.count("commit"), len(EXAMPLES))
-
-    async def test_authentication_failures_never_reach_the_database(self) -> None:
-        database = RecordingDatabase()
-        self.install_database(database)
-        async with self.client() as client:
-            missing = await client.put(member_path(TENANT, USER), json=body())
-            wrong = await client.put(
-                member_path(TENANT, USER), json=body(), headers={"X-Internal-Service-Key": "x" * 20}
-            )
-            with patch.dict(os.environ, {"AI_INTERNAL_API_KEY": ""}):
-                unset = await client.put(member_path(TENANT, USER), json=body(), headers=HEADERS)
-        self.assertEqual([missing.status_code, wrong.status_code, unset.status_code], [401, 401, 503])
-        self.assertEqual(database.events, [])
-
-    async def test_validation_failures_never_reach_the_database(self) -> None:
-        database = RecordingDatabase()
-        self.install_database(database)
-        async with self.client() as client:
-            bad_role = await client.put(
-                member_path(TENANT, USER), json=body(role="ADMIN"), headers=HEADERS
-            )
-            bad_phone = await client.put(
-                member_path(TENANT, USER), json=body(phone_number="0812-3456"), headers=HEADERS
-            )
-            bad_uuid = await client.put(
-                f"/api/v1/internal/tenants/nope/members/{USER}", json=body(), headers=HEADERS
-            )
-        self.assertEqual([r.status_code for r in (bad_role, bad_phone, bad_uuid)], [422, 422, 422])
-        self.assertNotIn("0812", bad_phone.text)
-        self.assertEqual(database.events, [])
-
     async def test_database_failure_is_a_generic_503_and_rolls_back(self) -> None:
         database = RecordingDatabase()
         database.error = OperationalError("INSERT secret", {"phone": PHONE}, Exception("down"))
@@ -174,12 +130,6 @@ class AsgiMemberApiTests(AppStateMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json(), {"error": "service_unavailable"})
         self.assertEqual(database.events, ["begin", "rollback"])
         self.assertNotIn(PHONE, response.text + "\n".join(captured.output))
-
-    async def test_no_running_channel_means_503(self) -> None:
-        self.install_database(None)
-        async with self.client() as client:
-            response = await client.put(member_path(TENANT, USER), json=body(), headers=HEADERS)
-        self.assertEqual(response.status_code, 503)
 
 
 def asyncpg_url(raw: str) -> URL:

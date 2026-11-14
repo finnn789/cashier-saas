@@ -125,22 +125,21 @@ class TenantIntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(markup, ReplyKeyboardRemove)
 
     async def test_foreign_contact_is_rejected_without_any_lookup(self) -> None:
-        for contact in (own_contact(user_id=USER_ID + 1), own_contact(user_id=None)):
-            with self.subTest(contact_user=contact.get("user_id")):
+        cases = (
+            {"contact": own_contact(user_id=USER_ID + 1)},
+            {"contact": own_contact(user_id=None)},
+            {"contact": own_contact(), "forwarded": True},
+        )
+        for kwargs in cases:
+            with self.subTest(contact_user=kwargs["contact"].get("user_id"), forwarded=kwargs.get("forwarded", False)):
                 self.sender.send.reset_mock()
-                await self.intake.process(message(contact=contact))
+                await self.intake.process(message(**kwargs))
                 [(text, markup)] = self.sent()
                 self.assertEqual(text, handlers.CONTACT_REJECTED)
                 self.assert_contact_keyboard(markup)
         self.chat.verify_contact.assert_not_awaited()
         self.chat.identify.assert_not_awaited()
         self.chat.handle.assert_not_awaited()
-
-    async def test_forwarded_own_contact_is_rejected(self) -> None:
-        await self.intake.process(message(contact=own_contact(), forwarded=True))
-        self.chat.verify_contact.assert_not_awaited()
-        [(text, _)] = self.sent()
-        self.assertEqual(text, handlers.CONTACT_REJECTED)
 
     async def test_typed_phone_number_is_ignored_for_verification(self) -> None:
         for typed in ("0812-3456-7890", "+6281234567890", "nomor saya 081234567890"):
@@ -233,7 +232,7 @@ class TenantIntakeTests(unittest.IsolatedAsyncioTestCase):
 
     # --- per-message tenant resolution ---------------------------------------------------
 
-    async def test_every_message_uses_the_tenant_resolved_for_it(self) -> None:
+    async def test_every_message_uses_the_tenant_resolved_for_it_including_the_fallback(self) -> None:
         self.chat.identify.side_effect = [
             Identity(VERIFIED, TENANT_A, "CASHIER", OPTIONS),
             Identity(VERIFIED, TENANT_B, "OWNERMERCHANT", OPTIONS),
@@ -245,10 +244,11 @@ class TenantIntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.chat.identify.await_count, 2)
         self.assertEqual([text for text, _ in self.sent()], ["jawaban", "jawaban"])
 
-    async def test_development_fallback_tenant_reaches_chat(self) -> None:
+        # development fallback tenant reaches chat
         fallback = uuid4()
+        self.chat.identify.side_effect = None
         self.chat.identify.return_value = Identity(FALLBACK, fallback)
-        await self.intake.process(message("halo"))
+        await self.intake.process(message("halo", message_id=3))
         self.assertEqual(self.chat.handle.await_args.kwargs["tenant_id"], fallback)
 
 

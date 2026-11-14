@@ -145,7 +145,7 @@ class DailySummaryEndpointTests(unittest.TestCase):
 
     # --- auth and validation -------------------------------------------------
 
-    def test_missing_or_wrong_key_is_401_and_nothing_runs(self) -> None:
+    def test_key_and_validation_precede_channel_state_and_nothing_runs(self) -> None:
         for headers in ({}, {"X-Internal-Service-Key": KEY[:-1] + "x"}, {"X-Internal-Service-Key": KEY[:-1]}):
             response = self.post(headers=headers)
             self.assertEqual(response.status_code, 401)
@@ -154,15 +154,9 @@ class DailySummaryEndpointTests(unittest.TestCase):
         self.assertEqual(self.grpc.calls, [])
         self.assertEqual(self.channel.sent, [])
 
-    def test_unset_key_is_503_even_with_a_header(self) -> None:
-        self.settings = InternalApiSettings("")
-        self.assertEqual(self.post().status_code, 503)
-        self.assertEqual(self.post(headers={}).status_code, 503)
-        self.recipients.assert_not_awaited()
-
-    def test_key_is_checked_before_channel_state(self) -> None:
         self.channel.is_ready = False
-        self.assertEqual(self.post(headers={}).status_code, 401)
+        self.assertEqual(self.post(headers={}).status_code, 401)  # key before channel state
+        self.assertEqual(self.post({"tenant_id": "x"}).status_code, 422)  # validation before channel state
 
     def test_invalid_body_is_422_with_field_names_only(self) -> None:
         cases = {
@@ -185,10 +179,6 @@ class DailySummaryEndpointTests(unittest.TestCase):
         self.assertEqual(oversized.status_code, 422)
         self.assertEqual(oversized.json(), {"error": "validation_error", "fields": ["body"]})
         self.recipients.assert_not_awaited()
-
-    def test_validation_runs_before_channel_check(self) -> None:
-        self.channel.is_ready = False
-        self.assertEqual(self.post({"tenant_id": "x"}).status_code, 422)
 
     # --- 503 -----------------------------------------------------------------
 
@@ -261,12 +251,6 @@ class DailySummaryEndpointTests(unittest.TestCase):
         self.assertIn("Kasir Senja", text)
         for foreign in ("Kedai Lain", "Gula Lain", "Kasir Lain"):
             self.assertNotIn(foreign, text)
-
-    def test_missing_restock_and_anomaly_sections_still_send_the_summary(self) -> None:
-        self.assertEqual(self.post().json(), {"delivered": 1, "skipped": 0})
-        text = self.channel.sent[0][1]
-        self.assertNotIn("Stok perlu perhatian", text)
-        self.assertNotIn("Perlu dicek", text)
 
     def test_recipient_without_the_outlet_or_without_data_is_skipped(self) -> None:
         owner_c = UUID("7a9d4e21-8b3c-4f60-a512-9e8d7c6b5a42")

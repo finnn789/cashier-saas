@@ -2,6 +2,8 @@ package org.lite.project.cashiersaas.unit.service;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.lite.project.cashiersaas.component.MemberSyncRequestedEvent;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
@@ -43,9 +45,10 @@ class MemberSyncPublisherTest {
         return user;
     }
 
-    @Test
-    void publishesTheContractFieldsFromTheEntities() {
-        publisher.memberChanged(tenant(), user("6281234567890"), Role.OWNERMERCHANT, "ACTIVE");
+    @ParameterizedTest
+    @CsvSource({"OWNERMERCHANT, ACTIVE", "CASHIER, DISABLED"})
+    void publishesTheContractFieldsFromTheEntitiesAndCarriesTheStatus(Role role, String status) {
+        publisher.memberChanged(tenant(), user("6281234567890"), role, status);
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(events).publishEvent(captor.capture());
@@ -55,17 +58,8 @@ class MemberSyncPublisherTest {
         assertEquals(userId, event.getUserId());
         assertEquals("Budi Santoso", event.getFullName());
         assertEquals("6281234567890", event.getPhoneNumber());
-        assertEquals(Role.OWNERMERCHANT, event.getRole());
-        assertEquals("ACTIVE", event.getStatus());
-    }
-
-    @Test
-    void carriesTheDisabledStatus() {
-        publisher.memberChanged(tenant(), user("6281234567890"), Role.CASHIER, "DISABLED");
-
-        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(events).publishEvent(captor.capture());
-        assertEquals("DISABLED", assertInstanceOf(MemberSyncRequestedEvent.class, captor.getValue()).getStatus());
+        assertEquals(role, event.getRole());
+        assertEquals(status, event.getStatus());
     }
 
     @Test

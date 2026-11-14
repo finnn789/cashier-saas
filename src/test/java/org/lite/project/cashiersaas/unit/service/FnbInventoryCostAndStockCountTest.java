@@ -3,6 +3,8 @@ package org.lite.project.cashiersaas.unit.service;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbStockCountLineRequest;
@@ -85,37 +87,32 @@ class FnbInventoryCostAndStockCountTest {
 
     // ---------------------------------------------------------------- restock price and moving average
 
-    @Test
-    void restockWithPriceBlendsTheAverageAndRecordsTheEnteredPriceOnTheMovement() {
+    @ParameterizedTest
+    @CsvSource({"false,7.5000,6.2500,7.5", "true,7,6.0000,7"})
+    void pricedRestockBlendsTheAverageRecordsTheEnteredPriceAndShowsTheCostToOwnerOnly(
+            boolean asOwner, String price, String expectedAverage, String plainPrice) {
+        TenantPrincipal principal = asOwner ? owner : cashier;
         InventoryItemEntity item = item(itemId, "Susu");
         InventoryBalanceEntity balance = balance(item, "10", "5");
-        stubMovementPath(cashier, cashierContext, item, balance);
+        stubMovementPath(principal, asOwner ? ownerContext : cashierContext, item, balance);
 
-        FnbStockMovementResponse response = service.recordMovement(cashier, outletId, itemId,
-                movement(InventoryMovementEntity.Type.RESTOCK, "10", "7.5000", "Kulakan", "k1"));
+        FnbStockMovementResponse response = service.recordMovement(principal, outletId, itemId,
+                movement(InventoryMovementEntity.Type.RESTOCK, "10", price, "Kulakan", "k1"));
 
-        // (10*5 + 10*7.5) / 20 = 6.25
-        assertEquals(new BigDecimal("6.2500"), balance.getAverageUnitCost());
+        // (10*5 + 10*price) / 20, e.g. 6.25 for 7.5
+        assertEquals(new BigDecimal(expectedAverage), balance.getAverageUnitCost());
         assertDecimal("20", balance.getQuantityOnHand());
         InventoryMovementEntity saved = persistedMovement();
-        assertDecimal("7.5", saved.getUnitCost());
+        assertDecimal(plainPrice, saved.getUnitCost());
         assertEquals(InventoryMovementEntity.Type.RESTOCK, saved.getType());
         assertDecimal("10", saved.getQuantityDelta());
         // trailing zeros of the price are stripped inside the fingerprint
-        assertEquals("fp(RESTOCK|" + itemId + "|10|Kulakan|7.5)", saved.getRequestFingerprint());
-        assertNull(response.getUnitCost(), "a cashier may send a price but never sees costs");
-    }
-
-    @Test
-    void ownerSeesTheMovementUnitCostInTheResponse() {
-        InventoryItemEntity item = item(itemId, "Susu");
-        InventoryBalanceEntity balance = balance(item, "10", "5");
-        stubMovementPath(owner, ownerContext, item, balance);
-
-        FnbStockMovementResponse response = service.recordMovement(owner, outletId, itemId,
-                movement(InventoryMovementEntity.Type.RESTOCK, "10", "7", "Kulakan", "k1"));
-
-        assertDecimal("7", response.getUnitCost());
+        assertEquals("fp(RESTOCK|" + itemId + "|10|Kulakan|" + plainPrice + ")", saved.getRequestFingerprint());
+        if (asOwner) {
+            assertDecimal(plainPrice, response.getUnitCost());
+        } else {
+            assertNull(response.getUnitCost(), "a cashier may send a price but never sees costs");
+        }
     }
 
     @Test
@@ -285,8 +282,10 @@ class FnbInventoryCostAndStockCountTest {
 
     // ---------------------------------------------------------------- stock count
 
-    @Test
-    void stockCountRecordsAnAdjustmentWithReasonKeyFingerprintAndAverageBeforeTheChange() {
+    @ParameterizedTest
+    @CsvSource({"8.000,-2,8", "15,5,15"})
+    void stockCountDeficitOrSurplusRecordsAnAdjustmentWithReasonKeyFingerprintAndAverageBeforeTheChange(
+            String counted, String expectedDifference, String expectedCounted) {
         InventoryItemEntity item = item(idA, "Susu");
         InventoryBalanceEntity balance = balance(item, "10", "3");
         stubCountItem(item, balance);
@@ -294,45 +293,29 @@ class FnbInventoryCostAndStockCountTest {
         stubMovementIds();
         when(guard.requireOwner(owner, outletId)).thenReturn(ownerContext);
 
-        FnbStockCountResponse response = service.stockCount(owner, outletId, count("k1", null, line(idA, "8.000")));
+        FnbStockCountResponse response = service.stockCount(owner, outletId, count("k1", null, line(idA, counted)));
 
         InventoryMovementEntity saved = persistedMovement();
         assertEquals(InventoryMovementEntity.Type.ADJUSTMENT, saved.getType());
-        assertDecimal("-2", saved.getQuantityDelta());
+        assertDecimal(expectedDifference, saved.getQuantityDelta());
         assertEquals("Stok opname", saved.getReason());
         assertEquals("count:fp(k1|" + idA + ")", saved.getIdempotencyKey());
-        assertEquals("fp(" + idA + "=8|)", saved.getRequestFingerprint());
+        assertEquals("fp(" + idA + "=" + expectedCounted + "|)", saved.getRequestFingerprint());
         assertEquals(new BigDecimal("3.0000"), saved.getUnitCost());
         assertEquals(ownerMembershipId, saved.getActorMembershipId());
         assertNull(saved.getOrderId());
-        assertDecimal("8", balance.getQuantityOnHand());
+        assertDecimal(expectedCounted, balance.getQuantityOnHand());
+        // a count never moves the average cost
         assertEquals(new BigDecimal("3.0000"), balance.getAverageUnitCost());
         FnbStockCountLineResponse result = response.getLines().get(0);
         assertEquals(idA, result.getInventoryItemId());
         assertEquals("Susu", result.getName());
         assertEquals("ml", result.getUnit());
         assertDecimal("10", result.getPreviousQuantity());
-        assertDecimal("8", result.getCountedQuantity());
-        assertDecimal("-2", result.getDifference());
+        assertDecimal(expectedCounted, result.getCountedQuantity());
+        assertDecimal(expectedDifference, result.getDifference());
         assertEquals(saved.getId(), result.getMovementId());
         assertNotNull(result.getMovementId());
-    }
-
-    @Test
-    void stockCountSurplusIsAPositiveAdjustmentThatDoesNotChangeTheAverage() {
-        InventoryItemEntity item = item(idA, "Susu");
-        InventoryBalanceEntity balance = balance(item, "10", "3");
-        stubCountItem(item, balance);
-        stubDigest();
-        stubMovementIds();
-        when(guard.requireOwner(owner, outletId)).thenReturn(ownerContext);
-
-        FnbStockCountResponse response = service.stockCount(owner, outletId, count("k1", null, line(idA, "15")));
-
-        assertDecimal("5", persistedMovement().getQuantityDelta());
-        assertDecimal("15", balance.getQuantityOnHand());
-        assertEquals(new BigDecimal("3.0000"), balance.getAverageUnitCost());
-        assertDecimal("5", response.getLines().get(0).getDifference());
     }
 
     @Test

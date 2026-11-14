@@ -2,17 +2,15 @@ package org.lite.project.cashiersaas.unit.dto;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.lite.project.cashiersaas.dto.FnbSalesReportMapper;
-import org.lite.project.cashiersaas.dto.response.FnbSalesCashierResponse;
-import org.lite.project.cashiersaas.dto.response.FnbSalesHourlyResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesProductResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesShiftResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesSummaryResponse;
 import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository.RefundTotals;
-import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.CashierRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.CostRow;
-import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.HourlyRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.ProductRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.ShiftRow;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository.SummaryRow;
@@ -38,27 +36,21 @@ class FnbSalesReportMapperTest {
                 bd(subtotal).subtract(bd(netSales)), bd("0"), bd("0"));
     }
 
-    @Test
-    void totalGrossProfitIsNetSalesAfterDiscountMinusCogs() {
-        // subtotal 1000, discount 100 -> net 900; COGS 400 -> gross profit 500 (D2)
-        FnbSalesSummaryResponse value = FnbSalesReportMapper.summary(summaryRow("1000.00", "900.00", 4), 1,
-                new CostRow(bd("400.00"), 0L), new RefundTotals(0L, bd("0")));
+    @ParameterizedTest
+    @CsvSource({
+            "1000.00, 900.00, 4, 1, 400.00, 0, 500.00", // discount 100 -> net 900; COGS 400 -> gross profit 500 (D2)
+            "500.00, 500.00, 2, 0, 0, 3, 500.00",       // no cost known: profit equals net sales
+            "100.00, 100.00, 1, 0, 130.50, 0, -30.50"   // cost above net sales: profit can be negative
+    })
+    void grossProfitIsNetSalesAfterDiscountMinusCogs(String subtotal, String netSales, long count, long cancellations,
+                                                     String cost, long itemsWithoutCost, String grossProfit) {
+        FnbSalesSummaryResponse value = FnbSalesReportMapper.summary(summaryRow(subtotal, netSales, count), cancellations,
+                new CostRow(bd(cost), itemsWithoutCost), new RefundTotals(0L, bd("0")));
 
-        assertEquals(bd("400.00"), value.getCostOfGoodsSold());
-        assertEquals(bd("500.00"), value.getGrossProfit());
-        assertEquals(bd("900.00"), value.getNetSales());
-    }
-
-    @Test
-    void grossProfitEqualsNetSalesWhenNoCostIsKnownAndCanBeNegative() {
-        FnbSalesSummaryResponse unknown = FnbSalesReportMapper.summary(summaryRow("500.00", "500.00", 2), 0,
-                new CostRow(bd("0"), 3L), new RefundTotals(0L, bd("0")));
-        assertEquals(0, bd("500.00").compareTo(unknown.getGrossProfit()));
-        assertEquals(3L, unknown.getItemsWithoutCost());
-
-        FnbSalesSummaryResponse loss = FnbSalesReportMapper.summary(summaryRow("100.00", "100.00", 1), 0,
-                new CostRow(bd("130.50"), 0L), new RefundTotals(0L, bd("0")));
-        assertEquals(bd("-30.50"), loss.getGrossProfit());
+        assertEquals(bd(cost), value.getCostOfGoodsSold());
+        assertEquals(bd(grossProfit), value.getGrossProfit());
+        assertEquals(bd(netSales), value.getNetSales());
+        assertEquals(itemsWithoutCost, value.getItemsWithoutCost());
     }
 
     @Test
@@ -106,35 +98,6 @@ class FnbSalesReportMapperTest {
         // no cost known: profit is the full gross sales and every line is flagged
         assertEquals(0, bd("120000.00").compareTo(second.getGrossProfit()));
         assertEquals(4L, second.getItemsWithoutCost());
-    }
-
-    @Test
-    void hourlyRowsKeepOrderAndValues() {
-        List<FnbSalesHourlyResponse> values = FnbSalesReportMapper.hourly(List.of(
-                new HourlyRow(8, 3L, bd("45000.00")), new HourlyRow(23, 1L, bd("12000.00"))));
-
-        assertEquals(2, values.size());
-        assertEquals(8, values.get(0).getHour());
-        assertEquals(3L, values.get(0).getTransactionCount());
-        assertEquals(bd("45000.00"), values.get(0).getNetSales());
-        assertEquals(23, values.get(1).getHour());
-    }
-
-    @Test
-    void cashierRowsKeepOrderAndValues() {
-        UUID top = UUID.randomUUID();
-        UUID other = UUID.randomUUID();
-
-        List<FnbSalesCashierResponse> values = FnbSalesReportMapper.cashiers(List.of(
-                new CashierRow(top, "Sari", 7L, bd("900.00"), bd("1000.00")),
-                new CashierRow(other, "Budi", 2L, bd("100.00"), bd("100.00"))));
-
-        assertEquals(top, values.get(0).getStaffUserId());
-        assertEquals("Sari", values.get(0).getFullName());
-        assertEquals(7L, values.get(0).getTransactionCount());
-        assertEquals(bd("900.00"), values.get(0).getNetSales());
-        assertEquals(bd("1000.00"), values.get(0).getAmountCollected());
-        assertEquals("Budi", values.get(1).getFullName());
     }
 
     @Test

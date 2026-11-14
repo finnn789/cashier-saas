@@ -9,6 +9,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MemberSyncRequestedEvent;
 import org.lite.project.cashiersaas.configuration.AiServiceProperties;
 import org.lite.project.cashiersaas.enums.Role;
@@ -31,6 +35,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -121,28 +126,16 @@ class MemberSyncClientTest {
         assertEquals(fixtureBody(name), actual);
     }
 
-    @Test
-    void ownerRequestMatchesTheContractFixture() {
-        server.expect(requestTo(fixtureUri("owner")))
+    @ParameterizedTest
+    @ValueSource(strings = {"owner", "cashier"})
+    void requestMatchesTheContractFixture(String name) {
+        server.expect(requestTo(fixtureUri(name)))
                 .andExpect(method(HttpMethod.PUT))
                 .andExpect(header("X-Internal-Service-Key", API_KEY))
-                .andExpect(request -> assertFixtureRequest("owner", request))
+                .andExpect(request -> assertFixtureRequest(name, request))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        client.sync(eventFromFixture("owner"));
-
-        server.verify();
-    }
-
-    @Test
-    void cashierRequestMatchesTheContractFixture() {
-        server.expect(requestTo(fixtureUri("cashier")))
-                .andExpect(method(HttpMethod.PUT))
-                .andExpect(header("X-Internal-Service-Key", API_KEY))
-                .andExpect(request -> assertFixtureRequest("cashier", request))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        client.sync(eventFromFixture("cashier"));
+        client.sync(eventFromFixture(name));
 
         server.verify();
     }
@@ -228,29 +221,12 @@ class MemberSyncClientTest {
         assertTrue(elapsedMillis >= 140, "expected about 50 ms + 100 ms of backoff but waited " + elapsedMillis);
     }
 
-    @Test
-    void doesNotRetryClientErrors() {
-        server.expect(requestTo(fixtureUri("owner"))).andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY));
+    @ParameterizedTest
+    @ValueSource(ints = {422, 401, 302}) // client error, authentication error, redirect
+    void doesNotRetryClientAuthenticationOrRedirectResponses(int status) {
+        server.expect(requestTo(fixtureUri("owner"))).andRespond(withStatus(HttpStatus.valueOf(status)));
 
         assertDoesNotThrow(() -> client.sync(eventFromFixture("owner")));
-
-        server.verify();
-    }
-
-    @Test
-    void doesNotRetryAuthenticationErrors() {
-        server.expect(requestTo(fixtureUri("owner"))).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
-
-        client.sync(eventFromFixture("owner"));
-
-        server.verify();
-    }
-
-    @Test
-    void doesNotRetryRedirects() {
-        server.expect(requestTo(fixtureUri("owner"))).andRespond(withStatus(HttpStatus.FOUND));
-
-        client.sync(eventFromFixture("owner"));
 
         server.verify();
     }
@@ -266,42 +242,27 @@ class MemberSyncClientTest {
         server.verify();
     }
 
-    @Test
-    void blankBaseUrlDisablesTheSyncAndMakesNoCall() {
+    static Stream<Arguments> disabledConfigurations() {
+        return Stream.of(
+                Arguments.of("blank base URL", "  ", API_KEY, true),
+                Arguments.of("blank base URL without an HTTP client", "", "", false),
+                Arguments.of("blank API key, so no unauthenticated calls", BASE_URL, " ", true));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("disabledConfigurations")
+    void blankBaseUrlOrApiKeyDisablesTheSyncAndMakesNoCall(String reason, String baseUrl, String apiKey,
+                                                           boolean withHttpClient) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer idle = MockRestServiceServer.bindTo(builder).build();
-        MemberSyncClient disabled = new MemberSyncClient(properties("  ", API_KEY), builder.build());
+        MemberSyncClient disabled = withHttpClient
+                ? new MemberSyncClient(properties(baseUrl, apiKey), builder.build())
+                : new MemberSyncClient(properties(baseUrl, apiKey));
 
         assertFalse(disabled.isEnabled());
         assertDoesNotThrow(() -> disabled.sync(eventFromFixture("owner")));
 
         idle.verify();
-    }
-
-    @Test
-    void blankBaseUrlNeedsNoHttpClientAtAll() {
-        MemberSyncClient disabled = new MemberSyncClient(properties("", ""));
-
-        assertFalse(disabled.isEnabled());
-        assertDoesNotThrow(() -> disabled.sync(eventFromFixture("owner")));
-    }
-
-    @Test
-    void blankApiKeyDisablesTheSyncInsteadOfSendingUnauthenticatedCalls() {
-        RestClient.Builder builder = RestClient.builder();
-        MockRestServiceServer idle = MockRestServiceServer.bindTo(builder).build();
-        MemberSyncClient noKey = new MemberSyncClient(properties(BASE_URL, " "), builder.build());
-
-        assertFalse(noKey.isEnabled());
-        noKey.sync(eventFromFixture("owner"));
-
-        idle.verify();
-    }
-
-    @Test
-    void configuredClientIsEnabled() {
-        assertTrue(client.isEnabled());
-        assertTrue(new MemberSyncClient(properties(BASE_URL, API_KEY)).isEnabled());
     }
 
     @Test

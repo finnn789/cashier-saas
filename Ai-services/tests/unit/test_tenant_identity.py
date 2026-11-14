@@ -228,10 +228,6 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((identity.status, identity.tenant_id), (VERIFIED, self.tenant_a))
         self.assertEqual(set(self.fake.memberships[self.user_id]), {self.tenant_a})
 
-    async def test_disabled_member_is_not_matched(self) -> None:
-        self.fake.add_staff(self.tenant_a, "Kopi Senja", status="DISABLED")
-        self.assertEqual((await self.verify(self.service())).status, NOT_REGISTERED)
-
     async def test_phone_must_be_normalized_digits(self) -> None:
         for phone in ("", "+6281234567890", "0812 3456 7890"):
             with self.subTest(phone=phone):

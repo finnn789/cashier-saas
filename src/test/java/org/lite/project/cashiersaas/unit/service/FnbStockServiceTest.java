@@ -276,9 +276,6 @@ class FnbStockServiceTest {
 
         assertDecimal("-26", balance.getQuantityOnHand());
         assertEquals(1, warnings.size());
-        assertTrue(warnings.get(0).contains("Susu"));
-        assertTrue(warnings.get(0).contains("-26"));
-        assertTrue(warnings.get(0).contains("(minus)"));
         assertEquals("Susu: sisa -26 ml (minus)", warnings.get(0));
         verify(inventory, times(1)).persist(any(InventoryMovementEntity.class));
     }

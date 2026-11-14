@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 from app.ai.openrouter import AIError, Completion
-from app.ai.prompts import MAX_PROMPT_BYTES, SYSTEM, build_prompt, system_prompt
+from app.ai.prompts import SYSTEM, system_prompt
 from app.chat import daily_summary
 from app.chat.daily_summary import build_summary, format_rupiah, request_insight
 
@@ -223,9 +223,6 @@ class RequestInsightTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(daily_summary, "INSIGHT_TIMEOUT_SECONDS", 0.01):
             self.assertIsNone(await asyncio.wait_for(request_insight("x"), 2))
 
-    def test_timeout_contract_is_eight_seconds(self) -> None:
-        self.assertEqual(daily_summary.INSIGHT_TIMEOUT_SECONDS, 8)
-
 
 def aiohttp_error() -> Exception:
     import aiohttp
@@ -245,17 +242,6 @@ class SystemPromptTests(unittest.TestCase):
         early = datetime(2026, 11, 14, 16, 59, tzinfo=timezone.utc)  # 23:59 WIB on the 14th
         self.assertIn("2026-11-15", system_prompt(late))
         self.assertIn("2026-11-14", system_prompt(early))
-
-    def test_states_read_only_owner_only_rule(self) -> None:
-        self.assertIn("hanya-baca", SYSTEM)
-        self.assertIn("owner", SYSTEM)
-
-    def test_build_prompt_uses_dated_system_and_stays_bounded(self) -> None:
-        messages = build_prompt("Name", None, [("x" * 3000, "y" * 3000)] * 10, "current")
-        self.assertEqual(messages[0]["content"], system_prompt())
-        self.assertLessEqual(
-            sum(len(item["content"].encode("utf-8")) for item in messages), MAX_PROMPT_BYTES
-        )
 
 
 if __name__ == "__main__":

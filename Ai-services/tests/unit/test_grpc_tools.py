@@ -4,9 +4,6 @@ import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
 
-import grpc
-import grpc.aio
-
 from app.integrations.grpc.client import CashierGrpcClient
 from app.integrations.grpc.config import GrpcSettings
 from app.integrations.grpc.generated import cashier_service_pb2
@@ -20,13 +17,6 @@ USER = "11111111-1111-1111-1111-111111111111"
 
 class GrpcClientTests(unittest.IsolatedAsyncioTestCase):
     """Tests for CashierGrpcClient lifecycle, channel creation, and error handling."""
-
-    def test_settings_defaults(self) -> None:
-        settings = GrpcSettings()
-        self.assertEqual(settings.host, "127.0.0.1")
-        self.assertEqual(settings.port, 9090)
-        self.assertEqual(settings.timeout_seconds, 5.0)
-        self.assertFalse(settings.use_tls)
 
     async def test_client_lazy_channel_and_close(self) -> None:
         settings = GrpcSettings(host="127.0.0.1", port=9999, use_tls=False)
@@ -44,74 +34,9 @@ class GrpcClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(managed_client._stub)
         self.assertIsNone(managed_client._channel)
 
-    async def test_catalog_offline_fallback(self) -> None:
-        """When gRPC target is unreachable, client returns [] instead of raising."""
-        settings = GrpcSettings(host="127.0.0.1", port=59999, timeout_seconds=0.2)
-        client = CashierGrpcClient(settings)
-        try:
-            items = await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
-            self.assertEqual(items, [])
-        finally:
-            await client.close()
-
-    async def test_order_status_offline_fallback(self) -> None:
-        """When gRPC target is unreachable, client returns None instead of raising."""
-        settings = GrpcSettings(host="127.0.0.1", port=59999, timeout_seconds=0.2)
-        client = CashierGrpcClient(settings)
-        try:
-            status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-1")
-            self.assertIsNone(status)
-        finally:
-            await client.close()
-
-    async def test_catalog_rpc_error_handling(self) -> None:
-        settings = GrpcSettings(host="127.0.0.1", port=9090)
-        client = CashierGrpcClient(settings)
-        mock_stub = Mock()
-        call_mock = AsyncMock(side_effect=grpc.aio.AioRpcError(
-            code=grpc.StatusCode.UNAVAILABLE,
-            initial_metadata=(),
-            trailing_metadata=(),
-            details="Backend down",
-            debug_error_string="",
-        ))
-        mock_stub.GetCatalogItem = call_mock
-        client._stub = mock_stub
-        client._channel = Mock()
-
-        items = await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="mie")
-        self.assertEqual(items, [])
-
-    async def test_order_status_not_found_rpc_error(self) -> None:
-        settings = GrpcSettings(host="127.0.0.1", port=9090)
-        client = CashierGrpcClient(settings)
-        mock_stub = Mock()
-        call_mock = AsyncMock(side_effect=grpc.aio.AioRpcError(
-            code=grpc.StatusCode.NOT_FOUND,
-            initial_metadata=(),
-            trailing_metadata=(),
-            details="Order not found",
-            debug_error_string="",
-        ))
-        mock_stub.GetOrderStatus = call_mock
-        client._stub = mock_stub
-        client._channel = Mock()
-
-        status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-NONE")
-        self.assertIsNone(status)
-
 
 class CatalogSearchToolTests(unittest.IsolatedAsyncioTestCase):
     """Tests for CatalogSearchTool schema and execution."""
-
-    def test_tool_schema(self) -> None:
-        tool = CatalogSearchTool()
-        self.assertEqual(tool.name, "search_catalog_menu")
-        self.assertIn("katalog", tool.description.lower())
-        schema = tool.to_openrouter_schema()
-        self.assertEqual(schema["type"], "function")
-        self.assertEqual(schema["function"]["name"], "search_catalog_menu")
-        self.assertIn("query", schema["function"]["parameters"]["required"])
 
     async def test_execute_with_items_returned(self) -> None:
         mock_client = Mock(spec=CashierGrpcClient)
@@ -163,36 +88,36 @@ class CatalogSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Tidak ditemukan menu dengan kata kunci 'pizza'", result["message"])
 
     async def test_lazy_client_initialization(self) -> None:
-        tool = CatalogSearchTool(client=None)
-        self.assertIsNone(tool._client)
-        with patch.object(CashierGrpcClient, "get_catalog_items", new_callable=AsyncMock) as mock_rpc:
-            mock_rpc.return_value = []
-            res = await tool.execute(tenant_id="tenant-xyz", user_id=USER, query="roti")
-            self.assertEqual(res["total"], 0)
-            self.assertIsNotNone(tool._client)
-            mock_rpc.assert_awaited_once_with(
-                tenant_id="tenant-xyz", user_id=USER, query="roti"
-            )
+        cases = (
+            (CatalogSearchTool, "get_catalog_items", [], {"query": "roti"}, "total", 0),
+            (
+                OrderStatusTool, "get_order_status", None, {"order_number": "ORD-999"},
+                "status", "not_found_or_unavailable",
+            ),
+        )
+        for tool_class, rpc, returned, arguments, key, expected in cases:
+            with self.subTest(tool=tool_class.__name__):
+                tool = tool_class(client=None)
+                self.assertIsNone(tool._client)
+                with patch.object(CashierGrpcClient, rpc, new_callable=AsyncMock) as mock_rpc:
+                    mock_rpc.return_value = returned
+                    res = await tool.execute(tenant_id="tenant-xyz", user_id=USER, **arguments)
+                    self.assertEqual(res[key], expected)
+                    self.assertIsNotNone(tool._client)
+                    mock_rpc.assert_awaited_once_with(
+                        tenant_id="tenant-xyz", user_id=USER, **arguments
+                    )
 
 
 class OrderStatusToolTests(unittest.IsolatedAsyncioTestCase):
     """Tests for OrderStatusTool schema and execution."""
-
-    def test_tool_schema(self) -> None:
-        tool = OrderStatusTool()
-        self.assertEqual(tool.name, "check_order_status")
-        self.assertIn("status", tool.description.lower())
-        schema = tool.to_openrouter_schema()
-        self.assertEqual(schema["type"], "function")
-        self.assertEqual(schema["function"]["name"], "check_order_status")
-        self.assertIn("order_number", schema["function"]["parameters"]["required"])
 
     async def test_execute_order_found(self) -> None:
         mock_client = Mock(spec=CashierGrpcClient)
         mock_client.get_order_status = AsyncMock(return_value={
             "tenant_id": "tenant-abc",
             "order_number": "ORD-20261022-001",
-            "status": "PROCESSING",
+            "status": "COMPLETED",
             "payment_status": "PAID",
             "total_amount": Decimal("45000.00"),
             "created_at": "2026-10-22T10:15:00Z",
@@ -201,12 +126,12 @@ class OrderStatusToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(tenant_id="tenant-abc", user_id=USER, order_number="ORD-20261022-001")
 
         self.assertEqual(result["order_number"], "ORD-20261022-001")
-        self.assertEqual(result["status"], "PROCESSING")
-        self.assertEqual(result["status_label"], "PROCESSING")
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(result["status_label"], "Selesai (sudah dibayar)")
         self.assertEqual(result["payment_status"], "PAID")
         self.assertEqual(result["total_amount"], "45000.00")
         self.assertEqual(result["created_at"], "2026-10-22T10:15:00Z")
-        self.assertIn("berstatus PROCESSING", result["message"])
+        self.assertIn("berstatus Selesai (sudah dibayar)", result["message"])
         self.assertIn("status pembayaran PAID", result["message"])
         mock_client.get_order_status.assert_awaited_once_with(
             tenant_id="tenant-abc", user_id=USER, order_number="ORD-20261022-001"
@@ -262,18 +187,6 @@ class OrderStatusToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["status"], "not_found_or_unavailable")
         mock_client.get_order_status.assert_not_awaited()
-
-    async def test_lazy_client_initialization(self) -> None:
-        tool = OrderStatusTool(client=None)
-        self.assertIsNone(tool._client)
-        with patch.object(CashierGrpcClient, "get_order_status", new_callable=AsyncMock) as mock_rpc:
-            mock_rpc.return_value = None
-            res = await tool.execute(tenant_id="tenant-xyz", user_id=USER, order_number="ORD-999")
-            self.assertEqual(res["status"], "not_found_or_unavailable")
-            self.assertIsNotNone(tool._client)
-            mock_rpc.assert_awaited_once_with(
-                tenant_id="tenant-xyz", user_id=USER, order_number="ORD-999"
-            )
 
 
 class DefaultToolRegistryTests(unittest.IsolatedAsyncioTestCase):

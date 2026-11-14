@@ -2,6 +2,8 @@ package org.lite.project.cashiersaas.unit.entity;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
@@ -33,24 +35,6 @@ class CashShiftEntityTest {
     }
 
     @Test
-    void openStartsAnOpenShiftOfTheMemberWithOpeningCashAtScaleTwo() {
-        CashShiftEntity shift = open("100000");
-
-        assertTrue(shift.isOpen());
-        assertEquals(CashShiftEntity.Status.OPEN, shift.getStatus());
-        assertEquals(new BigDecimal("100000.00"), shift.getOpeningCash());
-        assertSame(tenant, shift.getTenant());
-        assertSame(outlet, shift.getOutlet());
-        assertSame(membership, shift.getMembership());
-        assertSame(cashier, shift.getOpenedBy());
-        assertNotNull(shift.getOpenedAt());
-        assertNull(shift.getClosedAt());
-        assertNull(shift.getExpectedCash());
-        assertNull(shift.getCashDifference());
-        assertEquals(new BigDecimal("0.00"), open("0").getOpeningCash(), "zero opening cash is allowed");
-    }
-
-    @Test
     void openRejectsNullNegativeAndMoreThanTwoDecimals() {
         for (BigDecimal invalid : new BigDecimal[]{null, new BigDecimal("-0.01"), new BigDecimal("10.001")}) {
             InvalidOperationException ex = assertThrows(InvalidOperationException.class,
@@ -59,33 +43,31 @@ class CashShiftEntityTest {
         }
     }
 
-    @Test
-    void closeStoresExpectedCountedAndSignedDifference() {
-        CashShiftEntity shift = open("100000.00");
+    // Rows: deficit with a padded note closed by the owner; surplus with a blank note; exact count with a null note.
+    // Opening cash is also checked at scale two (zero opening cash is allowed).
+    @ParameterizedTest
+    @CsvSource(value = {
+            "100000, 100000.00, true, 150000, 149500.50, -499.50, '  selisih kecil  ', selisih kecil",
+            "0, 0.00, false, 10.00, 12.25, 2.25, '   ',",
+            "0, 0.00, false, 10.00, 10.00, 0.00, ,"
+    })
+    void closeStoresExpectedCountedAndSignedDifference(String openingCash, BigDecimal storedOpening, boolean byOwner,
+                                                       BigDecimal expected, BigDecimal counted, BigDecimal difference,
+                                                       String note, String storedNote) {
+        CashShiftEntity shift = open(openingCash);
+        StaffUserEntity closer = byOwner ? owner : cashier;
 
-        shift.close(owner, new BigDecimal("150000"), new BigDecimal("149500.50"), "  selisih kecil  ");
+        shift.close(closer, expected, counted, note);
 
+        assertEquals(storedOpening, shift.getOpeningCash());
         assertFalse(shift.isOpen());
         assertEquals(CashShiftEntity.Status.CLOSED, shift.getStatus());
-        assertSame(owner, shift.getClosedBy());
+        assertSame(closer, shift.getClosedBy());
         assertNotNull(shift.getClosedAt());
-        assertEquals(new BigDecimal("150000.00"), shift.getExpectedCash());
-        assertEquals(new BigDecimal("149500.50"), shift.getCountedCash());
-        assertEquals(new BigDecimal("-499.50"), shift.getCashDifference(), "difference = counted - expected");
-        assertEquals("selisih kecil", shift.getClosingNote());
-    }
-
-    @Test
-    void closeWithSurplusIsPositiveAndBlankNoteIsStoredAsNull() {
-        CashShiftEntity shift = open("0");
-
-        shift.close(cashier, new BigDecimal("10.00"), new BigDecimal("12.25"), "   ");
-
-        assertEquals(new BigDecimal("2.25"), shift.getCashDifference());
-        assertNull(shift.getClosingNote());
-        CashShiftEntity exact = open("0");
-        exact.close(cashier, new BigDecimal("10.00"), new BigDecimal("10.00"), null);
-        assertEquals(0, exact.getCashDifference().signum());
+        assertEquals(expected.setScale(2), shift.getExpectedCash());
+        assertEquals(counted, shift.getCountedCash());
+        assertEquals(difference, shift.getCashDifference(), "difference = counted - expected");
+        assertEquals(storedNote, shift.getClosingNote());
     }
 
     @Test

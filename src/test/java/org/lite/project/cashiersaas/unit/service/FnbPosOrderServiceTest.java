@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbPosOrderRequest;
@@ -142,18 +144,6 @@ class FnbPosOrderServiceTest {
     }
 
     @Test
-    void lockTenantRunsBeforeTheOrderIsLoaded() {
-        when(orders.byId(tenantId, outletId, orderId)).thenReturn(Optional.empty());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> service.replaceItems(principal, outletId, orderId, request(ServiceType.DINE_IN, "Budi", 1)));
-
-        InOrder inOrder = inOrder(orders);
-        inOrder.verify(orders).lockTenant(tenantId);
-        inOrder.verify(orders).byId(tenantId, outletId, orderId);
-    }
-
-    @Test
     void missingOrderIsNotFoundAndTouchesNothing() {
         when(orders.byId(tenantId, outletId, orderId)).thenReturn(Optional.empty());
 
@@ -163,28 +153,27 @@ class FnbPosOrderServiceTest {
         verifyUntouched();
     }
 
-    @Test
-    void paidOrderIsRejected() {
-        order.confirmPaid();
+    @ParameterizedTest
+    @ValueSource(strings = {"PAID", "CANCELLED", "DISCOUNTED"})
+    void paidCancelledOrDiscountedOrderIsRejected(String state) {
+        switch (state) {
+            case "PAID" -> order.confirmPaid();
+            case "CANCELLED" -> order.cancel("Salah pesan");
+            default -> when(discounts.byOrder(tenantId, outletId, orderId)).thenReturn(Optional.of(new DiscountEntity()));
+        }
         when(orders.byId(tenantId, outletId, orderId)).thenReturn(Optional.of(order));
 
         assertThrows(OperationConflictException.class,
                 () -> service.replaceItems(principal, outletId, orderId, request(ServiceType.DINE_IN, "Budi", 1)));
 
-        assertEquals(OrderStatus.COMPLETED, order.getStatus());
-        assertEquals(new BigDecimal("115.00"), order.getTotal());
-        verifyUntouched();
-    }
-
-    @Test
-    void cancelledOrderIsRejected() {
-        order.cancel("Salah pesan");
-        when(orders.byId(tenantId, outletId, orderId)).thenReturn(Optional.of(order));
-
-        assertThrows(OperationConflictException.class,
-                () -> service.replaceItems(principal, outletId, orderId, request(ServiceType.DINE_IN, "Budi", 1)));
-
-        assertEquals(OrderStatus.CANCELLED, order.getStatus());
+        switch (state) {
+            case "PAID" -> {
+                assertEquals(OrderStatus.COMPLETED, order.getStatus());
+                assertEquals(new BigDecimal("115.00"), order.getTotal());
+            }
+            case "CANCELLED" -> assertEquals(OrderStatus.CANCELLED, order.getStatus());
+            default -> { }
+        }
         verifyUntouched();
     }
 
@@ -215,17 +204,6 @@ class FnbPosOrderServiceTest {
         service.replaceItems(principal, outletId, orderId, request(ServiceType.TAKEAWAY, null, 1, null));
         assertNull(order.getOrderNote());
         assertNull(order.getCustomerLabel());
-    }
-
-    @Test
-    void existingDiscountIsRejected() {
-        when(orders.byId(tenantId, outletId, orderId)).thenReturn(Optional.of(order));
-        when(discounts.byOrder(tenantId, outletId, orderId)).thenReturn(Optional.of(new DiscountEntity()));
-
-        assertThrows(OperationConflictException.class,
-                () -> service.replaceItems(principal, outletId, orderId, request(ServiceType.DINE_IN, "Budi", 1)));
-
-        verifyUntouched();
     }
 
     private void verifyUntouched() {

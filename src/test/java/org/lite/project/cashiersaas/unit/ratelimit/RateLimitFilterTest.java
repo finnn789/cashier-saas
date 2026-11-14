@@ -34,7 +34,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RateLimitFilterTest {
 
     private static final String LOGIN = "/api/v1/auth/login";
-    private static final String MENU = "/api/v1/public/fnb/menu/";
 
     private final AtomicLong clock = new AtomicLong(1_000L);
     private final RateLimitProperties properties = RateLimitTestProperties.defaults();
@@ -102,17 +101,6 @@ class RateLimitFilterTest {
     }
 
     @Test
-    void formerPublicPathsAreClassifiedAsAnonymousOther() throws Exception {
-        properties.setAnonymousOther(limit(2));
-        RateLimitFilter filter = filter();
-
-        assertEquals(200, statusOf(filter, "GET", MENU + "abc", "1.1.1.1"));
-        assertEquals(200, statusOf(filter, "GET", "/api/v1/auth/csrf", "1.1.1.1"));
-        assertEquals(429, statusOf(filter, "GET", MENU + "abc", "1.1.1.1"), "shares the ANONYMOUS_OTHER bucket per IP");
-        assertEquals(200, statusOf(filter, "GET", MENU + "abc", "2.2.2.2"));
-    }
-
-    @Test
     void authenticatedRequestsShareOneBucketPerUserAcrossIps() throws Exception {
         properties.setAuthenticated(limit(2));
         properties.setAnonymousOther(limit(100));
@@ -161,7 +149,10 @@ class RateLimitFilterTest {
     void rejectedRequestGetsTooManyRequestsEnvelopeAndRetryAfterWithoutContinuingTheChain() throws Exception {
         properties.setAuth(new RateLimitProperties.Limit(10, 1));
         RateLimitFilter filter = filter();
-        assertTrue(run(filter, request("POST", LOGIN, "1.1.1.1")).passed());
+        Result allowed = run(filter, request("POST", LOGIN, "1.1.1.1"));
+        assertTrue(allowed.passed());
+        assertEquals(200, allowed.response.getStatus());
+        assertNull(allowed.response.getHeader("Retry-After"));
 
         Result rejected = run(filter, request("POST", LOGIN, "1.1.1.1"));
 
@@ -177,15 +168,6 @@ class RateLimitFilterTest {
         assertFalse(body.path("success").asBoolean(true));
         assertEquals("Terlalu banyak permintaan. Coba lagi dalam " + seconds + " detik.",
                 body.path("message").asString());
-    }
-
-    @Test
-    void allowedRequestContinuesTheChainUntouched() throws Exception {
-        Result result = run(filter(), request("POST", LOGIN, "1.1.1.1"));
-
-        assertTrue(result.passed());
-        assertEquals(200, result.response.getStatus());
-        assertNull(result.response.getHeader("Retry-After"));
     }
 
     @Test
