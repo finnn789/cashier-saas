@@ -114,6 +114,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
             port=self.bound_port,
             timeout_seconds=5.0,
             use_tls=False,
+            service_key="integration-test-key",
         )
         self.client = CashierGrpcClient(self.settings)
 

@@ -183,9 +183,39 @@ sequenceDiagram
 
 Money fields are decimal strings (`BigDecimal.toPlainString()`, scale 2, e.g. `"12500.50"`), not integers. Each call also carries the calling staff member's `user_id`: the server requires an ACTIVE staff user with an ACTIVE membership in the tenant and restricts the read to the outlets that user can access. A blank or malformed `user_id` is `INVALID_ARGUMENT`; an unknown or inactive user, or one without outlet access, gets the same `PERMISSION_DENIED` as a rejected tenant.
 
-Server side: `grpc/service/CashierGrpcService` delegates to `CashierCatalogGrpcHandler` and `CashierOrderGrpcHandler`. On the Python side (`Ai-services/`), a tool adapter hides `tenant_id` from the LLM schema and injects it (and `user_id`) from server-side context; conversations are stored in a separate database (`cashier_ai`) with its own Alembic migrations. The AI service is read-only against the backend (two lookup RPCs); it cannot create or modify orders.
+Server side: `grpc/service/CashierGrpcService` delegates to `CashierCatalogGrpcHandler` and `CashierOrderGrpcHandler`. On the Python side (`Ai-services/`), a tool adapter hides `tenant_id` from the LLM schema and injects it (and `user_id`) from server-side context; conversations are stored in a separate database (`cashier_ai`) with its own Alembic migrations. The AI service is read-only against the backend (two lookup RPCs plus the three owner-only insight RPCs below); it cannot create or modify orders.
 
 Access control: callers must send `x-internal-service-key` equal to `CASHIER_GRPC_SERVICE_KEY`. The request `tenant_id` is then checked against the database: a tenant is served only when it exists and is active (the earlier environment-variable tenant allowlist was removed). A missing and an inactive tenant return the same status, so the response does not reveal whether a tenant exists. Caveat: `tenant_id` is still supplied by the caller, not bound to a token. The demo compose file does not publish 9090 to the host (internal network only), but keep the gRPC port private until token-bound tenant identity is added.
+
+### Owner AI assistant and daily summary (M7)
+
+Three more read-only RPCs on the same service: `GetSalesSummary` (per outlet and date range: net sales, transactions, per payment label, discounts, COGS and gross profit, refunds, cancellations, cash expenses, cash difference, top 5 products), `GetRestockSuggestions` (active ingredients: 14-day average usage, suggested quantity = daily usage x 7 + reorder level - on hand, stock status) and `GetAnomalies` (cashiers whose cancellations, discounted orders or cash difference on a day exceed 2x their previous-30-day daily average and a minimum of 3 / 3 / Rp20.000). Contract: `docs/contracts/cashier-service.grpc.schema.json`.
+
+- **Owner only**: `CashierInsightGrpcHandler` calls `GrpcTenantAccessPolicy.requireOwnerOutlets`, which needs an ACTIVE `OWNERMERCHANT` membership; a cashier, an unknown user or another tenant gets the same `PERMISSION_DENIED` (no existence evidence). Data is limited to the owner's outlets and all handlers are `@Transactional(readOnly = true)`. The numbers come from `FnbSalesReportService.summarize` and `FnbOwnerInsightService`, so they match the REST owner report.
+- **Chat**: the Python tools `sales_summary`, `restock_suggestions` and `cashier_anomalies` inject `tenant_id` and `user_id` from the verified Telegram membership; a non-owner gets a "fitur ini hanya untuk owner" answer.
+
+```mermaid
+sequenceDiagram
+    participant S as FnbShiftService (close / forceClose)
+    participant D as DailySummaryService
+    participant DB as PostgreSQL (daily_summary_dispatches)
+    participant AI as Ai-services
+    participant API as Cashier backend (gRPC)
+    participant LLM as OpenRouter
+    participant T as Telegram (owners)
+    S->>D: onShiftClosed (last open shift of the outlet)
+    D->>DB: INSERT ... ON CONFLICT (outlet_id, business_date) DO NOTHING
+    Note over D: after commit, only if a row was inserted
+    D->>AI: POST /api/v1/internal/daily-summaries (X-Internal-Service-Key)
+    AI->>API: GetSalesSummary / GetRestockSuggestions / GetAnomalies (per owner)
+    AI->>LLM: one insight sentence (8 s timeout, optional)
+    AI->>T: deterministic template + insight
+    AI-->>D: 200 delivered / skipped
+    D->>DB: mark SENT or FAILED
+    Note over D,DB: scheduler every PT10M: 23:00 outlet-time FALLBACK row, retry PENDING/FAILED (max 3 attempts, business date >= today - 2 days)
+```
+
+Sent at most once per outlet per business day (unique row), best-effort, single application instance assumed. Details: `docs/contracts/daily-summary.md`.
 
 ## 8. Staff sync and Telegram identity (in progress)
 

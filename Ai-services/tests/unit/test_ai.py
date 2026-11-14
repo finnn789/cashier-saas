@@ -9,7 +9,7 @@ from unittest.mock import Mock
 import aiohttp
 from app.ai.config import OpenRouterSettings
 from app.ai.openrouter import AIError, ENDPOINT, MAX_RESPONSE_BYTES, OpenRouterClient
-from app.ai.prompts import MAX_PROMPT_BYTES, SYSTEM, build_prompt
+from app.ai.prompts import MAX_PROMPT_BYTES, SYSTEM, build_prompt, system_prompt
 
 
 class ResponseBody:
@@ -68,7 +68,7 @@ class ResponseContext:
 class PromptTests(unittest.TestCase):
     def test_history_order_and_current_user_once(self) -> None:
         messages = build_prompt("Name", "handle", [("old", "answer-old"), ("new", "answer-new")], "current")
-        self.assertEqual(messages[0], {"role": "system", "content": SYSTEM})
+        self.assertEqual(messages[0], {"role": "system", "content": system_prompt()})
         self.assertEqual(messages[2:], [
             {"role": "user", "content": "old"}, {"role": "assistant", "content": "answer-old"},
             {"role": "user", "content": "new"}, {"role": "assistant", "content": "answer-new"},
@@ -89,7 +89,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(messages[1]["role"], "user")
         self.assertEqual(json.loads(messages[1]["content"]), {
             "untrusted_profile": {"display_name": name[:160], "username": username[:64]}})
-        self.assertEqual(messages[0]["content"], SYSTEM)
+        self.assertEqual(messages[0]["content"], system_prompt())
         self.assertEqual(len(messages), 3)
 
 

@@ -10,15 +10,22 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
+import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
+import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -36,12 +43,14 @@ class GrpcTenantAccessPolicyTest {
 
     private TenantRepository tenantRepository;
     private MembershipOutletAccessRepository outletAccessRepository;
+    private TenantMembershipRepository membershipRepository;
     private GrpcTenantAccessPolicy policy;
 
     @BeforeEach
     void setUp() {
         tenantRepository = mock(TenantRepository.class);
         outletAccessRepository = mock(MembershipOutletAccessRepository.class);
+        membershipRepository = mock(TenantMembershipRepository.class);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ACTIVE))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(INACTIVE))).thenReturn(false);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(UNKNOWN))).thenReturn(false);
@@ -55,7 +64,7 @@ class GrpcTenantAccessPolicyTest {
     }
 
     private GrpcTenantAccessPolicy policy(GrpcSecurityProperties properties) {
-        return new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository, properties);
+        return new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository, membershipRepository, properties);
     }
 
     private static StatusRuntimeException rejection(GrpcTenantAccessPolicy policy, String raw) {
@@ -262,5 +271,62 @@ class GrpcTenantAccessPolicyTest {
         when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of(OUTLET));
 
         assertEquals(List.of(OUTLET), policy.requireMemberOutlets(tenant, "  " + USER.toString().toUpperCase() + " "));
+    }
+
+    private TenantMembershipEntity membership(Role role) {
+        TenantEntity tenant = new TenantEntity();
+        StaffUserEntity user = StaffUserEntity.createCashier("u@example.com", "hash", "User", null);
+        return role == Role.OWNERMERCHANT ? TenantMembershipEntity.grantOwner(user, tenant) : TenantMembershipEntity.grantCashier(user, tenant);
+    }
+
+    private StatusRuntimeException ownerRejection(String rawUser) {
+        return assertThrows(StatusRuntimeException.class, () -> policy.requireOwnerOutlets(UUID.fromString(ACTIVE), rawUser));
+    }
+
+    @Test
+    void ownerOutletsAreReturnedForAnActiveOwnerMembership() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of(OUTLET));
+        when(membershipRepository.findActive(USER, tenant)).thenReturn(Optional.of(membership(Role.OWNERMERCHANT)));
+
+        assertEquals(List.of(OUTLET), policy.requireOwnerOutlets(tenant, "  " + USER + " "));
+    }
+
+    @Test
+    void cashierInactiveMemberAndUserWithoutOutletAreRejectedWithTheIdenticalPermissionDenied() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        UUID cashierUser = UUID.fromString("77777777-7777-7777-7777-777777777777");
+        UUID inactiveUser = UUID.fromString("88888888-8888-8888-8888-888888888888");
+        UUID noOutletUser = UUID.fromString("99999999-9999-9999-9999-999999999999");
+        when(outletAccessRepository.findActiveOutletIds(tenant, cashierUser)).thenReturn(List.of(OUTLET));
+        when(outletAccessRepository.findActiveOutletIds(tenant, inactiveUser)).thenReturn(List.of(OUTLET));
+        when(outletAccessRepository.findActiveOutletIds(tenant, noOutletUser)).thenReturn(List.of());
+        when(membershipRepository.findActive(cashierUser, tenant)).thenReturn(Optional.of(membership(Role.CASHIER)));
+        when(membershipRepository.findActive(inactiveUser, tenant)).thenReturn(Optional.empty());
+        StatusRuntimeException tenantRejection = rejection(policy, INACTIVE);
+
+        for (UUID user : List.of(cashierUser, inactiveUser, noOutletUser)) {
+            StatusRuntimeException ex = ownerRejection(user.toString());
+            assertEquals(Status.Code.PERMISSION_DENIED, ex.getStatus().getCode());
+            assertEquals(tenantRejection.getStatus().getDescription(), ex.getStatus().getDescription());
+            assertFalse(String.valueOf(ex.getStatus().getDescription()).contains(user.toString()));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "   ", "not-a-uuid"})
+    void ownerCheckRejectsBlankOrMalformedUserWithoutTouchingTheDatabase(String raw) {
+        assertEquals(Status.Code.INVALID_ARGUMENT, ownerRejection(raw).getStatus().getCode());
+        assertEquals(Status.Code.INVALID_ARGUMENT, ownerRejection(null).getStatus().getCode());
+        verifyNoInteractions(outletAccessRepository, membershipRepository);
+    }
+
+    @Test
+    void memberCheckDoesNotConsultTheMembershipRole() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of(OUTLET));
+
+        assertTrue(policy.requireMemberOutlets(tenant, USER.toString()).contains(OUTLET));
+        verifyNoInteractions(membershipRepository);
     }
 }

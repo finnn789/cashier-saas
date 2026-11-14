@@ -8,6 +8,7 @@ import org.lite.project.cashiersaas.dto.request.FnbSalesReportFilter;
 import org.lite.project.cashiersaas.dto.response.FnbSalesCsvResponse;
 import org.lite.project.cashiersaas.dto.response.FnbSalesReportResponse;
 import org.lite.project.cashiersaas.enums.OrderStatus;
+import org.lite.project.cashiersaas.enums.PaymentMethod;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
@@ -37,29 +38,36 @@ public class FnbSalesReportService {
     @Transactional(readOnly = true)
     public FnbSalesReportResponse report(TenantPrincipal principal, UUID outletId, FnbSalesReportFilter filter) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
-        Query query = query(context, filter);
-        List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), query.page, query.size);
+        return assemble(principal.getTenantId(), outletId, query(context, filter), filter.getOrderStatus(), filter.getPaymentMethod());
+    }
+
+    /** Owner-side read model for an already authorised context: no status/method filter, one transaction row. */
+    @Transactional(readOnly = true)
+    public FnbSalesReportResponse summarize(MerchantAccessContext context, LocalDate startDate, LocalDate endDate, int topProducts) {
+        FnbSalesReportFilter filter = new FnbSalesReportFilter();
+        filter.setStartDate(startDate); filter.setEndDate(endDate); filter.setPage(0); filter.setSize(1); filter.setTopProducts(topProducts);
+        return assemble(context.getTenant().getId(), context.getOutlet().getId(), query(context, filter), null, null);
+    }
+
+    private FnbSalesReportResponse assemble(UUID tenantId, UUID outletId, Query query, OrderStatus status, PaymentMethod method) {
+        List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(tenantId, outletId,
+                query.start, query.end, status, method, query.page, query.size);
         boolean hasNext = rows.size() > query.size;
         if (hasNext) rows = rows.subList(0, query.size);
         FnbSalesReportResponse value = new FnbSalesReportResponse();
         value.setStartDate(query.startDate); value.setEndDate(query.endDate); value.setTimeZone(query.zone.getId());
-        value.setSummary(FnbSalesReportMapper.summary(reports.summary(principal.getTenantId(), outletId, query.start,
-                query.end, filter.getOrderStatus(), filter.getPaymentMethod()),
-                reports.cancellations(principal.getTenantId(), outletId, query.start, query.end),
-                reports.cost(principal.getTenantId(), outletId, query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod()),
-                refunds.totals(principal.getTenantId(), outletId, query.start, query.end)));
-        value.setHourly(FnbSalesReportMapper.hourly(reports.hourly(principal.getTenantId(), outletId, query.start,
-                query.end, query.zone.getId(), filter.getOrderStatus(), filter.getPaymentMethod())));
-        value.setCashiers(FnbSalesReportMapper.cashiers(reports.cashiers(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod())));
-        value.setShifts(FnbSalesReportMapper.shifts(reports.shifts(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod())));
+        value.setSummary(FnbSalesReportMapper.summary(reports.summary(tenantId, outletId, query.start, query.end, status, method),
+                reports.cancellations(tenantId, outletId, query.start, query.end),
+                reports.cost(tenantId, outletId, query.start, query.end, status, method),
+                refunds.totals(tenantId, outletId, query.start, query.end)));
+        value.setHourly(FnbSalesReportMapper.hourly(reports.hourly(tenantId, outletId, query.start,
+                query.end, query.zone.getId(), status, method)));
+        value.setCashiers(FnbSalesReportMapper.cashiers(reports.cashiers(tenantId, outletId, query.start, query.end, status, method)));
+        value.setShifts(FnbSalesReportMapper.shifts(reports.shifts(tenantId, outletId, query.start, query.end, status, method)));
         value.setTransactions(rows.stream().map(row -> FnbSalesReportMapper.transaction(row, query.zone)).toList());
-        value.setTopProducts(FnbSalesReportMapper.products(reports.products(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), query.top)));
-        value.setPaymentBreakdown(FnbSalesReportMapper.methods(reports.methods(principal.getTenantId(), outletId,
-                query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod())));
+        value.setTopProducts(FnbSalesReportMapper.products(reports.products(tenantId, outletId,
+                query.start, query.end, status, method, query.top)));
+        value.setPaymentBreakdown(FnbSalesReportMapper.methods(reports.methods(tenantId, outletId, query.start, query.end, status, method)));
         value.setPage(query.page); value.setSize(query.size); value.setHasNext(hasNext);
         return value;
     }

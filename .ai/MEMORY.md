@@ -1,11 +1,13 @@
 # Project memory
 
-Memory version: 77
+Memory version: 79
 Updated: 2026-11-14 (Asia/Jakarta)
 
 ## Evidence-qualified state
 
-- TASK-079 — M6 VERIFIED (user-requested `mvnw -B verify` run 3 BUILD SUCCESS 523 unit + 127 IT; runs 1-2 failed on test-only issues fixed by W4/W5, no production change), NOT COMMITTED (2026-11-14): M6 unit cost/COGS, batch stock count, inactive ingredient fix, owner reports (hour/cashier/shift, COGS, refunds), V9; packet `tasks/TASK-079.md`, decisions "M6 data owner". Canonical 76 -> 77.
+- NEXT ACTION (2026-11-14): M7 committed on `fix/flow-controls-a` (not pushed). Next: push/PR only on approval; optional real Telegram daily summary trial; then M8 pilot.
+- TASK-080 — M7 VERIFIED, COMMITTED (2026-11-14, user-approved, not pushed): user-requested `mvnw -B verify` run 2 BUILD SUCCESS 609 unit + 148 IT; run 1 had 2 IT failures fixed by W3 (F1 production: `DailySummaryService.runFallback` fetches retryable rows before inserting, so one sweep never sends a row twice; F2 test-only: null REST methodLabel vs gRPC ""). Python via `Ai-services/.venv` unittest: unit 323 OK, integration 24 OK (14 skipped) after W3 F3 test-only fix (missing service_key in `test_grpc_integration.py`); pytest is not installed. Real Telegram not tried. Canonical 78 -> 79. Earlier state: IMPLEMENTED, REVIEWED, COMPILED (2026-11-14): M7 owner AI (3 owner-only read-only gRPC RPCs, AI tools, daily summary dispatch V10 + Python endpoint); packet `tasks/TASK-080.md`, decisions "M7 owner AI". TASK-079 committed `08ff7af`. Canonical 77 -> 78.
+- TASK-079 — M6 VERIFIED (user-requested `mvnw -B verify` run 3 BUILD SUCCESS 523 unit + 127 IT; runs 1-2 failed on test-only issues fixed by W4/W5, no production change), COMMITTED `08ff7af` (2026-11-14): M6 unit cost/COGS, batch stock count, inactive ingredient fix, owner reports (hour/cashier/shift, COGS, refunds), V9; packet `tasks/TASK-079.md`, decisions "M6 data owner". Canonical 76 -> 77.
 - TASK-076/077/078 committed as `b383d90` on `fix/flow-controls-a` (2026-11-14, not pushed).
 - TASK-078 — M5 VERIFIED (`mvnw -B verify` 473 unit + 121 IT green), NOT COMMITTED (2026-11-14); details in TASKS.md.
 - PRD v2.1 (2026-11-13): record-only cashier, QRIS not a payment feature, non-cash labels, mock gateway to be removed, petty cash in M5; see DECISIONS "PRD v2.1".

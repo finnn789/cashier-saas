@@ -16,7 +16,7 @@ from app.ai.graph.tools_adapter import (
     current_java_user_id,
     current_tenant_id,
 )
-from app.ai.prompts import SYSTEM
+from app.ai.prompts import system_prompt
 from app.tools.base import BaseTool
 from app.tools.registry import ToolRegistry
 
@@ -61,14 +61,14 @@ def create_agent_node(
 
         # Ensure SystemMessage is present at index 0
         if not raw_messages or not isinstance(raw_messages[0], SystemMessage):
-            system_content = SYSTEM
+            system_content = system_prompt()
             display_name = state.get("display_name")
             if display_name:
                 profile_json = json.dumps(
                     {"untrusted_profile": {"display_name": str(display_name)[:160]}},
                     ensure_ascii=True,
                 )
-                system_content = f"{SYSTEM}\n{profile_json}"
+                system_content = f"{system_prompt()}\n{profile_json}"
             messages_to_send = [SystemMessage(content=system_content)] + raw_messages
         else:
             messages_to_send = raw_messages

@@ -21,6 +21,7 @@ import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
 import org.lite.project.cashiersaas.grpc.service.CashierCatalogGrpcHandler;
 import org.lite.project.cashiersaas.grpc.service.CashierOrderGrpcHandler;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
+import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
 import org.mockito.ArgumentCaptor;
 
@@ -76,7 +77,8 @@ class CashierGrpcHandlerRejectionTest {
                 .thenReturn(List.of());
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ALLOWED))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(OTHER))).thenReturn(false);
-        GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository, properties);
+        GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository,
+                mock(TenantMembershipRepository.class), properties);
 
         catalogHandler = new CashierCatalogGrpcHandler(entityManager, criteriaBuilderFactory, catalogMapper, policy);
         orderHandler = new CashierOrderGrpcHandler(entityManager, criteriaBuilderFactory, orderMapper, policy);

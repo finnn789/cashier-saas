@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cashier-saas.local/contracts/cashier-service.grpc.schema.json",
   "title": "CashierService gRPC JSON mapping (cashier.v1)",
-  "description": "JSON form of the messages in src/main/proto/cashier_service.proto, for testing with grpcurl or Postman. Metadata required on every call: x-internal-service-key = CASHIER_GRPC_SERVICE_KEY. proto3 JSON rules: money is a decimal string with 2 decimals (BigDecimal plain string, e.g. \"12500.50\"), never a number; int64 is a string in responses; fields holding their default value (empty string, 0, false) may be omitted in responses; responses use lowerCamelCase names (tenantId) while requests accept both snake_case and lowerCamelCase.",
+  "description": "JSON form of the messages in src/main/proto/cashier_service.proto, for testing with grpcurl or Postman. Owner-only RPCs (GetSalesSummary, GetRestockSuggestions, GetAnomalies) are read-only and need an OWNERMERCHANT user_id; their money and quantity fields are plain decimal strings without a fixed scale (see $defs/decimal). Metadata required on every call: x-internal-service-key = CASHIER_GRPC_SERVICE_KEY. proto3 JSON rules: money is a decimal string with 2 decimals (BigDecimal plain string, e.g. \"12500.50\"), never a number; int64 is a string in responses; fields holding their default value (empty string, 0, false) may be omitted in responses; responses use lowerCamelCase names (tenantId) while requests accept both snake_case and lowerCamelCase.",
   "$defs": {
     "uuid": {
       "type": "string",
@@ -102,6 +102,412 @@
           "description": "ISO-8601 instant in UTC."
         }
       }
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?[0-9]+([.][0-9]+)?$",
+      "description": "Decimal amount or quantity as a plain string (BigDecimal toPlainString, scale not fixed: money may be \"0\" or \"125000.50\", quantities have up to 3 decimals), never a number."
+    },
+    "ownerUserId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Staff user UUID of an ACTIVE membership with role OWNERMERCHANT in tenant_id. Blank or malformed is INVALID_ARGUMENT. A cashier, an unknown user, a deactivated membership or a user without outlet access gets PERMISSION_DENIED with the same message as a rejected tenant (no existence evidence); this check runs before argument validation. Results are limited to the owner's active outlets."
+    },
+    "GetSalesSummaryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "user_id",
+        "start_date",
+        "end_date"
+      ],
+      "properties": {
+        "tenant_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/ownerUserId"
+        },
+        "start_date": {
+          "allOf": [
+            {
+              "type": "string",
+              "format": "date"
+            }
+          ],
+          "description": "ISO date yyyy-MM-dd in each outlet's time zone, inclusive. Required."
+        },
+        "end_date": {
+          "allOf": [
+            {
+              "type": "string",
+              "format": "date"
+            }
+          ],
+          "description": "ISO date, inclusive, must be >= start_date; the range must be shorter than 366 days. Violations are INVALID_ARGUMENT."
+        }
+      }
+    },
+    "LabelTotal": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "Payment method enum name."
+        },
+        "label": {
+          "type": "string",
+          "description": "Owner-defined payment label snapshot (Tunai, QRIS, Transfer, Debit, ...)."
+        },
+        "count": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "netSales": {
+          "$ref": "#/$defs/decimal"
+        }
+      }
+    },
+    "ProductTotal": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "grossSales": {
+          "$ref": "#/$defs/decimal"
+        },
+        "costOfGoodsSold": {
+          "$ref": "#/$defs/decimal"
+        },
+        "grossProfit": {
+          "$ref": "#/$defs/decimal"
+        },
+        "itemsWithoutCost": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        }
+      }
+    },
+    "OutletSalesSummary": {
+      "type": "object",
+      "description": "Sales of one outlet over the range, from paid, non-cancelled, non-refunded transactions only. int64 fields are strings in JSON.",
+      "properties": {
+        "outletId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outletName": {
+          "type": "string"
+        },
+        "timeZone": {
+          "type": "string",
+          "description": "IANA zone of the outlet."
+        },
+        "startDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "endDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "transactionCount": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "grossSales": {
+          "$ref": "#/$defs/decimal"
+        },
+        "discountAmount": {
+          "$ref": "#/$defs/decimal"
+        },
+        "netSales": {
+          "$ref": "#/$defs/decimal"
+        },
+        "total": {
+          "$ref": "#/$defs/decimal"
+        },
+        "taxAmount": {
+          "$ref": "#/$defs/decimal"
+        },
+        "serviceChargeAmount": {
+          "$ref": "#/$defs/decimal"
+        },
+        "costOfGoodsSold": {
+          "$ref": "#/$defs/decimal"
+        },
+        "grossProfit": {
+          "$ref": "#/$defs/decimal"
+        },
+        "itemsWithoutCost": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "refundCount": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "refundAmount": {
+          "$ref": "#/$defs/decimal"
+        },
+        "cancellationCount": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "discountedOrderCount": {
+          "type": "string",
+          "description": "int64. Paid, non-cancelled orders with discount > 0."
+        },
+        "expensesTotal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            }
+          ],
+          "description": "Cash expenses recorded in the range."
+        },
+        "cashDifferenceTotal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            }
+          ],
+          "description": "Signed sum of cash differences of CLOSED shifts whose business date (outlet-local date of openedAt) is in the range."
+        },
+        "closedShiftCount": {
+          "type": "string",
+          "description": "int64 (a string in JSON)."
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LabelTotal"
+          }
+        },
+        "topProducts": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/ProductTotal"
+          }
+        }
+      }
+    },
+    "GetSalesSummaryResponse": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "outlets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutletSalesSummary"
+          }
+        }
+      }
+    },
+    "GetRestockSuggestionsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "user_id"
+      ],
+      "properties": {
+        "tenant_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/ownerUserId"
+        }
+      }
+    },
+    "RestockSuggestion": {
+      "type": "object",
+      "properties": {
+        "inventoryItemId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "quantityOnHand": {
+          "$ref": "#/$defs/decimal"
+        },
+        "reorderLevel": {
+          "$ref": "#/$defs/decimal"
+        },
+        "averageDailyUsage": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            }
+          ],
+          "description": "Usage over the last 14 x 24 h (SALE, SALE_REVERSAL and WASTE movements) divided by 14, scale 3."
+        },
+        "suggestedQuantity": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            }
+          ],
+          "description": "max(0, averageDailyUsage x 7 + reorderLevel - quantityOnHand), scale 3."
+        },
+        "stockStatus": {
+          "type": "string",
+          "enum": [
+            "NEGATIVE",
+            "OUT",
+            "LOW",
+            "OK"
+          ]
+        }
+      }
+    },
+    "OutletRestock": {
+      "type": "object",
+      "description": "Active ingredients with suggestedQuantity > 0 or status NEGATIVE/OUT/LOW, ordered NEGATIVE, OUT, LOW, OK then name.",
+      "properties": {
+        "outletId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outletName": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestockSuggestion"
+          }
+        }
+      }
+    },
+    "GetRestockSuggestionsResponse": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "outlets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutletRestock"
+          }
+        }
+      }
+    },
+    "GetAnomaliesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "user_id",
+        "date"
+      ],
+      "properties": {
+        "tenant_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/ownerUserId"
+        },
+        "date": {
+          "allOf": [
+            {
+              "type": "string",
+              "format": "date"
+            }
+          ],
+          "description": "ISO date yyyy-MM-dd, the outlet-local day to evaluate. Required; blank or malformed is INVALID_ARGUMENT."
+        }
+      }
+    },
+    "CashierAnomaly": {
+      "type": "object",
+      "description": "Rule: the day's value > 2 x the cashier's daily average over the previous 30 days AND at least the minimum.",
+      "properties": {
+        "staffUserId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "fullName": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "CANCELLATIONS",
+            "DISCOUNTS",
+            "CASH_DIFFERENCE"
+          ],
+          "description": "Minimums: CANCELLATIONS >= 3, DISCOUNTS (discounted orders) >= 3, CASH_DIFFERENCE |difference| >= 20000."
+        },
+        "value": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            }
+          ],
+          "description": "A count for CANCELLATIONS and DISCOUNTS; the sum of absolute cash differences (money) for CASH_DIFFERENCE."
+        },
+        "baselineDailyAverage": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            }
+          ],
+          "description": "Sum over the previous 30 days divided by 30, scale 2."
+        }
+      }
+    },
+    "OutletAnomalies": {
+      "type": "object",
+      "description": "CASHIER members only; owners are never evaluated.",
+      "properties": {
+        "outletId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outletName": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "anomalies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CashierAnomaly"
+          }
+        }
+      }
+    },
+    "GetAnomaliesResponse": {
+      "type": "object",
+      "properties": {
+        "tenantId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "outlets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutletAnomalies"
+          }
+        }
+      }
     }
   },
   "x-service": "cashier.v1.CashierService",
@@ -115,6 +521,57 @@
       "request": { "$ref": "#/$defs/GetOrderStatusRequest" },
       "response": { "$ref": "#/$defs/GetOrderStatusResponse" },
       "errors": ["UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "INVALID_ARGUMENT", "PERMISSION_DENIED", "NOT_FOUND", "INTERNAL"]
+    },
+    "GetSalesSummary": {
+      "request": {
+        "$ref": "#/$defs/GetSalesSummaryRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/GetSalesSummaryResponse"
+      },
+      "errors": [
+        "UNAUTHENTICATED",
+        "RESOURCE_EXHAUSTED",
+        "INVALID_ARGUMENT",
+        "PERMISSION_DENIED",
+        "INTERNAL"
+      ],
+      "x-ownerOnly": true,
+      "x-readOnly": true
+    },
+    "GetRestockSuggestions": {
+      "request": {
+        "$ref": "#/$defs/GetRestockSuggestionsRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/GetRestockSuggestionsResponse"
+      },
+      "errors": [
+        "UNAUTHENTICATED",
+        "RESOURCE_EXHAUSTED",
+        "INVALID_ARGUMENT",
+        "PERMISSION_DENIED",
+        "INTERNAL"
+      ],
+      "x-ownerOnly": true,
+      "x-readOnly": true
+    },
+    "GetAnomalies": {
+      "request": {
+        "$ref": "#/$defs/GetAnomaliesRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/GetAnomaliesResponse"
+      },
+      "errors": [
+        "UNAUTHENTICATED",
+        "RESOURCE_EXHAUSTED",
+        "INVALID_ARGUMENT",
+        "PERMISSION_DENIED",
+        "INTERNAL"
+      ],
+      "x-ownerOnly": true,
+      "x-readOnly": true
     }
   },
   "examples": [
@@ -138,6 +595,123 @@
         "paymentStatus": "PAID",
         "total": "36000.00",
         "createdAt": "2026-10-22T03:15:00Z"
+      }
+    },
+    {
+      "method": "GetSalesSummary",
+      "request": {
+        "tenant_id": "00000000-0000-4000-8000-0000000000b1",
+        "user_id": "00000000-0000-4000-8000-0000000000c1",
+        "start_date": "2026-11-14",
+        "end_date": "2026-11-14"
+      },
+      "response": {
+        "tenantId": "00000000-0000-4000-8000-0000000000b1",
+        "outlets": [
+          {
+            "outletId": "00000000-0000-4000-8000-0000000000d1",
+            "outletName": "Kedai Pusat",
+            "timeZone": "Asia/Jakarta",
+            "startDate": "2026-11-14",
+            "endDate": "2026-11-14",
+            "transactionCount": "42",
+            "grossSales": "1250000",
+            "discountAmount": "50000",
+            "netSales": "1200000",
+            "total": "1320000",
+            "taxAmount": "120000",
+            "serviceChargeAmount": "0",
+            "costOfGoodsSold": "480000",
+            "grossProfit": "720000",
+            "itemsWithoutCost": "3",
+            "refundCount": "1",
+            "refundAmount": "36000",
+            "cancellationCount": "2",
+            "discountedOrderCount": "5",
+            "expensesTotal": "75000",
+            "cashDifferenceTotal": "-5000",
+            "closedShiftCount": "2",
+            "labels": [
+              {
+                "method": "CASH",
+                "label": "Tunai",
+                "count": "30",
+                "netSales": "800000"
+              },
+              {
+                "method": "NON_CASH",
+                "label": "QRIS",
+                "count": "12",
+                "netSales": "400000"
+              }
+            ],
+            "topProducts": [
+              {
+                "name": "Kopi Susu",
+                "quantity": "60",
+                "grossSales": "1080000",
+                "costOfGoodsSold": "360000",
+                "grossProfit": "720000",
+                "itemsWithoutCost": "0"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "method": "GetRestockSuggestions",
+      "request": {
+        "tenant_id": "00000000-0000-4000-8000-0000000000b1",
+        "user_id": "00000000-0000-4000-8000-0000000000c1"
+      },
+      "response": {
+        "tenantId": "00000000-0000-4000-8000-0000000000b1",
+        "outlets": [
+          {
+            "outletId": "00000000-0000-4000-8000-0000000000d1",
+            "outletName": "Kedai Pusat",
+            "items": [
+              {
+                "inventoryItemId": "7a1c3a52-7f0e-4f0b-9a52-0d9b4a0c1e22",
+                "name": "Susu",
+                "unit": "L",
+                "quantityOnHand": "2.000",
+                "reorderLevel": "5.000",
+                "averageDailyUsage": "3.500",
+                "suggestedQuantity": "27.500",
+                "stockStatus": "LOW"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "method": "GetAnomalies",
+      "request": {
+        "tenant_id": "00000000-0000-4000-8000-0000000000b1",
+        "user_id": "00000000-0000-4000-8000-0000000000c1",
+        "date": "2026-11-14"
+      },
+      "response": {
+        "tenantId": "00000000-0000-4000-8000-0000000000b1",
+        "outlets": [
+          {
+            "outletId": "00000000-0000-4000-8000-0000000000d1",
+            "outletName": "Kedai Pusat",
+            "date": "2026-11-14",
+            "anomalies": [
+              {
+                "staffUserId": "00000000-0000-4000-8000-0000000000c2",
+                "fullName": "Sari",
+                "kind": "CANCELLATIONS",
+                "value": "4",
+                "baselineDailyAverage": "0.80"
+              }
+            ]
+          }
+        ]
       }
     }
   ]

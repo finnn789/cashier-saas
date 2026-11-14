@@ -15,7 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.chat.entities import ChannelAccount, ChannelUser, Conversation, Message
+from app.chat.entities import (
+    ChannelAccount,
+    ChannelUser,
+    Conversation,
+    Message,
+    TenantMember,
+    TenantMembership,
+)
 
 Row = dict[str, Any]
 CHANNELS = ChannelAccount.__table__
@@ -23,6 +30,38 @@ USERS = ChannelUser.__table__
 CONVERSATIONS = Conversation.__table__
 MESSAGES = Message.__table__
 PLATFORMS = frozenset(('TELEGRAM', 'WHATSAPP'))
+MEMBERS = TenantMember.__table__
+MEMBERSHIPS = TenantMembership.__table__
+
+
+async def list_telegram_owner_recipients(
+    connection: AsyncConnection, tenant_id: UUID
+) -> list[tuple[UUID, int]]:
+    '''(java_user_id, private chat id) of the tenant's ACTIVE owners with a verified Telegram user.'''
+    result = await connection.execute(
+        select(MEMBERSHIPS.c.java_user_id, USERS.c.external_user_id)
+        .select_from(
+            MEMBERSHIPS.join(USERS, USERS.c.id == MEMBERSHIPS.c.user_id).join(
+                MEMBERS,
+                and_(
+                    MEMBERS.c.tenant_id == MEMBERSHIPS.c.tenant_id,
+                    MEMBERS.c.java_user_id == MEMBERSHIPS.c.java_user_id,
+                ),
+            )
+        )
+        .where(
+            MEMBERSHIPS.c.tenant_id == tenant_id,
+            MEMBERSHIPS.c.java_user_id.is_not(None),
+            MEMBERS.c.role == 'OWNERMERCHANT',
+            MEMBERS.c.status == 'ACTIVE',
+            USERS.c.platform == 'TELEGRAM',
+        )
+        .order_by(MEMBERSHIPS.c.java_user_id, USERS.c.external_user_id)
+    )
+    # A Telegram private chat id equals the user id; skip anything that is not numeric.
+    return [
+        (row[0], int(row[1])) for row in result.all() if str(row[1]).lstrip('-').isdigit()
+    ]
 
 
 async def register_telegram_channel(

@@ -18,7 +18,9 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -72,6 +74,21 @@ public class FnbOrderRepository {
         if (orderNumber != null) query.where(ORDER.orderNumber.toString()).eq(orderNumber);
         return query.orderByDesc(ORDER.createdAt.toString()).orderByDesc(ORDER.id.toString())
                 .setFirstResult(page * size).setMaxResults(size + 1).getResultList();
+    }
+
+    /** Paid, non-cancelled orders with a discount, paid in [from, to), counted per receiving staff user. */
+    public Map<UUID, Long> discountedPaidOrdersByReceiver(UUID tenantId, UUID outletId, Instant from, Instant to) {
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : entityManager.createQuery("select p.receivedBy.id, count(distinct o.id) from PaymentEntity p "
+                        + "join p.salesOrder o where p.tenant.id = :tenantId and p.outlet.id = :outletId "
+                        + "and o.tenant.id = :tenantId and o.outlet.id = :outletId and p.paidAt >= :from and p.paidAt < :to "
+                        + "and o.paymentStatus = :paid and o.status <> :cancelled and o.discountAmount > 0 "
+                        + "group by p.receivedBy.id", Object[].class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("from", from).setParameter("to", to)
+                .setParameter("paid", PaymentStatus.PAID).setParameter("cancelled", OrderStatus.CANCELLED).getResultList())
+            counts.put((UUID) row[0], (Long) row[1]);
+        return counts;
     }
 
     public List<OrderItemEntity> items(UUID tenantId, UUID outletId, List<UUID> orderIds) {

@@ -92,6 +92,13 @@ Status: belum terverifikasi end-to-end. Kontrak lengkap ada di [docs/contracts/m
 - **Built-in Tools**:
   - [`CatalogSearchTool`](app/tools/catalog.py) (`search_catalog_menu`): Pencarian menu dan ketersediaan stok produk kasir via gRPC (`GetCatalogItem`).
   - [`OrderStatusTool`](app/tools/order.py) (`check_order_status`): Pengecekan status dan rincian pesanan kasir berdasarkan nomor order via gRPC (`GetOrderStatus`).
+  - [`SalesSummaryTool`](app/tools/insights.py) (`sales_summary`, parameter `start_date` dan `end_date` ISO, zona waktu outlet): ringkasan penjualan, HPP dan laba kotor, refund, pembatalan, kas, menu terlaris via gRPC (`GetSalesSummary`). Panggil dua kali untuk membandingkan dua periode.
+  - [`RestockSuggestionsTool`](app/tools/insights.py) (`restock_suggestions`): saran belanja bahan dari pemakaian 14 hari terakhir via gRPC (`GetRestockSuggestions`).
+  - [`CashierAnomaliesTool`](app/tools/insights.py) (`cashier_anomalies`, parameter `date`): kasir dengan pembatalan, diskon, atau selisih kas di atas 2x rata-rata 30 hari via gRPC (`GetAnomalies`).
+  - Ketiga tool insight bersifat **baca saja dan hanya untuk owner** (role `OWNERMERCHANT`): `user_id` diambil dari keanggotaan terverifikasi, bukan dari model. Untuk kasir atau jika backend menolak, tool menjawab "Data tidak tersedia; fitur ini hanya untuk owner". System prompt memuat tanggal hari ini (Asia/Jakarta).
+
+### 2.5. Ringkasan Harian Owner (M7)
+Backend memanggil **`POST /api/v1/internal/daily-summaries`** (header `X-Internal-Service-Key` = `AI_INTERNAL_API_KEY`, body `tenant_id`, `outlet_id`, `business_date`) saat shift terakhir outlet ditutup, atau pada fallback pukul 23:00 waktu outlet; satu kali per outlet per hari. Layanan ini mengirim ringkasan ke setiap owner (`OWNERMERCHANT`, `ACTIVE`, akun Telegram terverifikasi) di tenant tersebut: teks template deterministik dengan angka persis dari gRPC (`GetSalesSummary`, `GetRestockSuggestions`, `GetAnomalies`) ditambah satu kalimat insight dari LLM (batas 8 detik; jika gagal, dikirim tanpa kalimat itu). Respons: `200 {"delivered": n, "skipped": m}`, `401` kunci salah, `422` body tidak valid, `503` kunci belum dikonfigurasi atau bot Telegram belum siap. Kontrak lengkap: [docs/contracts/daily-summary.md](../docs/contracts/daily-summary.md).
 
 ---
 

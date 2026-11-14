@@ -47,6 +47,7 @@ public class FnbShiftService {
     private final AuditLogRepository audit;
     private final FnbCashExpenseRepository expenses;
     private final DigestService digest;
+    private final DailySummaryService dailySummary;
 
     /** The caller's own open shift in the context outlet; callers hold the tenant lock when the result drives a write. */
     public Optional<CashShiftEntity> findOpenShift(MerchantAccessContext context) {
@@ -149,6 +150,7 @@ public class FnbShiftService {
                 context.getMembership().getUser(), AuditLogEntity.Action.SHIFT_CLOSED, shift.getId(), null,
                 "expected=" + shift.getExpectedCash().toPlainString() + " counted=" + shift.getCountedCash().toPlainString()
                         + " difference=" + shift.getCashDifference().toPlainString()));
+        dailySummary.onShiftClosed(context, shift); // shared by closeCurrent and forceClose
         return response(shift, orders.countOpenUnpaid(context.getTenant().getId(), context.getOutlet().getId()), true);
     }
 

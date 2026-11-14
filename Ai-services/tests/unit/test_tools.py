@@ -74,5 +74,7 @@ class ToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(registry.get_tool("check_laptop_cpu_usage"))
         self.assertIsNotNone(registry.get_tool("search_catalog_menu"))
         self.assertIsNotNone(registry.get_tool("check_order_status"))
+        for name in ("sales_summary", "restock_suggestions", "cashier_anomalies"):
+            self.assertIsNotNone(registry.get_tool(name))
         schemas = registry.get_openrouter_schemas()
-        self.assertEqual(len(schemas), 2)
+        self.assertEqual(len(schemas), 5)

@@ -7,6 +7,9 @@ option java_multiple_files = true;
 service CashierService {
   rpc GetCatalogItem (GetCatalogItemRequest) returns (GetCatalogItemResponse);
   rpc GetOrderStatus (GetOrderStatusRequest) returns (GetOrderStatusResponse);
+  rpc GetSalesSummary (GetSalesSummaryRequest) returns (GetSalesSummaryResponse);
+  rpc GetRestockSuggestions (GetRestockSuggestionsRequest) returns (GetRestockSuggestionsResponse);
+  rpc GetAnomalies (GetAnomaliesRequest) returns (GetAnomaliesResponse);
 }
 
 message GetCatalogItemRequest {
@@ -46,4 +49,112 @@ message GetOrderStatusResponse {
   string payment_status = 4;
   string created_at = 6;
   string total = 7;
+}
+
+message GetSalesSummaryRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string start_date = 3;
+  string end_date = 4;
+}
+
+message LabelTotal {
+  string method = 1;
+  string label = 2;
+  int64 count = 3;
+  string net_sales = 4;
+}
+
+message ProductTotal {
+  string name = 1;
+  int64 quantity = 2;
+  string gross_sales = 3;
+  string cost_of_goods_sold = 4;
+  string gross_profit = 5;
+  int64 items_without_cost = 6;
+}
+
+message OutletSalesSummary {
+  string outlet_id = 1;
+  string outlet_name = 2;
+  string time_zone = 3;
+  string start_date = 4;
+  string end_date = 5;
+  int64 transaction_count = 6;
+  string gross_sales = 7;
+  string discount_amount = 8;
+  string net_sales = 9;
+  string total = 10;
+  string tax_amount = 11;
+  string service_charge_amount = 12;
+  string cost_of_goods_sold = 13;
+  string gross_profit = 14;
+  int64 items_without_cost = 15;
+  int64 refund_count = 16;
+  string refund_amount = 17;
+  int64 cancellation_count = 18;
+  int64 discounted_order_count = 19;
+  string expenses_total = 20;
+  string cash_difference_total = 21;
+  int64 closed_shift_count = 22;
+  repeated LabelTotal labels = 23;
+  repeated ProductTotal top_products = 24;
+}
+
+message GetSalesSummaryResponse {
+  string tenant_id = 1;
+  repeated OutletSalesSummary outlets = 2;
+}
+
+message GetRestockSuggestionsRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message RestockSuggestion {
+  string inventory_item_id = 1;
+  string name = 2;
+  string unit = 3;
+  string quantity_on_hand = 4;
+  string reorder_level = 5;
+  string average_daily_usage = 6;
+  string suggested_quantity = 7;
+  string stock_status = 8;
+}
+
+message OutletRestock {
+  string outlet_id = 1;
+  string outlet_name = 2;
+  repeated RestockSuggestion items = 3;
+}
+
+message GetRestockSuggestionsResponse {
+  string tenant_id = 1;
+  repeated OutletRestock outlets = 2;
+}
+
+message GetAnomaliesRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string date = 3;
+}
+
+message CashierAnomaly {
+  string staff_user_id = 1;
+  string full_name = 2;
+  string kind = 3;
+  string value = 4;
+  string baseline_daily_average = 5;
+}
+
+message OutletAnomalies {
+  string outlet_id = 1;
+  string outlet_name = 2;
+  string date = 3;
+  repeated CashierAnomaly anomalies = 4;
+}
+
+message GetAnomaliesResponse {
+  string tenant_id = 1;
+  repeated OutletAnomalies outlets = 2;
 }

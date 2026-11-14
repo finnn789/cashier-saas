@@ -10,7 +10,9 @@
     "<OUTSIDER_USER_ID>": "UUID of an existing staff user without an active membership in <TENANT_ID> (or with a deactivated membership, or only inactive outlets)",
     "<ORDER_NUMBER>": "an existing order number of <TENANT_ID> in an outlet <USER_ID> can access",
     "<OTHER_OUTLET_ORDER_NUMBER>": "an existing order number of <TENANT_ID> in an outlet <USER_ID> has no access to",
-    "<OTHER_TENANT_ORDER_NUMBER>": "an existing order number that belongs to <OTHER_TENANT_ID>"
+    "<OTHER_TENANT_ORDER_NUMBER>": "an existing order number that belongs to <OTHER_TENANT_ID>",
+    "<OWNER_USER_ID>": "UUID of an ACTIVE staff user with an ACTIVE OWNERMERCHANT membership in <TENANT_ID> and access to at least one active outlet; used as user_id for the owner-only RPCs",
+    "<CASHIER_USER_ID>": "UUID of an ACTIVE CASHIER member of <TENANT_ID> (valid for GetCatalogItem and GetOrderStatus, rejected by the owner-only RPCs)"
   },
   "GetCatalogItem": [
     {
@@ -144,6 +146,264 @@
       "name": "unknown tenant",
       "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead", "user_id": "<USER_ID>", "order_number": "<ORDER_NUMBER>" },
       "expect": "PERMISSION_DENIED"
+    }
+  ],
+  "GetSalesSummary": [
+    {
+      "name": "owner, valid request",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "OK, one entry per owner outlet, money as plain decimal strings, int64 counts, top_products at most 5; numbers equal the REST owner sales report for the same outlet and range"
+    },
+    {
+      "name": "cashier is rejected (owner only)",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<CASHIER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "user is not an active member of the tenant",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OUTSIDER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "unknown tenant",
+      "message": {
+        "tenant_id": "00000000-0000-4000-8000-00000000dead",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "tenant isolation: owner of another tenant",
+      "message": {
+        "tenant_id": "<OTHER_TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence); never returns the other tenant's data"
+    },
+    {
+      "name": "missing user_id",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "INVALID_ARGUMENT: user_id must not be blank"
+    },
+    {
+      "name": "blank tenant",
+      "message": {
+        "tenant_id": "",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "2026-11-14"
+      },
+      "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
+    },
+    {
+      "name": "single day",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-14",
+        "end_date": "2026-11-14"
+      },
+      "expect": "OK, start_date equals end_date in the response"
+    },
+    {
+      "name": "end before start",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-14",
+        "end_date": "2026-11-01"
+      },
+      "expect": "INVALID_ARGUMENT: date range is invalid"
+    },
+    {
+      "name": "range of 366 days or more",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2025-11-01",
+        "end_date": "2026-11-02"
+      },
+      "expect": "INVALID_ARGUMENT: date range is invalid"
+    },
+    {
+      "name": "start_date missing",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "end_date": "2026-11-14"
+      },
+      "expect": "INVALID_ARGUMENT: start_date must not be blank"
+    },
+    {
+      "name": "end_date is not an ISO date",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "start_date": "2026-11-01",
+        "end_date": "14/11/2026"
+      },
+      "expect": "INVALID_ARGUMENT: end_date must be an ISO date (yyyy-MM-dd)"
+    }
+  ],
+  "GetRestockSuggestions": [
+    {
+      "name": "owner, valid request",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>"
+      },
+      "expect": "OK, per outlet only active ingredients with suggested_quantity > 0 or stock_status NEGATIVE/OUT/LOW, ordered NEGATIVE, OUT, LOW, OK then name; quantities with up to 3 decimals"
+    },
+    {
+      "name": "cashier is rejected (owner only)",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<CASHIER_USER_ID>"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "user is not an active member of the tenant",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OUTSIDER_USER_ID>"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "unknown tenant",
+      "message": {
+        "tenant_id": "00000000-0000-4000-8000-00000000dead",
+        "user_id": "<OWNER_USER_ID>"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "tenant isolation: owner of another tenant",
+      "message": {
+        "tenant_id": "<OTHER_TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence); never returns the other tenant's data"
+    },
+    {
+      "name": "missing user_id",
+      "message": {
+        "tenant_id": "<TENANT_ID>"
+      },
+      "expect": "INVALID_ARGUMENT: user_id must not be blank"
+    },
+    {
+      "name": "blank tenant",
+      "message": {
+        "tenant_id": "",
+        "user_id": "<OWNER_USER_ID>"
+      },
+      "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
+    }
+  ],
+  "GetAnomalies": [
+    {
+      "name": "owner, valid request",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "OK, per outlet the CASHIER members whose day value exceeds 2 x their 30-day daily average and the minimum (CANCELLATIONS >= 3, DISCOUNTS >= 3, CASH_DIFFERENCE >= 20000); owners are never listed; anomalies may be empty"
+    },
+    {
+      "name": "cashier is rejected (owner only)",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<CASHIER_USER_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "user is not an active member of the tenant",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OUTSIDER_USER_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "unknown tenant",
+      "message": {
+        "tenant_id": "00000000-0000-4000-8000-00000000dead",
+        "user_id": "<OWNER_USER_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence)"
+    },
+    {
+      "name": "tenant isolation: owner of another tenant",
+      "message": {
+        "tenant_id": "<OTHER_TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant, no existence evidence); never returns the other tenant's data"
+    },
+    {
+      "name": "missing user_id",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "INVALID_ARGUMENT: user_id must not be blank"
+    },
+    {
+      "name": "blank tenant",
+      "message": {
+        "tenant_id": "",
+        "user_id": "<OWNER_USER_ID>",
+        "date": "2026-11-14"
+      },
+      "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
+    },
+    {
+      "name": "date missing",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>"
+      },
+      "expect": "INVALID_ARGUMENT: date must not be blank"
+    },
+    {
+      "name": "date is not an ISO date",
+      "message": {
+        "tenant_id": "<TENANT_ID>",
+        "user_id": "<OWNER_USER_ID>",
+        "date": "2026-13-45"
+      },
+      "expect": "INVALID_ARGUMENT: date must be an ISO date (yyyy-MM-dd)"
     }
   ],
   "authAndLimits": [

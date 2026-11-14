@@ -25,6 +25,11 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - Old product-scoped group/option/option-recipe endpoints are replaced, no compatibility routes. Migration V5 backfills and drops `option_groups.product_id`.
 - The inventory PR is not merged; Phase 2 is a stacked branch on `feature/fnb-inventory-recipe` (user decision, merge skipped).
 
+## M7 owner AI — 2026-11-14
+
+- Explicit user decisions (TASK-080): daily summary sent when the last open shift of the outlet closes, fallback 23:00 outlet time, once per outlet per day; text = deterministic template + one LLM insight sentence (sent without it on LLM failure); cashier anomaly = day value > 2 × own 30-day daily average and above minimums (cancellations >= 3, discounted orders >= 3, |cash difference| >= 20000).
+- Orchestrator design: three new read-only OWNERMERCHANT-only gRPC RPCs (sales summary, restock suggestions, anomalies); Java owns the trigger and dedupe (`daily_summary_dispatches`, V10) and calls the AI service after commit; the AI service reads data back through gRPC (Java stays the source of truth).
+
 ## M6 data owner — 2026-11-14
 
 - Explicit user decisions (TASK-079): cashiers may enter a purchase price on RESTOCK, but average cost and movement unit cost are visible to the owner only; per-menu gross profit = line totals − COGS (before order discount), total gross profit = net sales − COGS; stock count is one batch request per count.

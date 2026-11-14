@@ -28,6 +28,7 @@ import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbCashExpenseRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.lite.project.cashiersaas.repository.FnbShiftRepository;
+import org.lite.project.cashiersaas.service.DailySummaryService;
 import org.lite.project.cashiersaas.service.DigestService;
 import org.lite.project.cashiersaas.service.FnbShiftService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
@@ -51,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -66,6 +68,7 @@ class FnbShiftServiceTest {
     @Mock private AuditLogRepository audit;
     @Mock private FnbCashExpenseRepository expenses;
     @Mock private DigestService digest;
+    @Mock private DailySummaryService dailySummary;
     @InjectMocks private FnbShiftService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -341,6 +344,7 @@ class FnbShiftServiceTest {
         verify(audit).persist(log.capture());
         assertEquals("SHIFT_CLOSED", log.getValue().getAction());
         assertEquals("expected=320.00 counted=300.00 difference=-20.00", log.getValue().getDetails());
+        verify(dailySummary).onShiftClosed(any(MerchantAccessContext.class), same(shift));
     }
 
     @Test
@@ -365,6 +369,7 @@ class FnbShiftServiceTest {
         assertEquals(new BigDecimal("200.00"), response.getExpectedCash());
         assertEquals(new BigDecimal("0.00"), response.getCashDifference());
         verify(orders).lockTenant(tenantId);
+        verify(dailySummary).onShiftClosed(any(MerchantAccessContext.class), same(shift));
     }
 
     @Test

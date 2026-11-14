@@ -293,9 +293,18 @@ class DefaultToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(order_tool, OrderStatusTool)
 
         schemas = registry.get_openrouter_schemas()
-        self.assertEqual(len(schemas), 2)
+        self.assertEqual(len(schemas), 5)
         names = {s["function"]["name"] for s in schemas}
-        self.assertEqual(names, {"search_catalog_menu", "check_order_status"})
+        self.assertEqual(
+            names,
+            {
+                "search_catalog_menu",
+                "check_order_status",
+                "sales_summary",
+                "restock_suggestions",
+                "cashier_anomalies",
+            },
+        )
 
     async def test_dispatch_catalog_and_order_tools(self) -> None:
         registry = ToolRegistry()
