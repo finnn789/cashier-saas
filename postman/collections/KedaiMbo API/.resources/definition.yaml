@@ -8,6 +8,12 @@ description: |-
 
   Refresh/logout menggunakan cookie jar cashier_refresh dan CSRF: jalankan Get CSRF terlebih dahulu. Backend default cookie secure=true; HTTPS atau konfigurasi development CASHIER_REFRESH_COOKIE_SECURE=false diperlukan untuk cookie melalui HTTP.
 
+  Kelola kasir (folder 04, hanya OWNER): List Outlet Staff -> isi staffUserId dari userId -> Deactivate/Reactivate/Reset Staff Password (kata sandi sementara tampil sekali di respons). Change Password (folder 01) memakai password dan newPassword (isi lokal, jangan commit). Kasir tidak dapat membatalkan pesanan yang sudah diberi diskon (403); hanya owner.
+
+  Shift kas (folder 16): pembayaran (CASH dan MANUAL_NON_CASH) mewajibkan kasir yang membayar memiliki shift terbuka; tanpa shift respons 409. Urutan: Opening Suggestion (saran modal awal) -> Open Shift (kasir atau owner, openingCash) -> bayar pesanan -> opsional Record Expense (kas kecil) -> Close Current Shift (countedCash; expected = modal awal + kas masuk - refund tunai - pengeluaran kas kecil; totalsByMethod per metode dan label berfungsi sebagai laporan harian). Owner dapat melihat daftar/detail shift dan menutup paksa shift outlet. Refund Order (hanya OWNER, penuh, header Idempotency-Key + alasan) mengembalikan stok dan mengubah paymentStatus menjadi REFUNDED; refund CASH memerlukan shift terbuka milik owner.
+
+  Pembayaran hanya dicatat (tidak ada payment gateway; gateway mock dihapus): folder 17 berisi Pay Order Cash, Pay Order Non-Cash, Get Receipt, Cancel Order. Non-tunai wajib labelId aktif outlet dan amountTendered sama dengan total; ambil labelId dari Cashier List Payment Labels (folder 18; owner mengelola label lewat Owner List/Create/Update; default QRIS, Transfer, Debit). Nomor struk INV-YYYYMMDD-NNNN berurutan per outlet per hari. Struk (PAID atau REFUNDED) memuat footer (receiptFooter) dan penanda REFUND; footer diatur owner di folder 19 Update Business Settings. Folder 15 memuat List Orders dan Search Orders By Date And Number (from, to, orderNumber); customerLabel dan orderNote pada pesanan bersifat opsional.
+
   Idempotency key dihasilkan sekali bila kosong. Pertahankan saat retry payload yang sama; kosongkan/ganti variabel key untuk operasi baru. Tidak ada tenant header buatan. ID tenant/outlet dipakai hanya pada path atau kontrak Select Merchant dan tetap diperiksa server.
 
   Semua endpoint controller dimasukkan termasuk katalog layanan/sales yang kebijakan tipe usahanya dapat berbeda dari F&B. API belum dijalankan. Skrip response hanya menangkap variabel, tidak berisi assertion test.
@@ -57,12 +63,21 @@ variables:
   - key: orderId
     value: ""
     secret: false
+  - key: shiftId
+    value: ""
+    secret: false
   - key: itemId
     value: ""
     secret: false
   - key: saleId
     value: ""
     secret: false
+  - key: staffUserId
+    value: ""
+    secret: false
+  - key: newPassword
+    value: ""
+    secret: true
   - key: invitationCode
     value: ""
     secret: false
@@ -75,12 +90,24 @@ variables:
   - key: posOrderKey
     value: ""
     secret: false
+  - key: refundKey
+    value: ""
+    secret: false
+  - key: paymentKey
+    value: ""
+    secret: false
+  - key: expenseKey
+    value: ""
+    secret: false
+  - key: labelId
+    value: ""
+    secret: false
   - key: bearer_token_0vit
     secret: true
 scripts:
   - type: http:beforeRequest
     code: |-
-      ["onboardingKey","saleKey","posOrderKey"].forEach(function (key) {
+      ["onboardingKey","saleKey","posOrderKey","refundKey","paymentKey","expenseKey"].forEach(function (key) {
        if (!pm.variables.get(key)) pm.collectionVariables.set(key, pm.variables.replaceIn("{{$guid}}"));
       });
     language: text/javascript

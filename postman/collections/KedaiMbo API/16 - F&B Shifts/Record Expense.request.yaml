@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/shifts/current/expenses"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Idempotency-Key
+    value: "{{expenseKey}}"
+    description: Gunakan key yang sama saat retry pengeluaran yang sama. Ganti untuk pengeluaran baru.
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "amount": 15000.00,
+      "description": "Beli es batu"
+    }
+description: |-
+  Kas kecil yang diambil dari laci pada shift terbuka milik pemanggil. amount > 0 (2 desimal), description wajib (maks 200). Tanpa shift terbuka 409 "Buka shift terlebih dahulu sebelum mencatat pengeluaran.". Mengurangi expectedCash saat tutup shift.
+order: 8000

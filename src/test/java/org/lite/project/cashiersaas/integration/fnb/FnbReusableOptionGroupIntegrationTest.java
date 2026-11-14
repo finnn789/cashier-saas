@@ -202,6 +202,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
     }
 
     private MvcResult payCash(MerchantFixture actor, String orderId) throws Exception {
+        api.ensureShift(actor);
         return api.send(post(orders(actor) + "/" + orderId + "/payments").header(AUTH, actor.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"method\":\"CASH\",\"amountTendered\":1000000,\"idempotencyKey\":\"pay-" + UUID.randomUUID()

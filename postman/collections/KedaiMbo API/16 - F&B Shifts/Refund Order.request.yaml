@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/orders/{{orderId}}/refund"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Idempotency-Key
+    value: "{{refundKey}}"
+    description: Hanya OWNER. Gunakan key yang sama saat retry refund yang sama. Ganti untuk refund pesanan lain.
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "reason": "Pelanggan komplain"
+    }
+order: 7000

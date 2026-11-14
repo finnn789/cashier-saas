@@ -1,6 +1,7 @@
 package org.lite.project.cashiersaas.service;
 
 import lombok.RequiredArgsConstructor;
+import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.FnbStaffOrderMapper;
 import org.lite.project.cashiersaas.dto.response.FnbOrderPageResponse;
@@ -17,6 +18,11 @@ import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,17 +31,34 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class FnbStaffOrderService {
+    private static final int MAX_DAYS = 366;
     private final MerchantAccessGuard guard;
     private final FnbOrderRepository orders;
 
     @Transactional(readOnly = true)
     public FnbOrderPageResponse list(TenantPrincipal principal, UUID outletId, int page, int size,
-                                     OrderStatus status, PaymentStatus paymentStatus, OrderSource source) {
+                                     OrderStatus status, PaymentStatus paymentStatus, OrderSource source,
+                                     LocalDate from, LocalDate to, String orderNumber) {
         if (page < 0 || page > 1_000_000 || size < 1 || size > 50)
             throw new InvalidOperationException("Parameter halaman tidak valid.");
-        guard.requireOutlet(principal, outletId);
+        MerchantAccessContext context = guard.requireOutlet(principal, outletId);
+        if ((from == null) != (to == null)) throw new InvalidOperationException("Filter tanggal harus menyertakan from dan to.");
+        Instant start = null;
+        Instant end = null;
+        if (from != null) {
+            if (to.isBefore(from) || ChronoUnit.DAYS.between(from, to) >= MAX_DAYS)
+                throw new InvalidOperationException("Rentang tanggal pesanan tidak valid.");
+            try {
+                ZoneId zone = ZoneId.of(context.getOutlet().getTimeZone());
+                start = from.atStartOfDay(zone).toInstant();
+                end = to.plusDays(1).atStartOfDay(zone).toInstant();
+            } catch (DateTimeException exception) {
+                throw new InvalidOperationException("Rentang tanggal pesanan tidak valid.");
+            }
+        }
+        String number = orderNumber == null || orderNumber.isBlank() ? null : orderNumber.trim();
         List<SalesOrderEntity> probe = orders.page(principal.getTenantId(), outletId, page, size,
-                status, paymentStatus, source);
+                status, paymentStatus, source, start, end, number);
         boolean hasNext = probe.size() > size;
         List<SalesOrderEntity> pageOrders = hasNext ? probe.subList(0, size) : probe;
         FnbOrderPageResponse response = new FnbOrderPageResponse();

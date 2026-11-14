@@ -80,7 +80,7 @@ public class MemberSyncClient {
         body.put("full_name", member.getFullName());
         body.put("phone_number", member.getPhoneNumber());
         body.put("role", member.getRole().name());
-        body.put("status", "ACTIVE");
+        body.put("status", member.getStatus());
         int maxAttempts = Math.max(1, properties.getMaxAttempts());
         for (int attempt = 1; ; attempt++) {
             String failure;

@@ -23,6 +23,7 @@ public final class FnbSalesReportMapper {
         value.setOrderNumber(row.orderNumber);
         value.setOrderStatus(row.status);
         value.setPaymentMethod(row.method);
+        value.setMethodLabel(row.methodLabel);
         value.setSubtotal(row.subtotal);
         value.setNetSales(row.subtotal.subtract(row.discount));
         value.setTotal(row.total);
@@ -63,6 +64,7 @@ public final class FnbSalesReportMapper {
         return rows.stream().map(row -> {
             FnbSalesPaymentBreakdownResponse value = new FnbSalesPaymentBreakdownResponse();
             value.setMethod(row.method);
+            value.setMethodLabel(row.methodLabel);
             value.setTransactionCount(row.count);
             value.setNetSales(row.netSales);
             value.setAmountCollected(row.amountCollected);

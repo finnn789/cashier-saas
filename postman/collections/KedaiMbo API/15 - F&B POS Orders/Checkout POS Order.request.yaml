@@ -15,6 +15,7 @@ body:
     {
       "serviceType": "DINE_IN",
       "customerLabel": "Pelanggan KedaiMbo",
+      "orderNote": "Es dipisah, tanpa sedotan",
       "items": [
         {
           "productId": "{{productId}}",
@@ -29,7 +30,7 @@ scripts:
     code: |-
       if (pm.response.code >= 200 && pm.response.code < 300) {
        const r = pm.response.json();
-       if (r.success && r.data && r.data.id) pm.collectionVariables.set("orderId", r.data.id);
+       if (r.success && r.data && (r.data.orderId || r.data.id)) pm.collectionVariables.set("orderId", r.data.orderId || r.data.id);
       }
     language: text/javascript
 order: 1000

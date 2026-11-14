@@ -365,6 +365,83 @@ class FnbStockServiceTest {
         verify(inventory, times(2)).persist(any(InventoryMovementEntity.class));
     }
 
+    // 11
+    @Test
+    void reversalPutsBackNegatedSaleDeltasLinksTheOriginalAndLocksInItemOrder() {
+        InventoryItemEntity low = ingredient(ingredientA, "Susu", "ml", "10");
+        InventoryItemEntity high = ingredient(ingredientB, "Gula", "ml", "10");
+        InventoryBalanceEntity lowBalance = balance(low, "991");
+        InventoryBalanceEntity highBalance = balance(high, "993");
+        InventoryMovementEntity lowSale = sale(low, "-9.000");
+        InventoryMovementEntity highSale = sale(high, "-7.000");
+        ReflectionTestUtils.setField(lowSale, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(highSale, "id", UUID.randomUUID());
+        when(inventory.saleMovements(tenantId, outletId, orderId)).thenReturn(List.of(lowSale, highSale));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA, ingredientB)))
+                .thenReturn(List.of(highBalance, lowBalance));
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        List<String> warnings = service.reverseForRefundedOrder(context, order);
+
+        assertTrue(warnings.isEmpty());
+        assertDecimal("1000", lowBalance.getQuantityOnHand());
+        assertDecimal("1000", highBalance.getQuantityOnHand());
+        InOrder inOrder = inOrder(inventory);
+        inOrder.verify(inventory).lock(lowBalance);
+        inOrder.verify(inventory).persist(any(InventoryMovementEntity.class));
+        inOrder.verify(inventory).lock(highBalance);
+        inOrder.verify(inventory).persist(any(InventoryMovementEntity.class));
+        ArgumentCaptor<InventoryMovementEntity> captor = ArgumentCaptor.forClass(InventoryMovementEntity.class);
+        verify(inventory, times(2)).persist(captor.capture());
+        InventoryMovementEntity first = captor.getAllValues().get(0);
+        assertEquals(InventoryMovementEntity.Type.SALE_REVERSAL, first.getType());
+        assertDecimal("9", first.getQuantityDelta());
+        assertEquals(lowSale.getId(), first.getReversalOfMovementId());
+        assertEquals("sale-reversal:" + orderId + ":" + ingredientA, first.getIdempotencyKey());
+        assertEquals("Refund pesanan ORD-1", first.getReason());
+        assertEquals(orderId, first.getOrderId());
+        assertEquals(membershipId, first.getActorMembershipId());
+        assertSame(low, first.getInventoryItem());
+        InventoryMovementEntity second = captor.getAllValues().get(1);
+        assertDecimal("7", second.getQuantityDelta());
+        assertEquals(highSale.getId(), second.getReversalOfMovementId());
+        assertEquals("sale-reversal:" + orderId + ":" + ingredientB, second.getIdempotencyKey());
+    }
+
+    // 12
+    @Test
+    void reversalSkipsAnItemWhoseReversalKeyExistsAndOrdersWithoutSalesAreNoOps() {
+        when(inventory.saleMovements(tenantId, outletId, orderId)).thenReturn(List.of());
+        assertTrue(service.reverseForRefundedOrder(context, order).isEmpty());
+        verify(inventory, never()).balances(any(UUID.class), any(UUID.class), any());
+
+        InventoryItemEntity done = ingredient(ingredientA, "Susu", "ml", "100");
+        InventoryItemEntity fresh = ingredient(ingredientB, "Gula", "ml", "10");
+        InventoryBalanceEntity doneBalance = balance(done, "5");
+        InventoryBalanceEntity freshBalance = balance(fresh, "1000");
+        when(inventory.saleMovements(tenantId, outletId, orderId))
+                .thenReturn(List.of(sale(done, "-2.000"), sale(fresh, "-10.000")));
+        when(inventory.balances(tenantId, outletId, List.of(ingredientA, ingredientB)))
+                .thenReturn(List.of(doneBalance, freshBalance));
+        String doneKey = "sale-reversal:" + orderId + ":" + ingredientA;
+        when(inventory.movementByKey(tenantId, doneKey)).thenReturn(Optional.of(sale(done, "2.000")));
+        when(inventory.movementByKey(tenantId, "sale-reversal:" + orderId + ":" + ingredientB)).thenReturn(Optional.empty());
+        when(tokens.digest(anyString())).thenReturn("fingerprint");
+
+        List<String> warnings = service.reverseForRefundedOrder(context, order);
+
+        assertTrue(warnings.isEmpty(), "skipped item gives no (duplicate) warning");
+        assertDecimal("5", doneBalance.getQuantityOnHand());
+        verify(inventory, never()).lock(doneBalance);
+        assertDecimal("1010", freshBalance.getQuantityOnHand());
+        verify(inventory, times(1)).persist(any(InventoryMovementEntity.class));
+    }
+
+    private InventoryMovementEntity sale(InventoryItemEntity item, String delta) {
+        return InventoryMovementEntity.record(tenantId, outletId, item, orderId, InventoryMovementEntity.Type.SALE,
+                new BigDecimal(delta), "Penjualan ORD-1", "sale:" + orderId + ":" + item.getId(), "old", membershipId);
+    }
+
     private void stubOrder(List<OrderItemEntity> items, List<OrderItemOptionEntity> options) {
         when(orders.items(tenantId, outletId, List.of(orderId))).thenReturn(items);
         when(orders.itemOptions(tenantId, outletId, items.stream().map(OrderItemEntity::getId).toList())).thenReturn(options);

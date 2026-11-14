@@ -5,6 +5,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import Any
 
 import grpc
@@ -150,6 +151,7 @@ class CashierGrpcClient:
         self,
         *,
         tenant_id: str,
+        user_id: str,
         query: str = "",
         limit: int = DEFAULT_CATALOG_LIMIT,
     ) -> list[dict[str, Any]]:
@@ -162,6 +164,7 @@ class CashierGrpcClient:
                 return []
             request = cashier_service_pb2.GetCatalogItemRequest(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 query=query,
                 limit=_clamp_catalog_limit(limit),
             )
@@ -176,7 +179,7 @@ class CashierGrpcClient:
                 {
                     "id": item.id,
                     "name": item.name,
-                    "price": item.price,
+                    "price": Decimal(item.price_amount),
                     "is_available": item.is_available,
                     "category": item.category,
                 }
@@ -201,6 +204,7 @@ class CashierGrpcClient:
         self,
         *,
         tenant_id: str,
+        user_id: str,
         order_number: str,
     ) -> dict[str, Any] | None:
         """Fetch status of an order for tenant via gRPC."""
@@ -212,6 +216,7 @@ class CashierGrpcClient:
                 return None
             request = cashier_service_pb2.GetOrderStatusRequest(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 order_number=order_number,
             )
             with self._rpc_span("GetOrderStatus") as span:
@@ -227,7 +232,7 @@ class CashierGrpcClient:
                 "order_number": response.order_number,
                 "status": response.status,
                 "payment_status": response.payment_status,
-                "total_amount": response.total_amount,
+                "total_amount": Decimal(response.total),
                 "created_at": response.created_at,
             }
         except grpc.aio.AioRpcError as err:

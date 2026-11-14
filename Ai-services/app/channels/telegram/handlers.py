@@ -295,6 +295,7 @@ class Intake:
         chat_started = time.perf_counter()
         response = await self.chat.handle(
             tenant_id=identity.tenant_id,
+            java_user_id=identity.java_user_id,
             external_user_id=str(user.id),
             external_chat_id=str(message.chat.id),
             external_message_id=str(message.message_id),

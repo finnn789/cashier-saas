@@ -108,7 +108,7 @@ class MemberSyncClientTest {
         Map<String, Object> body = fixtureBody(name);
         return new MemberSyncRequestedEvent(tenantId, (String) body.get("tenant_name"), userId,
                 (String) body.get("full_name"), (String) body.get("phone_number"),
-                Role.valueOf((String) body.get("role")));
+                Role.valueOf((String) body.get("role")), (String) body.get("status"));
     }
 
     private static URI fixtureUri(String name) {
@@ -143,6 +143,24 @@ class MemberSyncClientTest {
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         client.sync(eventFromFixture("cashier"));
+
+        server.verify();
+    }
+
+    @Test
+    void deactivatedMemberIsSentAsDisabled() {
+        MemberSyncRequestedEvent active = eventFromFixture("cashier");
+        MemberSyncRequestedEvent disabled = new MemberSyncRequestedEvent(active.getTenantId(), active.getTenantName(),
+                active.getUserId(), active.getFullName(), active.getPhoneNumber(), active.getRole(), "DISABLED");
+        server.expect(requestTo(fixtureUri("cashier")))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(request -> {
+                    Map<String, Object> actual = JsonPath.read(((MockClientHttpRequest) request).getBodyAsString(), "$");
+                    assertEquals("DISABLED", actual.get("status"));
+                })
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        client.sync(disabled);
 
         server.verify();
     }

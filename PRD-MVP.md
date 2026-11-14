@@ -1,391 +1,226 @@
-# Product Requirements Document — SaaS Cashier MVP
+# Product Requirements Document — Kasir Cafe + Asisten AI Owner
 
-> Keputusan operasional aktif, 30 September 2026: backend F&B memakai Pay First wajib. QR outlet tidak memerlukan meja; QR meja tetap didukung. Owner/Cashier dapat membuat order. Order NEW/UNPAID hanya masuk produksi setelah pembayaran manual tercatat atomik sebagai CONFIRMED/PAID. Lifecycle berikutnya PREPARING -> READY -> COMPLETED, dan COMPLETED wajib READY + PAID. Owner saja menentukan diskon sebelum pajak/service charge. Owner dan Cashier boleh membatalkan NEW/UNPAID dengan alasan/audit; order dibayar tidak dibatalkan karena refund di luar scope. Push staf menggunakan WebSocket dengan REST resync/polling fallback, bukan SSE. Fokus tahap ini backend; frontend terpisah. Keputusan ini menggantikan bagian lama yang menyebut bayar setelah makan, meja wajib, atau konfirmasi sebelum pembayaran. Role aktif tetap SUPERADMIN, OWNERMERCHANT, CASHIER.
-
-> Keputusan prioritas, 28 September 2026: F&B kembali menjadi produk pertama dan alur MVP di dokumen ini menjadi target implementasi aktif. Pengembangan Laundry ditunda; onboarding dan akses operasional Laundry dinonaktifkan tanpa menghapus data historis. Catatan arah Laundry di bawah dipertahankan sebagai riwayat keputusan.
-
-> Catatan arah produk, 16 September 2026: pengguna menetapkan platform multi-bisnis dengan Laundry sebagai produk pertama. [Rancangan database Laundry v1](docs/database/README.md) mendokumentasikan scope dan model data baru untuk pekerjaan desain ini. Isi F&B di bawah dipertahankan sebagai referensi bisnis berikutnya; belum menjadi PRD laundry dan bukan tanda fitur laundry sudah diimplementasikan. Untuk desain database baru, keputusan laundry terbaru tersebut menggantikan batas scope F&B lama (termasuk langganan gateway, antar-jemput, dan inventory dasar).
-
-> Keputusan Freetier, 23 September 2026: Freetier adalah paket gratis untuk pencatatan kasir biasa. Kasir memasukkan transaksi dan nama pelanggan secara manual, lalu mencatat uang yang diterima dari pelanggan secara manual. Data transaksi disimpan di database SaaS dan dapat dibuka kembali setelah login, termasuk dari perangkat lain yang diizinkan. Aktivasi Freetier tidak memerlukan invoice atau pembayaran langganan melalui gateway platform. Batas fitur lain masih perlu dipastikan; aturan F&B di bawah tidak otomatis menjadi hak Freetier Laundry.
-
-> Keputusan implementasi, 6 Oktober 2026: lanjutkan backend POS F&B, pembayaran Pay First, proses dapur, struk, dan laporan penjualan. Payment gateway memakai mock terlebih dahulu dengan hasil tertunda, berhasil, atau gagal; integrasi provider nyata belum termasuk tugas ini. Pembayaran berhasil tetap menjadi syarat masuk produksi. Frontend tetap terpisah.
-
-**Versi:** 0.1
-**Status:** Draft awal  
-**Tanggal:** 13 September 2026  
-**Fokus:** MVP untuk bisnis F&B skala kecil dengan 1–3 outlet
+**Versi:** 2.1
+**Status:** Aktif
+**Tanggal:** 13 November 2026
+**Menggantikan:** PRD v0.1 (13 September 2026) beserta catatan keputusan 16 September – 6 Oktober 2026 (ringkasannya ada di §17).
+**Fokus:** aplikasi kasir (POS) berbasis web untuk cafe/coffee shop kecil dengan satu outlet, ditambah asisten AI yang membantu owner mengambil keputusan.
 
 ## 1. Ringkasan Produk
 
-SaaS Cashier adalah aplikasi kasir dan manajemen pesanan berbasis web untuk kafe, restoran, dan usaha F&B kecil. Produk menyatukan pesanan yang dibuat oleh kasir dan pesanan mandiri pelanggan melalui QR meja ke dalam satu antrean operasional.
+Kasir web untuk cafe kecil yang **hanya mencatat** transaksi (aplikasi tidak memproses uang dan tidak terhubung ke penyedia pembayaran): kasir mencatat pesanan dan pembayaran dengan cepat, owner mengontrol uang dan stok, dan asisten AI (Telegram, lalu chat web) merangkum data menjadi jawaban dan saran dalam bahasa sehari-hari.
 
-Pemilik dan staf menggunakan dashboard pada komputer, tablet, atau ponsel. Pelanggan cukup memindai QR dan memesan melalui browser tanpa memasang aplikasi.
+Diferensiator: owner tidak perlu membaca laporan; asisten AI mengirim ringkasan, peringatan, dan saran (stok, target, anomali kasir) berdasarkan data transaksi yang lengkap dan bisa dipercaya.
 
 ## 2. Masalah yang Diselesaikan
 
-Bisnis F&B kecil sering menghadapi masalah berikut:
+- Uang kas bisa bocor tanpa jejak (pembatalan, diskon, selisih laci) karena tidak ada kontrol shift.
+- Owner tidak tahu margin per menu karena harga pokok bahan tidak tercatat.
+- Stok bahan habis tanpa peringatan, atau owner salah menghitung.
+- Laporan POS biasa harus dibuka dan dibaca sendiri; owner kecil jarang sempat.
+- Aplikasi POS lengkap terlalu rumit atau mahal untuk satu outlet.
 
-- Pesanan dari kasir dan meja dicatat melalui alur yang berbeda.
-- Pesanan lisan atau tulisan tangan rentan salah dan hilang.
-- Kasir dan dapur tidak memiliki status pesanan yang sama.
-- Pelanggan harus menunggu pelayan untuk melihat menu atau memesan ulang.
-- Pemilik sulit mengetahui omzet, transaksi, dan produk terlaris secara cepat.
-- Aplikasi POS yang lengkap sering terlalu rumit atau mahal untuk bisnis kecil.
+## 3. Prinsip Produk
 
-## 3. Visi MVP
+1. **Kasir harus bisa dipercaya dulu, baru AI.** Kontrol kas dan kelengkapan data didahulukan; AI hanya membaca data yang sudah benar.
+2. **Satu niche:** cafe/coffee shop dengan satu outlet. Bukan retail, bukan multi-vertical.
+3. **AI read-only lebih dulu.** Aksi tulis lewat AI hanya setelah fondasi stabil dan selalu dengan konfirmasi eksplisit serta audit.
+4. **Pencatatan saja, tetap sederhana.** Pembayaran hanya dicatat (tunai atau non-tunai dengan label); tidak ada integrasi pembayaran. Fitur lanjutan (inventori, resep, option group) opsional dan tidak wajib diisi sebelum bisa berjualan.
+5. **Fitur yang tidak mendukung alur §9 masuk backlog.**
 
-Memberikan satu sistem sederhana yang memungkinkan bisnis menerima pesanan dari QR meja dan kasir, memprosesnya melalui antrean yang sama, menyelesaikan pembayaran, dan melihat laporan penjualan dasar.
+## 4. Sasaran
 
-## 4. Sasaran MVP
+- Kasir menyelesaikan transaksi sederhana di bawah 60 detik.
+- Setiap rupiah yang masuk/keluar laci tercatat per shift, dan selisih kas terlihat saat tutup shift.
+- Owner melihat omzet, margin, dan stok menipis tanpa membuka dashboard (ringkasan Telegram).
+- Data antar tenant terisolasi penuh.
 
-- Kasir dapat membuat dan menyelesaikan transaksi dengan cepat.
-- Pelanggan dapat melihat menu dan mengirim pesanan melalui QR tanpa login.
-- Pesanan QR dan kasir muncul pada dashboard pesanan yang sama secara real-time.
-- Staf dapat melacak pesanan dari baru hingga selesai.
-- Pemilik dapat mengatur menu, meja, pengguna, pajak, dan biaya layanan.
-- Pemilik dapat melihat ringkasan penjualan harian dan riwayat transaksi.
-- Sistem mendukung banyak bisnis dengan data yang terisolasi per tenant.
+## 5. Di Luar Cakupan
 
-## 5. Di Luar Cakupan MVP
+- Pemesanan mandiri pelanggan lewat QR, halaman publik pelanggan, layar dapur (KDS), manajemen meja, real-time WebSocket (dihapus pada pivot 12 November 2026; polling 15 detik dipakai sebagai gantinya).
+- Multi-outlet tingkat lanjut dan laporan konsolidasi (satu tenant = satu outlet untuk rilis ini).
+- Loyalty, membership pelanggan, voucher kompleks.
+- Integrasi marketplace/delivery, akuntansi lengkap, payroll, reservasi.
+- Manajemen supplier dan purchase order (harga beli dicatat langsung saat restock, §8.6).
+- Semua integrasi pembayaran: payment gateway, QRIS sebagai fitur pembayaran (termasuk menampilkan QRIS di aplikasi), EDC. QRIS/transfer/debit hanya dicatat sebagai label pembayaran non-tunai (§8.9). Gateway mock dihapus (M5).
+- Split bill, cicilan, beberapa metode bayar dalam satu transaksi, refund parsial.
+- Operasi offline penuh, integrasi WhatsApp.
+- Aksi tulis oleh AI (ditunda ke setelah M7).
 
-Fitur berikut ditunda setelah MVP:
+## 6. Pengguna dan Peran
 
-- Inventori bahan baku dan resep.
-- Loyalty, membership, poin, dan voucher kompleks.
-- Integrasi marketplace atau layanan delivery.
-- Akuntansi lengkap.
-- Manajemen supplier dan pembelian.
-- Reservasi meja.
-- Payroll dan penjadwalan pegawai.
-- Analitik atau rekomendasi berbasis AI.
-- Dukungan operasi offline penuh.
-- Integrasi payment gateway otomatis.
-- Integrasi WhatsApp.
-- Multi-outlet tingkat lanjut dan laporan konsolidasi kompleks.
+Peran sistem tetap `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER`.
 
-## 6. Target Pengguna
+- **Owner (`OWNERMERCHANT`):** mengatur bisnis, menu, resep, stok, staf; memberi diskon; void/refund; melihat laporan, audit, dan shift; menerima ringkasan AI.
+- **Kasir (`CASHIER`):** membuka/menutup shift, membuat dan menahan pesanan, menerima pembayaran, mencatat restock/waste, membatalkan pesanan terbuka tanpa diskon.
 
-### 6.1 Pemilik/Owner
+## 7. Model Pesanan
 
-Mengelola konfigurasi bisnis, pengguna, menu, meja, serta memantau transaksi dan laporan.
+- Status pesanan: `OPEN` (ditahan/belum dibayar), `COMPLETED` (lunas), `CANCELLED`.
+- Status pembayaran: `UNPAID`, `PAID`, `REFUNDED`.
+- Tagihan yang ditahan (hold bill) adalah pesanan `OPEN`/`UNPAID` di server; itemnya dapat diganti selama belum ada diskon.
+- Void/refund penuh mengubah `PAID` menjadi `REFUNDED`; status pesanan tetap `COMPLETED` sebagai jejak, dan laporan tidak menghitungnya.
 
-### 6.2 Admin/Manager
+## 8. Ruang Lingkup Fungsional
 
-Membantu mengelola menu dan operasional, tetapi tidak memiliki seluruh kewenangan pemilik.
+Kolom **Status** mengikuti kode di branch aktif; detail bukti ada di `.ai/MEMORY.md` dan `.ai/TASKS.md`.
 
-### 6.3 Kasir
+### 8.1 Autentikasi, Tenant, dan Onboarding — sudah ada
+- Registrasi, login, pilih merchant/outlet, JWT Bearer + refresh cookie, onboarding Freetier (tenant, langganan, outlet pertama).
+- Ganti password sendiri. *(M4, TASK-076)*
 
-Membuat pesanan langsung, menerima pembayaran, mengelola tagihan, dan melihat antrean pesanan.
+### 8.2 Manajemen Staf
+- Undang kasir via kode sekali pakai (24 jam) — sudah ada.
+- Owner melihat daftar kasir outlet, menonaktifkan/mengaktifkan kembali kasir (akses dan sesi langsung berhenti, bot Telegram ikut menolak), dan mereset password kasir menjadi password sementara sekali tampil. Reset ditolak bila akun kasir terhubung ke bisnis lain. *(M4, TASK-076)*
 
-### 6.4 Staf Dapur
+### 8.3 Pengaturan Bisnis — sudah ada, perlu dilengkapi
+- Nama usaha, logo, alamat, telepon, mata uang (terkunci setelah ada pesanan), pajak, biaya layanan, zona waktu outlet.
+- Tambahan: footer struk dan daftar label pembayaran non-tunai yang diatur owner (mis. "QRIS", "Transfer BCA", "Debit"). *(M5)*
 
-Melihat antrean produksi dan memperbarui status pesanan.
+### 8.4 Menu dan Option Group — sudah ada
+- Kategori dinamis, produk, option group yang dapat dipakai ulang di level outlet (min/max/required), archive (bukan hapus), perubahan harga diaudit.
 
-### 6.5 Pelanggan
+### 8.5 Inventori dan Resep — sudah ada, perlu dilengkapi
+- Bahan baku (satu satuan per bahan), resep per produk dan per opsi, stok dipotong otomatis saat lunas, stok boleh minus dengan peringatan (NEGATIVE/OUT/LOW).
+- Kasir boleh RESTOCK dan WASTE; ADJUSTMENT, bahan, dan resep hanya owner.
+- Perbaikan: bahan yang dinonaktifkan tidak lagi dipotong lewat resep. *(M6)*
 
-Memindai QR, melihat menu, membuat pesanan, dan memantau status pesanan tanpa membuat akun.
+### 8.6 Harga Pokok dan Stok Opname *(M6)*
+- RESTOCK mencatat harga beli per satuan (opsional); sistem menyimpan harga pokok rata-rata bergerak per bahan.
+- Pergerakan SALE menyimpan snapshot harga pokok, sehingga HPP per transaksi dan per menu dapat dihitung.
+- Stok opname: owner memasukkan jumlah fisik; sistem mencatat selisihnya sebagai ADJUSTMENT dengan alasan "Stok opname".
 
-## 7. Proposisi Nilai
+### 8.7 POS Kasir — sudah ada, perlu dilengkapi
+- Buat pesanan dine-in/takeaway, pilih produk dan opsi, jumlah, catatan per item; total dihitung server; idempotency key wajib.
+- Tahan pesanan (OPEN) dan ganti itemnya; batalkan dengan alasan.
+- Nama pelanggan menjadi opsional dan ada catatan level pesanan. *(M5)*
+- Mempercepat kasir (UI): tombol uang cepat ("Uang pas", 20rb, 50rb, 100rb), produk favorit/terlaris di atas, pencarian lewat keyboard, struk opsional ("Cetak struk"). *(M5, UI)*
+- Daftar pesanan dapat difilter tanggal dan nomor pesanan, serta menampilkan umur tagihan yang ditahan. *(M5)*
 
-- Satu antrean untuk pesanan QR dan kasir.
-- Pelanggan tidak perlu memasang aplikasi atau membuat akun.
-- Pengoperasian sederhana untuk bisnis F&B kecil.
-- Status pesanan terlihat oleh kasir, dapur, dan pelanggan.
-- Pemilik memperoleh data penjualan dasar tanpa pencatatan manual.
+### 8.8 Shift dan Kas *(M4)*
+- Setiap pengguna yang menerima pembayaran harus memiliki shift terbuka di outlet tersebut; satu shift terbuka per pengguna per outlet.
+- Buka shift: modal awal (≥ 0); nilainya diisi otomatis dari uang terhitung pada penutupan shift terakhir di outlet itu dan dapat diubah. *(prefill: M5)*
+- Pengeluaran kas kecil: selama shift terbuka, kasir mencatat uang yang diambil dari laci (nominal > 0 dan keterangan wajib, mis. "Beli es batu"); pengeluaran diaudit dan dapat dilihat owner. *(M5)*
+- Tutup shift: kasir memasukkan uang fisik di laci; sistem menghitung kas seharusnya = modal + tunai diterima (dibayar − kembalian) − refund tunai − pengeluaran kas kecil pada shift itu, lalu menyimpan selisih. *(pengeluaran: M5)*
+- Ringkasan tutup shift berfungsi sebagai laporan harian: jumlah transaksi, omzet, tunai, non-tunai per label, pengeluaran, refund, pembatalan, diskon, dan selisih kas.
+- Tagihan OPEN boleh tetap ada saat tutup shift; jumlahnya ditampilkan sebagai peringatan.
+- Owner melihat daftar dan detail shift (siapa, kapan, selisih).
 
-## 8. Ruang Lingkup Fungsional MVP
+### 8.9 Pembayaran — sudah ada, perlu dilengkapi
+- Hanya dua metode yang dicatat: **Tunai** (kembalian dihitung) dan **Non-tunai** (nominal harus sama dengan total).
+- Non-tunai wajib memilih satu label dari daftar owner (§8.3) agar owner dapat mencocokkannya dengan mutasi rekening; label disimpan sebagai snapshot teks pada pembayaran. *(M5)*
+- Gateway mock dan alur attempt/resolve dihapus dari kode; data lama tetap di database. *(M5; sebelumnya dimatikan lewat flag di TASK-076)*
+- Satu pembayaran per pesanan; pembayaran tercatat dengan metode, nominal, kembalian, waktu, penerima, dan shift. *(shift: M4)*
 
-### 8.1 Autentikasi dan Tenant
+### 8.10 Pembatalan, Void, dan Refund
+- Pembatalan pesanan OPEN: owner, atau kasir bila pesanan tidak memiliki diskon; alasan wajib; diaudit. *(aturan kasir: M4, TASK-076)*
+- Void/refund penuh pesanan lunas: hanya owner, alasan wajib, mengembalikan stok (pergerakan SALE_REVERSAL), refund tunai dicatat pada shift terbuka owner, diaudit. *(M4)*
 
-- Pengguna staf dapat masuk dan keluar menggunakan email serta kata sandi.
-- Setiap bisnis menjadi satu tenant dengan data terisolasi.
-- Pemilik dapat mengundang atau membuat akun staf.
-- Sistem memiliki peran Owner, Manager, Cashier, dan Kitchen.
-- Pengguna hanya dapat mengakses outlet dan fungsi yang diizinkan.
+### 8.11 Struk *(M5)*
+- Nomor struk berurutan per outlet per hari menurut zona waktu outlet, format `INV-YYYYMMDD-NNNN`.
+- Struk memuat nama usaha, logo, alamat/telepon outlet, item dan opsi, subtotal, diskon, pajak, biaya layanan, total, dibayar, kembalian, kasir, waktu lokal, dan footer.
+- Struk dapat dicetak ulang dari browser; tanda "REFUND" bila sudah di-refund. Mencetak struk tidak wajib.
 
-### 8.2 Pengaturan Bisnis dan Outlet
+### 8.12 Laporan — sudah ada, perlu dilengkapi
+- Sudah ada: ringkasan omzet (gross, diskon, net, pajak, layanan, tunai bersih), produk terlaris, rekap per metode bayar, daftar transaksi, ekspor CSV. Hanya transaksi `PAID` yang tidak dibatalkan yang dihitung.
+- Tambahan *(M5)*: rekap non-tunai per label.
+- Tambahan *(M6)*: penjualan per jam, per kasir, per shift; HPP dan laba kotor per menu dan total; jumlah refund.
 
-- Owner dapat mengatur nama bisnis, logo, alamat, nomor telepon, mata uang, zona waktu, pajak, dan biaya layanan.
-- MVP mendukung setidaknya satu outlet per bisnis.
-- Data pesanan dan transaksi selalu terkait dengan outlet.
+### 8.13 Audit
+- Tercatat: perubahan harga, resep, pembuatan pesanan *(TASK-076)*, ganti item, diskon, pembatalan, pembayaran, pengaturan, aksi staf (nonaktif/aktif/reset password) *(TASK-076)*, buka/tutup shift dan void/refund *(M4)*, pengeluaran kas kecil *(M5)*.
+- Owner melihat audit log dengan filter aksi, pelaku, dan tanggal — sudah ada.
 
-### 8.3 Manajemen Menu
-
-- Owner atau Manager dapat membuat, mengubah, mengarsipkan, dan mengurutkan kategori.
-- Owner atau Manager dapat membuat, mengubah, mengarsipkan, dan mengurutkan produk.
-- Produk memiliki nama, deskripsi, harga, foto opsional, kategori, dan status tersedia/habis.
-- Produk dapat memiliki grup pilihan sederhana, misalnya ukuran, level pedas, atau topping.
-- Pilihan dapat diwajibkan atau opsional serta dapat menambah harga.
-- Produk yang habis tetap terlihat dengan label “Habis” tetapi tidak dapat ditambahkan ke keranjang.
-
-### 8.4 Manajemen Meja dan QR
-
-- Owner atau Manager dapat membuat dan mengubah meja.
-- Setiap meja memiliki nama/nomor dan QR unik.
-- QR mengarah ke menu outlet serta membawa identitas meja.
-- QR dapat dilihat dan diunduh untuk dicetak.
-- Meja dapat berstatus kosong, aktif, atau menunggu pembayaran.
-- QR harus menggunakan token publik yang tidak membuka ID internal berurutan.
-
-### 8.5 Menu dan Pemesanan Pelanggan
-
-- Pelanggan dapat membuka menu tanpa login.
-- Pelanggan dapat melihat kategori, produk, harga, foto, dan ketersediaan.
-- Pelanggan dapat memilih varian/tambahan dan menulis catatan per item.
-- Pelanggan dapat menambah, mengubah, dan menghapus item dari keranjang.
-- Sebelum mengirim pesanan, pelanggan melihat subtotal, pajak, biaya layanan, dan total.
-- Pelanggan memasukkan nama atau label pemesan singkat.
-- Pelanggan dapat memilih “bayar di kasir” atau “bayar setelah makan”.
-- Setelah dikirim, pesanan memperoleh nomor pesanan yang mudah dibaca.
-- Pelanggan dapat melihat status pesanan melalui halaman yang sama.
-- Pesanan pelanggan tidak langsung dianggap dibayar.
-
-### 8.6 POS Kasir
-
-- Kasir dapat membuat pesanan dine-in atau takeaway.
-- Untuk dine-in, kasir dapat memilih meja.
-- Kasir dapat mencari atau memilih produk berdasarkan kategori.
-- Kasir dapat menambahkan pilihan produk, jumlah, dan catatan.
-- Kasir dapat melihat subtotal, pajak, biaya layanan, diskon nominal/persentase, dan total.
-- Kasir dapat menahan pesanan sebagai tagihan aktif.
-- Kasir dapat memilih pembayaran tunai atau pembayaran non-tunai manual.
-- Untuk pembayaran tunai, sistem menghitung uang kembali.
-- Setelah pembayaran berhasil dicatat, transaksi memiliki nomor struk.
-- Sistem menyediakan tampilan struk yang dapat dicetak dari browser.
-
-### 8.7 Manajemen Pesanan
-
-- Semua pesanan QR dan kasir tampil dalam satu daftar.
-- Pesanan menunjukkan nomor, sumber, meja/tipe layanan, waktu, item, catatan, total, status pesanan, dan status pembayaran.
-- Status pesanan: `NEW`, `CONFIRMED`, `PREPARING`, `READY`, `COMPLETED`, dan `CANCELLED`.
-- Status pembayaran: `UNPAID`, `PAID`, dan `REFUNDED` sebagai persiapan data; proses refund otomatis belum termasuk MVP.
-- Staf berwenang dapat memperbarui status pesanan.
-- Pembatalan wajib memiliki alasan dan tercatat dalam audit log.
-- Perubahan pesanan yang telah dikirim harus tercatat agar total dan item tidak berubah tanpa jejak.
-- Pesanan baru harus muncul tanpa pengguna memuat ulang halaman secara manual.
-
-### 8.8 Tampilan Dapur
-
-- Staf dapur melihat pesanan aktif dalam bentuk kartu atau kolom status.
-- Tampilan menonjolkan nomor pesanan, waktu tunggu, item, jumlah, dan catatan.
-- Dapur dapat mengubah status dari dikonfirmasi menjadi diproses lalu siap.
-- Harga dan informasi pembayaran tidak perlu ditampilkan pada layar dapur.
-- Pesanan selesai atau dibatalkan keluar dari antrean aktif.
-
-### 8.9 Pembayaran dan Penutupan Pesanan
-
-- MVP mencatat pembayaran tunai dan non-tunai secara manual.
-- Satu pesanan hanya dianggap lunas setelah pembayaran dikonfirmasi kasir.
-- Sistem menyimpan jumlah dibayar, metode, waktu, dan pengguna penerima pembayaran.
-- Split bill, cicilan, dan beberapa metode pembayaran dalam satu transaksi tidak termasuk MVP.
-- Setelah pesanan selesai dan lunas, meja kembali kosong jika tidak ada tagihan aktif lain.
-
-### 8.10 Laporan Dasar
-
-- Ringkasan hari ini: omzet bersih, jumlah transaksi, nilai transaksi rata-rata, dan pesanan dibatalkan.
-- Daftar transaksi dapat difilter berdasarkan tanggal, status, dan metode pembayaran.
-- Laporan produk terlaris berdasarkan jumlah terjual.
-- Rekap pembayaran tunai dan non-tunai.
-- Data laporan hanya menghitung transaksi berstatus dibayar dan tidak dibatalkan.
-- Owner dapat mengekspor daftar transaksi ke CSV; ekspor lanjutan ditunda.
-
-### 8.11 Audit Minimum
-
-- Sistem mencatat pengguna dan waktu untuk tindakan penting: perubahan harga, pembatalan pesanan, pemberian diskon, dan pencatatan pembayaran.
-- Owner dapat melihat audit log sederhana.
+### 8.14 Asisten AI Owner *(M7)*
+- Sudah ada: bot Telegram dengan identitas dari kontak terverifikasi; alat baca katalog dan status pesanan lewat gRPC, dibatasi pada tenant dan outlet milik member *(pembatasan outlet: TASK-076)*.
+- Ringkasan harian otomatis ke owner setelah shift terakhir ditutup atau pada jam yang diatur: omzet, transaksi, tunai vs non-tunai per label, pengeluaran kas kecil, produk terlaris, stok menipis/minus, selisih kas, pembatalan/diskon/refund.
+- Saran restock dari rata-rata pemakaian ditambah reorder level.
+- Peringatan anomali: kasir dengan pembatalan, diskon, atau selisih kas di atas kebiasaan.
+- Tanya-jawab data penjualan ("omzet minggu ini vs minggu lalu", "menu paling untung").
+- AI hanya membaca. Data diambil dari backend Java (sumber kebenaran), tidak dari salinan.
 
 ## 9. Alur Utama
 
-### 9.1 Pesanan Melalui QR
+1. Owner mendaftar → onboarding → mengatur menu, resep, bahan, dan staf.
+2. Kasir login → buka shift (modal awal terisi otomatis).
+3. Kasir membuat pesanan (opsional ditahan dan diubah) → owner dapat memberi diskon.
+4. Kasir mencatat pembayaran (tunai, atau non-tunai dengan label) → pesanan `COMPLETED`, stok terpotong, struk dapat dicetak.
+5. Selama shift: kasir mencatat pengeluaran kas kecil bila mengambil uang dari laci.
+6. Bila perlu: kasir membatalkan pesanan terbuka; owner melakukan void/refund pesanan lunas.
+7. Kasir tutup shift → hitung laci → selisih tercatat → ringkasan harian.
+8. Owner menerima ringkasan AI dan melihat laporan.
 
-1. Pelanggan memindai QR meja.
-2. Sistem membuka menu outlet dan mengenali meja.
-3. Pelanggan memilih item, pilihan tambahan, jumlah, dan catatan.
-4. Pelanggan meninjau total lalu mengirim pesanan.
-5. Sistem membuat pesanan berstatus `NEW` dan pembayaran `UNPAID`.
-6. Kasir mengonfirmasi pesanan menjadi `CONFIRMED`.
-7. Dapur mengubah status menjadi `PREPARING`, lalu `READY`.
-8. Pesanan disajikan dan kasir mencatat pembayaran.
-9. Pesanan ditutup sebagai `COMPLETED`.
+## 10. Aturan Bisnis
 
-### 9.2 Pesanan Langsung di Kasir
-
-1. Kasir memilih tipe layanan dan meja jika diperlukan.
-2. Kasir menambahkan item dan catatan.
-3. Kasir mengirim pesanan ke antrean.
-4. Dapur memproses pesanan dengan alur status yang sama.
-5. Kasir menerima dan mencatat pembayaran.
-6. Pesanan ditutup sebagai `COMPLETED` dan struk dapat dicetak.
-
-## 10. Aturan Bisnis Penting
-
-- Harga item pada pesanan disalin sebagai snapshot agar perubahan menu tidak mengubah transaksi lama.
-- Total dihitung oleh server, bukan dipercaya dari browser pelanggan.
-- Nomor pesanan mudah dibaca tetapi bukan pengganti ID internal.
-- Hanya pengguna berwenang yang dapat memberi diskon atau membatalkan pesanan.
-- Pesanan yang sudah dibayar tidak boleh dihapus.
-- Semua waktu disimpan secara konsisten dan ditampilkan sesuai zona waktu outlet.
-- Data dari satu tenant tidak boleh dapat dibaca atau diubah tenant lain.
-- Halaman pelanggan hanya boleh mengakses data publik yang diperlukan melalui token aman.
-- Perubahan status harus divalidasi; misalnya pesanan batal tidak dapat diproses kembali tanpa tindakan khusus.
+- Harga, nama item, dan opsi disalin sebagai snapshot; total dihitung server; uang memakai `BigDecimal`.
+- Tarif pajak dan biaya layanan disnapshot pada saat pesanan dibuat.
+- Pesanan lunas tidak dapat dihapus; koreksi hanya lewat void/refund oleh owner.
+- Diskon hanya oleh owner, sekali per pesanan, sebelum pajak/layanan, tidak melebihi subtotal.
+- Pembayaran dan pengeluaran kas kecil membutuhkan shift terbuka milik penerima/pencatatnya.
+- Aplikasi tidak memproses uang; setiap pembayaran adalah pencatatan oleh kasir.
+- Semua waktu disimpan dalam UTC dan ditampilkan menurut zona waktu outlet.
+- Tenant ditentukan dari JWT yang tervalidasi, tidak pernah dari payload; tidak ada bukti keberadaan data tenant lain.
+- Aksi uang dan aksi sensitif mencatat pelaku, waktu, dan alasan.
+- Stok boleh minus; sistem memberi peringatan, tidak memblokir penjualan.
 
 ## 11. Entitas Data Inti
 
-- Tenant/Business
-- Outlet
-- User
-- Role/Permission
-- Category
-- Product
-- OptionGroup
-- ProductOption
-- Table
-- TableQrToken
-- Order
-- OrderItem
-- OrderItemOption
-- Payment
-- Discount
-- AuditLog
-
-Setiap entitas operasional utama wajib memiliki `tenant_id`; entitas terkait outlet juga memiliki `outlet_id`.
+Tenant, Outlet, StaffUser, TenantMembership, MembershipOutletAccess, Subscription, BusinessSettings, Category, Product, OptionGroup, Option, RecipeLine, InventoryItem, InventoryBalance, InventoryMovement, SalesOrder, OrderItem, OrderItemOption, Discount, Payment, Shift *(M4)*, Refund *(M4)*, CashExpense *(M5)*, NonCashLabel *(M5)*, ReceiptSequence *(M5)*, AuditLog. Tabel gateway attempt tetap ada di database tetapi tidak dipakai setelah M5. Entitas QR/meja/dapur tetap ada di database (migrasi V1..V5 tidak diubah) tetapi tidak dipakai.
 
 ## 12. Kebutuhan Nonfungsional
 
-### Keamanan
+- **Keamanan:** BCrypt, HTTPS di produksi, otorisasi di server pada setiap aksi, rate limit REST dan gRPC, kunci layanan internal untuk gRPC dan sinkronisasi member, tidak ada token/rahasia/nomor telepon di log.
+- **Keandalan:** checkout, pembayaran, dan pergerakan stok idempotent; konflik konkurensi dijawab 409, bukan 500.
+- **Kinerja:** halaman POS tampil < 3 detik; daftar pesanan diperbarui lewat polling 15 detik dan saat jendela kembali fokus.
+- **UX:** POS untuk desktop dan tablet; status tidak hanya dibedakan warna; pesan error berbahasa Indonesia.
 
-- Kata sandi disimpan menggunakan hashing yang aman.
-- Seluruh lalu lintas produksi menggunakan HTTPS.
-- Otorisasi diperiksa di server untuk setiap tindakan staf.
-- Endpoint publik QR dibatasi dan divalidasi untuk mencegah penyalahgunaan.
-- Data sensitif tidak dimasukkan ke log aplikasi.
+## 13. Acceptance Criteria Tingkat Produk
 
-### Kinerja
+- **AC-01 Isolasi tenant:** pengguna tenant A tidak dapat membaca/mengubah data tenant B dan tidak mendapat bukti keberadaannya (REST dan gRPC/AI).
+- **AC-02 Harga konsisten:** total tersimpan dihitung ulang di server dari harga aktif, opsi, pajak, layanan, dan diskon sah.
+- **AC-03 Pembayaran:** pembayaran valid mengubah pesanan menjadi `COMPLETED`/`PAID`, memotong stok sekali, tercatat pada shift penerima, dan masuk laporan.
+- **AC-04 Pembatalan:** hanya pengguna berwenang (§8.10), alasan wajib, audit tercatat.
+- **AC-05 Ketersediaan produk:** produk habis/diarsipkan tidak dapat dipesan, termasuk bila berubah sesaat sebelum checkout.
+- **AC-06 Kas shift:** saat tutup shift, kas seharusnya = modal + tunai bersih − refund tunai − pengeluaran kas kecil, dan selisih tersimpan.
+- **AC-07 Void/refund:** pesanan lunas yang di-refund keluar dari laporan penjualan, stoknya kembali, dan audit tercatat.
+- **AC-08 Akses staf:** kasir yang dinonaktifkan langsung ditolak di REST, refresh token, dan bot/gRPC.
+- **AC-09 AI read-only:** asisten AI tidak dapat mengubah data dan hanya melihat outlet milik member yang bertanya.
+- **AC-10 Non-tunai berlabel:** pembayaran non-tunai tanpa label aktif ditolak; rekap non-tunai per label sama dengan jumlah pembayaran non-tunai pada periode itu.
 
-- Halaman menu dan dashboard utama ditargetkan tampil dalam kurang dari 3 detik pada koneksi normal.
-- Perubahan pesanan ditargetkan terlihat oleh dashboard lain dalam kurang dari 5 detik.
-- Pencarian atau pemilihan produk POS harus terasa instan untuk katalog bisnis kecil.
+## 14. Metrik Produk
 
-### Keandalan
+- Waktu median transaksi kasir; jumlah transaksi per hari per tenant.
+- Rata-rata selisih kas per shift; rasio pembatalan, diskon, dan refund.
+- Persentase owner yang membuka ringkasan AI harian.
+- Tunai vs non-tunai per label; rata-rata pengeluaran kas kecil per shift.
 
-- Pembuatan pesanan harus idempotent untuk mencegah pesanan ganda akibat klik ulang atau jaringan lambat.
-- Nominal pembayaran dan total transaksi menggunakan tipe desimal/integer terkecil, bukan floating point.
-- Kesalahan operasional harus menghasilkan pesan yang dapat dipahami pengguna.
+## 15. Tahapan Implementasi
 
-### Pengalaman Pengguna
+| Milestone | Isi | Status (13 Nov 2026) |
+|---|---|---|
+| M1 Fondasi | Auth, tenant, onboarding, undangan kasir, keamanan, rate limit | Selesai |
+| M2 Katalog dan inventori | Menu, option group reusable, bahan, resep, stok | Selesai |
+| M3 POS dan pembayaran | Pesanan, hold bill, diskon, bayar, struk dasar, laporan dasar, audit viewer, pivot status | Selesai (branch `refactor/pivot-cashier-ai`, belum di-merge ke main) |
+| M4 Kontrol kasir | TASK-076 (staf, password, flag mock, aturan cancel, audit checkout, gRPC scoping); shift dan kas; void/refund (TASK-077) | Terimplementasi dan lolos `mvnw verify`, belum di-commit |
+| M5 Pencatatan sederhana dan struk | Hapus mock gateway; label non-tunai dari owner; pengeluaran kas kecil di shift; modal awal otomatis; nomor struk berurutan + struk lengkap (nama usaha, logo, footer, tanda REFUND); nama pelanggan opsional + catatan pesanan; filter daftar pesanan; UI kasir cepat | Backend terimplementasi dan lolos `mvnw verify` (TASK-078), belum di-commit; UI via `prompts/m5-ui-cashier.md` |
+| M6 Data owner | Harga pokok, stok opname, bahan nonaktif tidak dipotong, laporan per jam/kasir/shift, HPP/laba kotor | Belum |
+| M7 Asisten AI | Ringkasan harian, saran restock, anomali, tanya-jawab penjualan (read-only) | Belum |
+| M8 Pilot | 3 cafe pilot, 100+ transaksi nyata, umpan balik | Belum |
 
-- Antarmuka pelanggan responsif dan mengutamakan ponsel.
-- POS dapat digunakan pada layar desktop dan tablet.
-- Tombol aksi utama jelas dan sesuai peran pengguna.
-- Status tidak hanya dibedakan berdasarkan warna.
+## 16. Keputusan yang Masih Terbuka
 
-## 13. Kriteria Keberhasilan MVP
+- Model harga langganan dan batas Freetier vs berbayar (enforcement paket belum ada).
+- Jam kirim ringkasan AI harian (default: setelah shift terakhir ditutup, cadangan pukul 23.00 waktu outlet).
+- Printer thermal yang diprioritaskan untuk pilot (sementara cetak dari browser).
+- Batas diskon kasir (saat ini kasir tidak boleh memberi diskon).
+- Kapan multi-outlet dibuka (perlu mengganti lock per tenant menjadi per outlet).
 
-MVP dianggap layak diuji ke pengguna ketika:
+## 17. Riwayat Keputusan (ringkas)
 
-- Satu bisnis dapat mendaftar dan menyiapkan outlet, menu, meja, serta akun staf.
-- Pelanggan berhasil memesan melalui QR tanpa login.
-- Kasir berhasil membuat pesanan langsung.
-- Kedua sumber pesanan masuk ke antrean yang sama tanpa duplikasi.
-- Dapur dapat memproses dan memperbarui status pesanan.
-- Kasir dapat mencatat pembayaran dan mencetak struk.
-- Owner dapat melihat transaksi dan laporan harian yang konsisten.
-- Pengujian membuktikan pengguna tenant A tidak dapat mengakses data tenant B.
-
-Target validasi bisnis awal:
-
-- Digunakan oleh minimal 3 bisnis pilot.
-- Minimal 100 transaksi end-to-end berhasil diproses.
-- Tingkat keberhasilan pembuatan pesanan minimal 99% selama pilot.
-- Waktu median kasir membuat pesanan sederhana di bawah 60 detik setelah pelatihan singkat.
-
-## 14. Acceptance Criteria Tingkat Produk
-
-### AC-01 — Isolasi Tenant
-
-Jika pengguna berasal dari bisnis A, seluruh permintaan untuk membaca atau mengubah data bisnis B harus ditolak dan tidak membocorkan keberadaan data tersebut.
-
-### AC-02 — Pesanan QR
-
-Jika QR valid dan produk tersedia, pelanggan dapat mengirim keranjang lalu menerima nomor pesanan serta status awal tanpa login.
-
-### AC-03 — Harga Konsisten
-
-Total yang tersimpan harus dihitung ulang di server berdasarkan harga aktif, pilihan, pajak, biaya layanan, dan diskon yang sah.
-
-### AC-04 — Antrean Terpadu
-
-Pesanan baru dari QR maupun POS harus tampil pada daftar operasional dan layar dapur dengan sumber yang dapat dibedakan.
-
-### AC-05 — Pembayaran
-
-Ketika kasir mencatat pembayaran valid, status pembayaran berubah menjadi `PAID`, informasi pembayaran tersimpan, dan transaksi masuk ke laporan.
-
-### AC-06 — Pembatalan
-
-Pembatalan hanya dapat dilakukan pengguna berwenang, wajib memiliki alasan, dan menghasilkan audit log.
-
-### AC-07 — Ketersediaan Produk
-
-Produk berstatus habis tidak dapat dipesan oleh pelanggan atau kasir, termasuk jika status berubah sesaat sebelum checkout.
-
-## 15. Metrik Produk yang Dicatat
-
-- Jumlah bisnis dan outlet aktif.
-- Jumlah pesanan berdasarkan sumber QR atau POS.
-- Rasio pesanan berhasil, gagal, dan dibatalkan.
-- Waktu dari `NEW` ke `CONFIRMED`.
-- Waktu dari `CONFIRMED` ke `READY`.
-- Nilai transaksi rata-rata.
-- Produk terlaris.
-- Persentase pembayaran tunai dan non-tunai.
-
-## 16. Tahapan Implementasi MVP
-
-### Milestone 1 — Fondasi
-
-Tenant, autentikasi, peran, outlet, pengaturan bisnis, dan struktur audit.
-
-### Milestone 2 — Katalog dan Meja
-
-Kategori, produk, pilihan produk, ketersediaan, meja, token QR, dan menu publik.
-
-### Milestone 3 — Pemesanan
-
-Keranjang pelanggan, POS kasir, kalkulasi harga server-side, antrean terpadu, dan status real-time.
-
-### Milestone 4 — Operasional dan Pembayaran
-
-Tampilan dapur, pencatatan pembayaran, penutupan meja, dan struk browser.
-
-### Milestone 5 — Laporan dan Pilot
-
-Dashboard, riwayat transaksi, ekspor CSV, audit log, pengujian keamanan tenant, dan persiapan bisnis pilot.
-
-## 17. Risiko MVP dan Mitigasi
-
-- **Pesanan ganda:** gunakan idempotency key saat checkout.
-- **Harga dimanipulasi browser:** hitung ulang seluruh total di server.
-- **Kebocoran antar-tenant:** wajibkan filter tenant pada akses data dan tambahkan automated test.
-- **Koneksi tidak stabil:** pertahankan keranjang lokal dan tampilkan status pengiriman yang jelas; offline penuh ditunda.
-- **Antrean tidak sinkron:** gunakan pembaruan real-time dengan fallback polling.
-- **QR disalahgunakan:** gunakan token acak, rate limiting, dan opsi regenerasi QR.
-- **Lingkup membesar:** fitur di luar bagian 8 tidak masuk sprint MVP tanpa keputusan produk baru.
-
-## 18. Keputusan yang Masih Terbuka
-
-- Nama final produk dan identitas merek.
-- Apakah satu tenant dapat memiliki lebih dari satu outlet pada rilis MVP pertama.
-- Apakah pesanan QR wajib dikonfirmasi kasir atau dapat langsung masuk dapur.
-- Batas nilai diskon untuk peran Cashier dan Manager.
-- Printer yang diprioritaskan untuk pilot.
-- Model harga berlangganan dan masa uji coba.
-- Teknologi aplikasi, basis data, hosting, dan layanan real-time.
-
-## 19. Prinsip Penjagaan Scope
-
-Setiap fitur baru hanya masuk MVP jika secara langsung diperlukan untuk menyelesaikan alur berikut:
-
-`buat menu → buat meja/QR → pelanggan atau kasir membuat pesanan → dapur memproses → kasir menerima pembayaran → owner melihat laporan`.
-
-Jika sebuah fitur tidak diperlukan untuk alur tersebut, fitur ditempatkan pada backlog setelah MVP.
+- 13 Sep 2026: PRD v0.1 F&B dengan QR meja, dapur, dan kasir.
+- 16–28 Sep 2026: arah Laundry ditetapkan lalu ditunda; F&B kembali menjadi produk pertama; Laundry dinonaktifkan tanpa menghapus data.
+- 23 Sep 2026: Freetier = pencatatan kasir gratis.
+- 30 Sep – 6 Okt 2026: Pay First, owner saja memberi diskon, gateway mock untuk tahap awal.
+- 10 Nov 2026: inventori bahan dan resep dimasukkan ke cakupan; stok boleh minus.
+- 12 Nov 2026: pivot menjadi kasir cafe + asisten AI owner; QR, dapur, meja, WebSocket dihapus; status OPEN/COMPLETED/CANCELLED; hold bill di server.
+- 13 Nov 2026: PRD v2 (dokumen ini); keputusan kontrol kasir grup A (`.ai/DECISIONS.md` "Flow controls A").
+- 13 Nov 2026 (v2.1): aplikasi hanya mencatat; QRIS bukan fitur pembayaran; pembayaran = tunai atau non-tunai berlabel; mock gateway dihapus; pengeluaran kas kecil dan modal awal otomatis masuk M5.

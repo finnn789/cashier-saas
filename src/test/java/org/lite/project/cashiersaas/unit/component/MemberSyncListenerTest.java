@@ -123,7 +123,7 @@ class MemberSyncListenerTest {
 
     private MemberSyncRequestedEvent event() {
         return new MemberSyncRequestedEvent(UUID.randomUUID(), "Kopi Senja", UUID.randomUUID(), "Budi Santoso",
-                "6281234567890", Role.OWNERMERCHANT);
+                "6281234567890", Role.OWNERMERCHANT, "ACTIVE");
     }
 
     private static final class CommitCountingTransactionManager extends AbstractPlatformTransactionManager {

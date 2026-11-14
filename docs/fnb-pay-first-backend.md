@@ -9,10 +9,10 @@ removed together with the kitchen queue, dining tables and WebSocket real-time; 
 
 - Orders are created by the cashier at the POS (`POST /api/v1/cashier/outlets/{outletId}/fnb/orders`
   with `Idempotency-Key`). There is no anonymous or customer-facing order route.
-- Flow: menu -> POS order (held = `OPEN`/`UNPAID`) -> payment (atomic) -> `COMPLETED`/`PAID` -> sales report.
+- Flow: menu -> POS order (held = `OPEN`/`UNPAID`) -> record-only payment (cash or non-cash with an owner-defined label; atomic) -> `COMPLETED`/`PAID` -> receipt `INV-YYYYMMDD-NNNN` -> sales report.
 - Order status is `OPEN`, `COMPLETED` or `CANCELLED`. Payment status is `UNPAID`, `PAID` or `REFUNDED`.
 - A held bill can be changed with `PUT .../fnb/orders/{orderId}/items` (full replacement, no idempotency key)
-  while it is `OPEN`/`UNPAID`, a POS order, without a discount or pending gateway attempt.
+  while it is `OPEN`/`UNPAID`, a POS order, without a discount.
 - Owner controls discounts before tax/service charge. Owner/Cashier may cancel only `OPEN`/`UNPAID`
   orders, with a reason and an audit record. Paid orders are never cancelled or deleted.
 - Totals are computed on the server; product names, prices and tax/service rates are stored as snapshots.

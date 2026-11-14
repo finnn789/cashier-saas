@@ -43,6 +43,18 @@ class MerchantBusinessSettingsMapperTest {
         assertEquals("Outlet road", response.getOutletAddress());
         assertEquals("08222", response.getOutletPhoneNumber());
         assertEquals("Asia/Makassar", response.getTimeZone());
+        assertNull(response.getReceiptFooter());
+    }
+
+    @Test
+    void mapsTheReceiptFooter() {
+        TenantEntity tenant = new TenantEntity();
+        tenant.updateBusinessSettings("Kopi Nusantara", null, "IDR", null, null,
+                new BigDecimal("11.00"), new BigDecimal("5.00"), "Asia/Jakarta");
+        tenant.changeReceiptFooter("Terima kasih");
+        OutletEntity outlet = OutletEntity.open(tenant, "Menteng", "Asia/Jakarta", null, null);
+
+        assertEquals("Terima kasih", MerchantBusinessSettingsMapper.response(tenant, outlet).getReceiptFooter());
     }
 
     @Test

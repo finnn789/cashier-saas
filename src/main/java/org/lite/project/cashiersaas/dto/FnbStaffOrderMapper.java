@@ -25,6 +25,7 @@ public final class FnbStaffOrderMapper {
         response.setSource(order.getSource());
         response.setServiceType(order.getServiceType());
         response.setCustomerLabel(order.getCustomerLabel());
+        response.setOrderNote(order.getOrderNote());
         response.setStatus(order.getStatus());
         response.setPaymentStatus(order.getPaymentStatus());
         response.setCreatedAt(order.getCreatedAt());

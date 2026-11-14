@@ -60,6 +60,22 @@ public class MembershipOutletAccessRepository {
                 .setMaxResults(1).getResultList().stream().findFirst();
     }
 
+    /** Active outlets a user can reach in a tenant through an active membership; empty when the user is not an active member. */
+    public List<UUID> findActiveOutletIds(UUID tenantId, UUID userId) {
+        return criteriaBuilderFactory.create(entityManager, UUID.class)
+                .from(MembershipOutletAccessEntity.class, ACCESS.getMetadata().getName())
+                .innerJoin(ACCESS.membership.toString(), MEMBERSHIP.getMetadata().getName())
+                .innerJoin(ACCESS.outlet.toString(), OUTLET.getMetadata().getName())
+                .select(OUTLET.id.toString())
+                .where(MEMBERSHIP.tenant.id.toString()).eq(tenantId)
+                .where(MEMBERSHIP.user.id.toString()).eq(userId)
+                .where(MEMBERSHIP.active.toString()).eq(true)
+                .where(MEMBERSHIP.user.status.toString()).eq(StatusConstants.ACTIVE)
+                .where(OUTLET.tenant.id.toString()).eq(tenantId)
+                .where(OUTLET.active.toString()).eq(true)
+                .getResultList();
+    }
+
     public List<MerchantOutletChoiceProjection> listActiveChoices(UUID userId, Instant now) {
         return criteriaBuilderFactory.create(entityManager, Tuple.class)
                 .from(MembershipOutletAccessEntity.class, ACCESS.getMetadata().getName())

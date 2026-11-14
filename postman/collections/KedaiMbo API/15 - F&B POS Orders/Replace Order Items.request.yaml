@@ -12,6 +12,7 @@ body:
     {
       "serviceType": "DINE_IN",
       "customerLabel": "Pelanggan KedaiMbo",
+      "orderNote": "Es dipisah, tanpa sedotan",
       "items": [
         {
           "productId": "{{productId}}",

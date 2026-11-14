@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 public class MemberSyncPublisher {
     private final ApplicationEventPublisher events;
 
-    public void memberChanged(TenantEntity tenant, StaffUserEntity user, Role role) {
+    public void memberChanged(TenantEntity tenant, StaffUserEntity user, Role role, String status) {
         String phoneNumber = user.getPhoneNumber();
         if (phoneNumber == null || phoneNumber.isBlank()) {
             log.warn("Member sync skipped because the user has no phone number: tenantId={} userId={}",
@@ -27,6 +27,6 @@ public class MemberSyncPublisher {
             return;
         }
         events.publishEvent(new MemberSyncRequestedEvent(tenant.getId(), tenant.getName(), user.getId(),
-                user.getFullName(), phoneNumber, role));
+                user.getFullName(), phoneNumber, role, status));
     }
 }

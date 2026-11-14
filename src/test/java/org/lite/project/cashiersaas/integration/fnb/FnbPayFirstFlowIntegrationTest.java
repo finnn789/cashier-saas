@@ -109,6 +109,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
         assertTrue(total.compareTo(new BigDecimal("50000")) >= 0, "total includes subtotal 2 x " + PRICE);
 
+        api.openShift(merchant, "100000.00");
         BigDecimal tendered = total.add(new BigDecimal("5000"));
         MvcResult paid = api.send(post(orders(merchant) + "/" + orderId + "/payments")
                 .header(HttpHeaders.AUTHORIZATION, merchant.bearer()).contentType(MediaType.APPLICATION_JSON)
@@ -184,6 +185,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(orderId, ApiTestSupport.read(list, "$.data.orders[0].orderId"));
         BigDecimal total = money(list, "$.data.orders[0].total");
 
+        api.openShift(merchant, "0.00");
         MvcResult paid = api.send(post(orders(merchant) + "/" + orderId + "/payments")
                 .header(HttpHeaders.AUTHORIZATION, merchant.bearer()).contentType(MediaType.APPLICATION_JSON)
                 .content(paymentJson("CASH", total.add(BigDecimal.valueOf(1000)).toPlainString(),
@@ -201,6 +203,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         String productId = api.createProduct(merchant, api.createCategory(merchant, "Kopi"), "Latte", PRICE);
         String orderId = createPosOrder(merchant, productId, 1);
         BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
+        api.openShift(merchant, "0.00");
         BigDecimal tendered = total.add(new BigDecimal("2000"));
         String key = "pay-" + UUID.randomUUID();
 
@@ -233,6 +236,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         String orderId = createPosOrder(merchant, productId, 1);
         BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
 
+        api.openShift(merchant, "0.00");
         int threads = 4;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         CountDownLatch ready = new CountDownLatch(threads);
@@ -345,6 +349,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(0, api.jdbc().queryForObject("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid",
                 Integer.class, orderId), "no stock movement while the bill is held");
 
+        api.openShift(owner, "0.00");
         api.send(post(orders(owner) + "/" + orderId + "/payments")
                 .header(HttpHeaders.AUTHORIZATION, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
                 .content(paymentJson("CASH", newTotal.toPlainString(), "pay-" + UUID.randomUUID())), 200, 201);

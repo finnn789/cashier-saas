@@ -22,6 +22,7 @@ public class FnbStaffOrderResponse {
     private OrderSource source;
     private ServiceType serviceType;
     private String customerLabel;
+    private String orderNote;
     private OrderStatus status;
     private PaymentStatus paymentStatus;
     private Instant createdAt;

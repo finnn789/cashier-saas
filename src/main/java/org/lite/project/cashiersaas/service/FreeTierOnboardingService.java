@@ -55,6 +55,7 @@ public class FreeTierOnboardingService {
     private final MembershipOutletAccessRepository accessRepository;
     private final AuthSessionService authSessionService;
     private final MemberSyncPublisher memberSyncPublisher;
+    private final FnbPaymentLabelService paymentLabelService;
 
     @Transactional
     public FreeTierStartResponse startFreeTier(AccountPrincipal principal, String idempotencyKey,
@@ -126,7 +127,7 @@ public class FreeTierOnboardingService {
                 throw new OperationConflictException("Profil usaha telah diselesaikan dengan data berbeda.");
             }
             // Idempotent re-complete: re-publish so an earlier failed Ai-services sync is healed.
-            memberSyncPublisher.memberChanged(tenant, ownerMembership.getUser(), Role.OWNERMERCHANT);
+            memberSyncPublisher.memberChanged(tenant, ownerMembership.getUser(), Role.OWNERMERCHANT, StatusConstants.ACTIVE);
             AuthSessionService.IssuedTokens tokens = authSessionService.selectMerchant(principal,
                     ownerMembership, existingOutlet, subscription);
             return FreeTierMapper.toOwnerResponse(tokens.getAccessToken(), tokens.getExpiresAt(),
@@ -138,6 +139,7 @@ public class FreeTierOnboardingService {
         OutletEntity outlet = OutletEntity.open(tenant, outletName, timeZone, address, phoneNumber);
         tenant.completeFreeTierProfile(businessName, address, phoneNumber);
         outletRepository.persist(outlet);
+        paymentLabelService.createDefaults(tenant, outlet);
         accessRepository.persist(MembershipOutletAccessEntity.grant(ownerMembership, outlet));
         StaffUserEntity owner = ownerMembership.getUser();
         if (owner.getOnboardingIntent() != OnboardingIntent.OWNER) {
@@ -146,7 +148,7 @@ public class FreeTierOnboardingService {
         if (owner.isPendingProfile()) {
             owner.completeBusinessProfile();
         }
-        memberSyncPublisher.memberChanged(tenant, owner, Role.OWNERMERCHANT);
+        memberSyncPublisher.memberChanged(tenant, owner, Role.OWNERMERCHANT, StatusConstants.ACTIVE);
         AuthSessionService.IssuedTokens tokens = authSessionService.selectMerchant(principal, ownerMembership, outlet,
                 subscription);
         return FreeTierMapper.toOwnerResponse(tokens.getAccessToken(), tokens.getExpiresAt(), ownerMembership, outlet);

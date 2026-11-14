@@ -43,7 +43,7 @@ The seed (`src/main/resources/db/demo/R__demo_seed.sql`) is a Flyway repeatable 
 
 ## Verified curl walkthrough
 
-All requests were run against the compose stack before the cashier-first pivot (replace the port if you changed it). Responses are `{success, code, message, data}`. After the pivot the QR and kitchen steps were removed and the order statuses are now `OPEN`/`COMPLETED`; the changed steps (4 to 6) were not re-run.
+All requests were run against the compose stack before the cashier-first pivot (replace the port if you changed it). Responses are `{success, code, message, data}`. After the pivot the QR and kitchen steps were removed and the order statuses are now `OPEN`/`COMPLETED`; the changed steps (4 to 6) were not re-run. Since the cash-shift milestone a payment requires an open shift: step 5b (open a shift) and the optional steps 8 and 9 (close the shift, refund) were added without being run, and the walkthrough has not been re-run with them.
 
 ```bash
 B=http://localhost:8080
@@ -73,17 +73,55 @@ curl -s -X PUT -H 'Content-Type: application/json' -H "Authorization: Bearer $TO
   -d '{"serviceType":"DINE_IN","customerLabel":"Budi","items":[{"productId":"00000000-0000-4000-8000-000000002001","quantity":2,"optionIds":[]},{"productId":"00000000-0000-4000-8000-000000002002","quantity":1,"note":"less ice","optionIds":["00000000-0000-4000-8000-000000004002","00000000-0000-4000-8000-000000004003"]}]}' \
   $B/api/v1/cashier/outlets/$O/fnb/orders/$OID/items
 
+# 5b. Open a cash shift for the paying cashier -> 201. Payments return 409 "Buka shift terlebih dahulu ..." without it.
+#     The shift stays open for the rest of this document (one open shift per user and outlet).
+#     Optional, not run: GET .../fnb/shifts/opening-suggestion returns {openingCash, sourceShiftId} = the counted cash of the
+#     last closed shift of the outlet (0.00 / null when there is none); the UI prefills the opening cash with it.
+curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK"   -d '{"openingCash":100000.00}' $B/api/v1/cashier/outlets/$O/fnb/shifts
+
 # 6. Pay CASH -> 200, order becomes COMPLETED / PAID (total 83.520 incl. 11% tax + 5% service; change 116.480 on 200.000 tendered)
+#    The receipt number in the response is INV-<yyyyMMdd>-<NNNN>: sequential per outlet per day (outlet time zone).
 curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK" \
   -d "{\"method\":\"CASH\",\"amountTendered\":200000.00,\"idempotencyKey\":\"demo-pay-$OID\"}" \
   $B/api/v1/cashier/outlets/$O/fnb/orders/$OID/payments
 
+# 6b. Optional, not run: record-only non-cash payment (QRIS/Transfer/Debit are only recorded, no provider is called).
+#     The demo seed does not create payment labels (V8 seeds the labels of outlets that already exist when it runs, and
+#     onboarding creates them for new outlets), so the owner creates one first ($OWNER_TOK as in step 7, 201), the cashier lists the
+#     active labels and pays another OPEN order with the exact total and a labelId (amountTendered must equal the total).
+curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $OWNER_TOK" -d '{"name":"QRIS","displayOrder":1}' \
+  $B/api/v1/merchant/outlets/$O/fnb/payment-labels
+curl -s -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/payment-labels
+#   -d "{\"method\":\"MANUAL_NON_CASH\",\"amountTendered\":<exact total>,\"labelId\":\"$LABEL\",\"idempotencyKey\":\"demo-pay-nc-$OID2\"}"
+#   .../fnb/orders/$OID2/payments  (without labelId: 400 "Pilih label pembayaran non-tunai.")
+
+# 6c. Optional, not run: petty cash during the open shift (header Idempotency-Key, amount > 0, description) -> 201; no open shift -> 409
+curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK" -H "Idempotency-Key: demo-expense-$RANDOM$RANDOM" \
+  -d '{"amount":15000.00,"description":"Beli es batu"}' $B/api/v1/cashier/outlets/$O/fnb/shifts/current/expenses
+curl -s -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/shifts/current/expenses
+
+# 6d. Optional, not run: receipt (paid or refunded orders; refunded ones carry refunded=true and a REFUND marker; footer from business settings)
+curl -s -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/orders/$OID/receipt
+# Order list filters: ...fnb/orders?from=2026-11-14&to=2026-11-14 and ...fnb/orders?orderNumber=<number>
+
 # 7. Sales report (owner only: repeat steps 1-2 with owner@demo.local) -> 200
 curl -s -H "Authorization: Bearer $OWNER_TOK" "$B/api/v1/merchant/outlets/$O/fnb/reports/sales"
 # CSV: .../fnb/reports/sales/csv
+
+# 8. Optional, not run: current shift with the live cash summary, then close it -> 200.
+#    expected = opening 100000 + cash in (tendered - change) - cash refunds - petty-cash expenses; difference = counted - expected
+#    (totalsByMethod lists one row per method and label; the summary is the daily report)
+curl -s -H "Authorization: Bearer $TOK" $B/api/v1/cashier/outlets/$O/fnb/shifts/current
+curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $TOK"   -d '{"countedCash":100000.00,"note":"Tutup shift demo"}' $B/api/v1/cashier/outlets/$O/fnb/shifts/current/close
+
+# 9. Optional, not run: owner refund of the paid order (owner only, full refund). A CASH refund needs the OWNER's own open shift.
+#    -> 200, paymentStatus REFUNDED, stock returned by SALE_REVERSAL movements, the order drops out of the sales report.
+#    Do it after the inventory walkthrough below if you want to keep its seeded stock numbers.
+curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $OWNER_TOK"   -d '{"openingCash":0.00}' $B/api/v1/cashier/outlets/$O/fnb/shifts
+curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $OWNER_TOK" -H "Idempotency-Key: demo-refund-$OID"   -d '{"reason":"Pelanggan komplain"}' $B/api/v1/merchant/outlets/$O/fnb/orders/$OID/refund
 ```
 
-Owner-only endpoints (categories, products CRUD, reports) are under `/api/v1/merchant/outlets/{outletId}/fnb/...`; cashier endpoints under `/api/v1/cashier/outlets/{outletId}/fnb/...`.
+Owner-only endpoints (categories, products CRUD, reports, shift list/force close, refund) are under `/api/v1/merchant/outlets/{outletId}/fnb/...`; cashier endpoints under `/api/v1/cashier/outlets/{outletId}/fnb/...`.
 
 ## Inventory and recipes walkthrough
 
@@ -201,15 +239,17 @@ curl -s -H "Authorization: Bearer $TOK" "$B/api/v1/cashier/outlets/$O/fnb/invent
 What the steps demonstrate:
 
 - Recipes belong to a product or to an add-on option; the add-on recipe of a shared option applies to every product that has the group, once per ordered unit of the line.
-- Stock changes only when an order becomes paid (cash, manual non-cash, and a mock-gateway attempt resolved `SUCCEEDED`), inside the payment transaction, with one `SALE` movement per (order, ingredient). An unpaid order, and a cancelled unpaid order, deduct nothing, and a paid order cannot be cancelled, so there is no stock reversal.
+- Stock changes only when an order becomes paid (cash or non-cash), inside the payment transaction, with one `SALE` movement per (order, ingredient). An unpaid order, and a cancelled unpaid order, deduct nothing, and a paid order cannot be cancelled. The only reversal is the owner refund, which writes one `SALE_REVERSAL` movement per ingredient.
 - The seeded steps 4 and 6 of the first walkthrough already consume stock with the seeded recipes. Observed on a fresh stack (confirmed by the run described above): the step 6 payment response carries `stockWarnings` of `["Gula Aren: sisa 380 ml (menipis)"]` (400 - 20 ml, reorder level 500).
 - RESTOCK and WASTE are open to CASHIER and OWNERMERCHANT; ADJUSTMENT, ingredient create/update/deactivate and recipes are OWNERMERCHANT only.
 - A movement key is unique per tenant: the same key with a different body is a `409`. Known limit: two parallel requests with the same key may return `409` to the loser instead of a replay (the balance still changes once).
 
 ## Notes
 
+- Cash shifts: payments need an open shift of the user who pays. The inventory walkthrough below pays as the same cashier, so the shift opened in step 5b is reused.
 - Only paid, non-cancelled orders appear in reports.
 - Refresh cookie `Secure` flag is off in the demo profile so it works over plain HTTP.
+- Payments are record-only (M5): `CASH` and `MANUAL_NON_CASH` with an owner-defined label; there is no payment gateway, mock or real, and no related setting. Steps 6b to 6d (labels, petty cash, receipt, filters) and the order note (`orderNote`) were not run against a live stack.
 - The root `.env` is also read by the backend outside Docker (`spring.config.import`); inside the container no `.env` is shipped.
 - Staff sync to the AI service is **in progress**: the backend pushes staff data (tenant, name, normalized phone, role) to Ai-services on owner profile completion and cashier invitation claim, authenticated by `AI_INTERNAL_API_KEY`. Compose points the backend at `http://ai-services:8001` unless `AI_SERVICE_BASE_URL` is set. Not yet verified end to end.
 - Telegram staff identification is **in progress**: users verify by sharing their own Telegram contact. `AI_TENANT_ID` is only a development fallback and never overrides a verified tenant.

@@ -12,6 +12,7 @@ class AgentState(TypedDict, total=False):
     Attributes:
         messages: Conversation message history with add_messages reducer.
         tenant_id: Tenant UUID string, enforcing strict tenant isolation.
+        java_user_id: Verified Java staff user UUID string; None when unverified.
         user_id: Local database user identifier.
         conversation_id: Local database conversation UUID string.
         display_name: Human user's display name or nickname.
@@ -21,6 +22,7 @@ class AgentState(TypedDict, total=False):
 
     messages: Annotated[list[BaseMessage], add_messages]
     tenant_id: str
+    java_user_id: str | None
     user_id: int
     conversation_id: str
     display_name: str

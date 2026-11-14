@@ -45,7 +45,7 @@ class MemberSyncPublisherTest {
 
     @Test
     void publishesTheContractFieldsFromTheEntities() {
-        publisher.memberChanged(tenant(), user("6281234567890"), Role.OWNERMERCHANT);
+        publisher.memberChanged(tenant(), user("6281234567890"), Role.OWNERMERCHANT, "ACTIVE");
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(events).publishEvent(captor.capture());
@@ -56,19 +56,29 @@ class MemberSyncPublisherTest {
         assertEquals("Budi Santoso", event.getFullName());
         assertEquals("6281234567890", event.getPhoneNumber());
         assertEquals(Role.OWNERMERCHANT, event.getRole());
+        assertEquals("ACTIVE", event.getStatus());
+    }
+
+    @Test
+    void carriesTheDisabledStatus() {
+        publisher.memberChanged(tenant(), user("6281234567890"), Role.CASHIER, "DISABLED");
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(events).publishEvent(captor.capture());
+        assertEquals("DISABLED", assertInstanceOf(MemberSyncRequestedEvent.class, captor.getValue()).getStatus());
     }
 
     @Test
     void usersWithoutAPhoneAreSkipped() {
-        publisher.memberChanged(tenant(), user(null), Role.CASHIER);
-        publisher.memberChanged(tenant(), user("  "), Role.CASHIER);
+        publisher.memberChanged(tenant(), user(null), Role.CASHIER, "ACTIVE");
+        publisher.memberChanged(tenant(), user("  "), Role.CASHIER, "ACTIVE");
 
         verify(events, never()).publishEvent(any(Object.class));
     }
 
     @Test
     void eventToStringNeverExposesThePhoneOrTheName() {
-        publisher.memberChanged(tenant(), user("6281234567890"), Role.CASHIER);
+        publisher.memberChanged(tenant(), user("6281234567890"), Role.CASHIER, "ACTIVE");
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(events).publishEvent(captor.capture());
 

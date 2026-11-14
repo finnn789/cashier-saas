@@ -11,6 +11,7 @@ import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.enums.ServiceType;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -46,6 +47,8 @@ public class SalesOrderEntity extends MutableBaseEntity {
     private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
     @Column(length = 80)
     private String customerLabel;
+    @Column(name = "order_note", length = 500)
+    private String orderNote;
     @Column(precision = 19, scale = 2, nullable = false)
     private BigDecimal subtotal;
     @Column(precision = 19, scale = 2, nullable = false)
@@ -69,7 +72,7 @@ public class SalesOrderEntity extends MutableBaseEntity {
     }
 
     public record PosDetails(String idempotencyKey, String fingerprint,
-                             String orderNumber, ServiceType serviceType, String customerLabel) {
+                             String orderNumber, ServiceType serviceType, String customerLabel, String orderNote) {
     }
 
     public static SalesOrderEntity pos(TenantEntity tenant, OutletEntity outlet, PosDetails details, Charges charges) {
@@ -83,6 +86,7 @@ public class SalesOrderEntity extends MutableBaseEntity {
         order.source = OrderSource.POS;
         order.serviceType = details.serviceType();
         order.customerLabel = details.customerLabel();
+        order.orderNote = details.orderNote();
         order.subtotal = charges.subtotal();
         order.taxAmount = charges.tax();
         order.serviceChargeAmount = charges.serviceCharge();
@@ -100,13 +104,14 @@ public class SalesOrderEntity extends MutableBaseEntity {
         serviceChargeRateSnapshot = serviceChargeRate;
     }
 
-    public void replaceLines(ServiceType serviceType, String customerLabel, Charges charges) {
+    public void replaceLines(ServiceType serviceType, String customerLabel, String orderNote, Charges charges) {
         requireOpenUnpaid();
         if (discountAmount.signum() != 0)
             throw new InvalidOperationException("Pesanan sudah memiliki diskon; item tidak dapat diubah.");
         if (serviceType == null) throw new InvalidOperationException("Tipe layanan tidak valid.");
         this.serviceType = serviceType;
         this.customerLabel = customerLabel;
+        this.orderNote = orderNote;
         subtotal = charges.subtotal();
         taxAmount = charges.tax();
         serviceChargeAmount = charges.serviceCharge();
@@ -117,6 +122,12 @@ public class SalesOrderEntity extends MutableBaseEntity {
         requireOpenUnpaid();
         paymentStatus = PaymentStatus.PAID;
         status = OrderStatus.COMPLETED;
+    }
+
+    public void markRefunded() {
+        if (status != OrderStatus.COMPLETED || paymentStatus != PaymentStatus.PAID)
+            throw new OperationConflictException("Hanya pesanan lunas yang dapat direfund.");
+        paymentStatus = PaymentStatus.REFUNDED;
     }
 
     public void cancel(String reason) {

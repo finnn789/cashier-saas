@@ -20,6 +20,7 @@ import org.lite.project.cashiersaas.repository.StaffUserRepository;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
+import org.lite.project.cashiersaas.service.FnbPaymentLabelService;
 import org.lite.project.cashiersaas.service.FreeTierOnboardingService;
 import org.lite.project.cashiersaas.enums.OnboardingIntent;
 import org.mockito.ArgumentCaptor;
@@ -52,6 +53,7 @@ class FreeTierOnboardingServiceTest {
     @Mock private MembershipOutletAccessRepository accessRepository;
     @Mock private JwtTokenService jwtTokenService;
     @Mock private JwtProperties jwtProperties;
+    @Mock private FnbPaymentLabelService paymentLabelService;
     @InjectMocks private FreeTierOnboardingService service;
 
     private final UUID userId = UUID.randomUUID();

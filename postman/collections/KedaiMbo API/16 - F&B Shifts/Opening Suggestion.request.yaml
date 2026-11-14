@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/shifts/opening-suggestion"
+method: GET
+headers:
+  Accept: application/json
+description: |-
+  Saran modal awal = uang terhitung pada shift tertutup terakhir di outlet (0.00 dan sourceShiftId null bila belum ada). Pakai sebagai isian awal Open Shift; kasir boleh mengubahnya.
+order: 500

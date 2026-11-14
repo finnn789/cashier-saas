@@ -6,6 +6,7 @@ import org.lite.project.cashiersaas.entity.shared.catalog.CategoryEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.springframework.stereotype.Component;
 
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,7 +39,7 @@ public class GrpcCatalogMapper {
             builder.setName(entity.getName());
         }
         if (entity.getPrice() != null) {
-            builder.setPrice(entity.getPrice().longValue());
+            builder.setPriceAmount(entity.getPrice().setScale(2, RoundingMode.HALF_UP).toPlainString());
         }
         builder.setIsAvailable(entity.isAvailable());
 

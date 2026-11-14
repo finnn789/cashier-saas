@@ -7,6 +7,7 @@ import org.lite.project.cashiersaas.dto.FnbReceiptMapper;
 import org.lite.project.cashiersaas.dto.response.FnbReceiptResponse;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentRefundEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentStatus;
@@ -14,6 +15,7 @@ import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.lite.project.cashiersaas.repository.FnbPaymentRepository;
+import org.lite.project.cashiersaas.repository.FnbRefundRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.DateTimeException;
@@ -27,14 +29,17 @@ public class FnbReceiptService {
     private final MerchantAccessGuard guard;
     private final FnbOrderRepository orders;
     private final FnbPaymentRepository payments;
+    private final FnbRefundRepository refunds;
     @Transactional(readOnly = true)
     public FnbReceiptResponse receipt(TenantPrincipal principal, UUID outletId, UUID orderId) {
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         try { ZoneId.of(context.getOutlet().getTimeZone()); } catch (DateTimeException exception) { throw new InvalidOperationException("Zona waktu outlet tidak valid."); }
         SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId).orElseThrow(ResourceNotFoundException::new);
-        if (order.getPaymentStatus() != PaymentStatus.PAID || order.getStatus() == OrderStatus.CANCELLED) throw new ResourceNotFoundException();
+        if (order.getStatus() == OrderStatus.CANCELLED || (order.getPaymentStatus() != PaymentStatus.PAID && order.getPaymentStatus() != PaymentStatus.REFUNDED)) throw new ResourceNotFoundException();
         PaymentEntity payment = payments.byOrder(principal.getTenantId(), outletId, orderId).orElseThrow(ResourceNotFoundException::new);
+        PaymentRefundEntity refund = order.getPaymentStatus() == PaymentStatus.REFUNDED
+                ? refunds.byPayment(principal.getTenantId(), payment.getId()).orElse(null) : null;
         List<OrderItemEntity> items = orders.items(principal.getTenantId(), outletId, List.of(orderId));
-        return FnbReceiptMapper.receipt(payment, items, orders.itemOptions(principal.getTenantId(), outletId, items.stream().map(OrderItemEntity::getId).toList()));
+        return FnbReceiptMapper.receipt(payment, refund, items, orders.itemOptions(principal.getTenantId(), outletId, items.stream().map(OrderItemEntity::getId).toList()));
     }
 }

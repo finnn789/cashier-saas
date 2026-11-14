@@ -23,4 +23,5 @@ public class MerchantBusinessSettingsResponse {
     private String outletAddress;
     private String outletPhoneNumber;
     private String timeZone;
+    private String receiptFooter;
 }

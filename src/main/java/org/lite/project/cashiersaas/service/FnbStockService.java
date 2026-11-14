@@ -65,13 +65,7 @@ public class FnbStockService {
             if (inventory.movementByKey(tenantId, key).isPresent()) continue;
             InventoryItemEntity inventoryItem = inventoryItems.get(itemId);
             BigDecimal delta = need.getValue();
-            InventoryBalanceEntity balance = balances.get(itemId);
-            if (balance == null) {
-                balance = InventoryBalanceEntity.create(tenantId, outletId, inventoryItem);
-                inventory.persist(balance);
-            } else {
-                inventory.lock(balance);
-            }
+            InventoryBalanceEntity balance = lockedBalance(balances, tenantId, outletId, inventoryItem);
             balance.apply(delta.negate());
             inventory.persist(InventoryMovementEntity.record(tenantId, outletId, inventoryItem, order.getId(), InventoryMovementEntity.Type.SALE,
                     delta.negate(), "Penjualan " + order.getOrderNumber(), key,
@@ -80,6 +74,44 @@ public class FnbStockService {
             if (warning != null) warnings.add(warning);
         }
         return warnings;
+    }
+
+    // Runs inside the refund transaction. Puts back exactly what the SALE movements took out; idempotent per (order, item).
+    public List<String> reverseForRefundedOrder(MerchantAccessContext context, SalesOrderEntity order) {
+        UUID tenantId = context.getTenant().getId();
+        UUID outletId = context.getOutlet().getId();
+        List<InventoryMovementEntity> sales = inventory.saleMovements(tenantId, outletId, order.getId()); // ordered by item id
+        if (sales.isEmpty()) return List.of();
+        Map<UUID, InventoryBalanceEntity> balances = new HashMap<>();
+        for (InventoryBalanceEntity balance : inventory.balances(tenantId, outletId, sales.stream().map(sale -> sale.getInventoryItem().getId()).toList()))
+            balances.put(balance.getInventoryItem().getId(), balance);
+
+        List<String> warnings = new ArrayList<>();
+        for (InventoryMovementEntity sale : sales) {
+            InventoryItemEntity inventoryItem = sale.getInventoryItem();
+            String key = "sale-reversal:" + order.getId() + ":" + inventoryItem.getId();
+            if (inventory.movementByKey(tenantId, key).isPresent()) continue;
+            BigDecimal delta = sale.getQuantityDelta().negate();
+            InventoryBalanceEntity balance = lockedBalance(balances, tenantId, outletId, inventoryItem);
+            balance.apply(delta);
+            inventory.persist(InventoryMovementEntity.record(tenantId, outletId, inventoryItem, order.getId(), InventoryMovementEntity.Type.SALE_REVERSAL,
+                    delta, "Refund pesanan " + order.getOrderNumber(), key,
+                    tokens.digest("sale-reversal|" + order.getId() + "|" + inventoryItem.getId() + "|" + delta.toPlainString()), context.getMembership().getId(), sale.getId()));
+            String warning = warning(inventoryItem, balance);
+            if (warning != null) warnings.add(warning);
+        }
+        return warnings;
+    }
+
+    private InventoryBalanceEntity lockedBalance(Map<UUID, InventoryBalanceEntity> balances, UUID tenantId, UUID outletId, InventoryItemEntity item) {
+        InventoryBalanceEntity balance = balances.get(item.getId());
+        if (balance == null) {
+            balance = InventoryBalanceEntity.create(tenantId, outletId, item);
+            inventory.persist(balance);
+        } else {
+            inventory.lock(balance);
+        }
+        return balance;
     }
 
     private static void addNeeds(Map<UUID, BigDecimal> needs, Map<UUID, InventoryItemEntity> inventoryItems, List<RecipeLineEntity> recipe, int quantity) {

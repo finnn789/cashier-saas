@@ -13,7 +13,7 @@ import org.lite.project.cashiersaas.entity.shared.BaseEntity;
 @Table(name="inventory_movements",uniqueConstraints=@UniqueConstraint(columnNames={"tenant_id","idempotency_key"}))
 @NoArgsConstructor
 public class InventoryMovementEntity extends BaseEntity {
-    public enum Type { RESTOCK, WASTE, ADJUSTMENT, SALE }
+    public enum Type { RESTOCK, WASTE, ADJUSTMENT, SALE, SALE_REVERSAL }
 
     @Column(name="tenant_id",nullable=false)
     private UUID tenantId;
@@ -45,11 +45,19 @@ public class InventoryMovementEntity extends BaseEntity {
     public static InventoryMovementEntity record(UUID tenantId, UUID outletId, InventoryItemEntity item, UUID orderId,
                                                  Type type, BigDecimal quantityDelta, String reason, String idempotencyKey,
                                                  String requestFingerprint, UUID actorMembershipId) {
+        return record(tenantId, outletId, item, orderId, type, quantityDelta, reason, idempotencyKey,
+                requestFingerprint, actorMembershipId, null);
+    }
+
+    public static InventoryMovementEntity record(UUID tenantId, UUID outletId, InventoryItemEntity item, UUID orderId,
+                                                 Type type, BigDecimal quantityDelta, String reason, String idempotencyKey,
+                                                 String requestFingerprint, UUID actorMembershipId, UUID reversalOfMovementId) {
         InventoryMovementEntity movement = new InventoryMovementEntity();
         movement.tenantId = tenantId;
         movement.outletId = outletId;
         movement.inventoryItem = item;
         movement.orderId = orderId;
+        movement.reversalOfMovementId = reversalOfMovementId;
         movement.type = type;
         movement.quantityDelta = quantityDelta;
         movement.reason = reason;

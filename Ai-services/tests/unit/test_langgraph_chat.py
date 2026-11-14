@@ -280,6 +280,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
                         "args": {
                             "order_number": "ORD-777",
                             "tenant_id": "malicious-injected-tenant",
+                            "user_id": "malicious-injected-user",
                         },
                         "id": "call_ord_1",
                     }
@@ -300,7 +301,8 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
                 graph=compiled_graph,
             )
 
-            result = await service.handle(**self.input)
+            java_user_id = uuid4()
+            result = await service.handle(**{**self.input, "java_user_id": java_user_id})
 
             self.assertEqual(result, "Status pesanan ORD-777 Anda adalah PROCESSING.")
             # Verify LLM was invoked twice (agent -> tools -> agent -> END)
@@ -314,6 +316,8 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             # The malicious tenant_id was stripped, and the real repository tenant_id was injected
             self.assertEqual(invocation["tenant_id"], str(self.tenant_id))
             self.assertNotIn("tenant_id", invocation["kwargs"])
+            # Same for user_id: the model-supplied one is stripped, the verified Java user injected
+            self.assertEqual(invocation["kwargs"]["user_id"], str(java_user_id))
             self.assertEqual(invocation["kwargs"]["order_number"], "ORD-777")
 
             # Verify DB persistence

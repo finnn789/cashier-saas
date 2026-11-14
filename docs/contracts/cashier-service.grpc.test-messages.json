@@ -6,105 +6,143 @@
   "placeholders": {
     "<TENANT_ID>": "UUID of an active tenant with F&B enabled and some products/orders",
     "<OTHER_TENANT_ID>": "UUID of a different active tenant (isolation checks)",
-    "<ORDER_NUMBER>": "an existing order number of <TENANT_ID>",
+    "<USER_ID>": "UUID of an ACTIVE staff user with an active membership in <TENANT_ID> and access to at least one active outlet",
+    "<OUTSIDER_USER_ID>": "UUID of an existing staff user without an active membership in <TENANT_ID> (or with a deactivated membership, or only inactive outlets)",
+    "<ORDER_NUMBER>": "an existing order number of <TENANT_ID> in an outlet <USER_ID> can access",
+    "<OTHER_OUTLET_ORDER_NUMBER>": "an existing order number of <TENANT_ID> in an outlet <USER_ID> has no access to",
     "<OTHER_TENANT_ORDER_NUMBER>": "an existing order number that belongs to <OTHER_TENANT_ID>"
   },
   "GetCatalogItem": [
     {
       "name": "all items, default limit",
-      "message": { "tenant_id": "<TENANT_ID>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>" },
       "expect": "OK, up to 10 items"
     },
     {
       "name": "search by name or category",
-      "message": { "tenant_id": "<TENANT_ID>", "query": "kopi", "limit": 5 },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "query": "kopi", "limit": 5 },
       "expect": "OK, at most 5 items matching name or category"
     },
     {
       "name": "search is case-insensitive and trimmed",
-      "message": { "tenant_id": "<TENANT_ID>", "query": "  KOPI  " },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "query": "  KOPI  " },
       "expect": "OK, same items as the lowercase query"
     },
     {
       "name": "LIKE wildcards are escaped",
-      "message": { "tenant_id": "<TENANT_ID>", "query": "%" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "query": "%" },
       "expect": "OK, empty items (a literal percent sign, not match-all)"
     },
     {
       "name": "no match",
-      "message": { "tenant_id": "<TENANT_ID>", "query": "zzzz-not-exist" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "query": "zzzz-not-exist" },
       "expect": "OK, items omitted or empty"
     },
     {
       "name": "limit zero uses default",
-      "message": { "tenant_id": "<TENANT_ID>", "limit": 0 },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "limit": 0 },
       "expect": "OK, up to 10 items"
     },
     {
       "name": "negative limit uses default",
-      "message": { "tenant_id": "<TENANT_ID>", "limit": -5 },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "limit": -5 },
       "expect": "OK, up to 10 items"
     },
     {
       "name": "limit above maximum is clamped",
-      "message": { "tenant_id": "<TENANT_ID>", "limit": 999 },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "limit": 999 },
       "expect": "OK, at most 50 items"
     },
     {
       "name": "blank tenant",
-      "message": { "tenant_id": "" },
+      "message": { "tenant_id": "", "user_id": "<USER_ID>" },
       "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
     },
     {
       "name": "tenant is not a UUID",
-      "message": { "tenant_id": "not-a-uuid" },
+      "message": { "tenant_id": "not-a-uuid", "user_id": "<USER_ID>" },
       "expect": "INVALID_ARGUMENT: tenant_id must be a valid UUID"
     },
     {
       "name": "unknown tenant",
-      "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead" },
+      "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead", "user_id": "<USER_ID>" },
       "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (same message as an inactive tenant)"
+    },
+    {
+      "name": "missing user_id",
+      "message": { "tenant_id": "<TENANT_ID>" },
+      "expect": "INVALID_ARGUMENT: user_id must not be blank"
+    },
+    {
+      "name": "user_id is not a UUID",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "not-a-uuid" },
+      "expect": "INVALID_ARGUMENT: user_id must be a valid UUID"
+    },
+    {
+      "name": "user is not an active member of the tenant",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<OUTSIDER_USER_ID>" },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (same message as an unknown tenant)"
+    },
+    {
+      "name": "unknown user",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "00000000-0000-4000-8000-00000000dead" },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service"
     }
   ],
   "GetOrderStatus": [
     {
       "name": "existing order",
-      "message": { "tenant_id": "<TENANT_ID>", "order_number": "<ORDER_NUMBER>" },
-      "expect": "OK with status (OPEN, COMPLETED or CANCELLED), paymentStatus, totalAmount (string), createdAt (UTC ISO-8601)"
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "order_number": "<ORDER_NUMBER>" },
+      "expect": "OK with status (OPEN, COMPLETED or CANCELLED), paymentStatus, total (decimal string with 2 decimals, e.g. 36000.00), createdAt (UTC ISO-8601)"
     },
     {
       "name": "order number is trimmed",
-      "message": { "tenant_id": "<TENANT_ID>", "order_number": "  <ORDER_NUMBER>  " },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "order_number": "  <ORDER_NUMBER>  " },
       "expect": "OK, same order"
     },
     {
       "name": "order not found",
-      "message": { "tenant_id": "<TENANT_ID>", "order_number": "ORD-00000000-999" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "order_number": "ORD-00000000-999" },
       "expect": "NOT_FOUND: Order not found"
     },
     {
       "name": "tenant isolation: order of another tenant",
-      "message": { "tenant_id": "<TENANT_ID>", "order_number": "<OTHER_TENANT_ORDER_NUMBER>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "order_number": "<OTHER_TENANT_ORDER_NUMBER>" },
       "expect": "NOT_FOUND (must never return the other tenant's order)"
     },
     {
+      "name": "outlet scoping: order of an outlet the user cannot access",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "order_number": "<OTHER_OUTLET_ORDER_NUMBER>" },
+      "expect": "NOT_FOUND (same tenant, but outside the user's outlets)"
+    },
+    {
+      "name": "user is not an active member of the tenant",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<OUTSIDER_USER_ID>", "order_number": "<ORDER_NUMBER>" },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service"
+    },
+    {
+      "name": "missing user_id",
+      "message": { "tenant_id": "<TENANT_ID>", "order_number": "<ORDER_NUMBER>" },
+      "expect": "INVALID_ARGUMENT: user_id must not be blank"
+    },
+    {
       "name": "blank order number",
-      "message": { "tenant_id": "<TENANT_ID>", "order_number": "   " },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>", "order_number": "   " },
       "expect": "INVALID_ARGUMENT: order_number must not be blank"
     },
     {
       "name": "missing order number",
-      "message": { "tenant_id": "<TENANT_ID>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>" },
       "expect": "INVALID_ARGUMENT: order_number must not be blank"
     },
     {
       "name": "blank tenant",
-      "message": { "tenant_id": "", "order_number": "<ORDER_NUMBER>" },
+      "message": { "tenant_id": "", "user_id": "<USER_ID>", "order_number": "<ORDER_NUMBER>" },
       "expect": "INVALID_ARGUMENT: tenant_id must not be blank"
     },
     {
       "name": "unknown tenant",
-      "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead", "order_number": "<ORDER_NUMBER>" },
+      "message": { "tenant_id": "00000000-0000-4000-8000-00000000dead", "user_id": "<USER_ID>", "order_number": "<ORDER_NUMBER>" },
       "expect": "PERMISSION_DENIED"
     }
   ],
@@ -112,28 +150,28 @@
     {
       "name": "no x-internal-service-key header",
       "method": "GetCatalogItem",
-      "message": { "tenant_id": "<TENANT_ID>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>" },
       "metadata": {},
       "expect": "UNAUTHENTICATED: Invalid or missing service credentials"
     },
     {
       "name": "wrong x-internal-service-key",
       "method": "GetCatalogItem",
-      "message": { "tenant_id": "<TENANT_ID>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>" },
       "metadata": { "x-internal-service-key": "wrong-key-0000000000" },
       "expect": "UNAUTHENTICATED"
     },
     {
       "name": "AI_INTERNAL_API_KEY used by mistake",
       "method": "GetCatalogItem",
-      "message": { "tenant_id": "<TENANT_ID>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>" },
       "metadata": { "x-internal-service-key": "<AI_INTERNAL_API_KEY>" },
       "expect": "UNAUTHENTICATED (the two keys must differ)"
     },
     {
       "name": "burst above 50 requests per second",
       "method": "GetCatalogItem",
-      "message": { "tenant_id": "<TENANT_ID>" },
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<USER_ID>" },
       "note": "Send 100+ calls within one second",
       "expect": "Some calls return RESOURCE_EXHAUSTED: Rate limit exceeded"
     }

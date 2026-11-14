@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/shifts?page=0&size=20"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: http:afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+       const r = pm.response.json();
+       if (r.success && r.data && r.data.shifts && r.data.shifts.length) pm.collectionVariables.set("shiftId", r.data.shifts[0].id);
+      }
+    language: text/javascript
+order: 4000

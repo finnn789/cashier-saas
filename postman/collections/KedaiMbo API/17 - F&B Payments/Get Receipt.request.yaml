@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/receipt"
+method: GET
+headers:
+  Accept: application/json
+description: |-
+  Struk pesanan PAID atau REFUNDED (CANCELLED atau UNPAID = 404). Berisi businessName, logoUrl, receiptFooter, methodLabel, customerLabel, orderNote, refunded, refundedAt, refundReason, dan html untuk dicetak (penanda REFUND bila sudah direfund).
+order: 3000

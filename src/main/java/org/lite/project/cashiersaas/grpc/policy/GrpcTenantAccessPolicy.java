@@ -2,9 +2,11 @@ package org.lite.project.cashiersaas.grpc.policy;
 
 import io.grpc.Status;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
+import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -18,11 +20,14 @@ public class GrpcTenantAccessPolicy {
     static final String TENANT_NOT_PERMITTED_MESSAGE = "Tenant is not permitted for this service";
 
     private final TenantRepository tenantRepository;
+    private final MembershipOutletAccessRepository outletAccessRepository;
     private final int defaultLimit;
     private final int maxLimit;
 
-    public GrpcTenantAccessPolicy(TenantRepository tenantRepository, GrpcSecurityProperties properties) {
+    public GrpcTenantAccessPolicy(TenantRepository tenantRepository, MembershipOutletAccessRepository outletAccessRepository,
+                                  GrpcSecurityProperties properties) {
         this.tenantRepository = tenantRepository;
+        this.outletAccessRepository = outletAccessRepository;
         this.defaultLimit = properties.getDefaultCatalogLimit();
         this.maxLimit = properties.getMaxCatalogLimit();
     }
@@ -41,6 +46,28 @@ public class GrpcTenantAccessPolicy {
             throw Status.PERMISSION_DENIED.withDescription(TENANT_NOT_PERMITTED_MESSAGE).asRuntimeException();
         }
         return tenantId;
+    }
+
+    /**
+     * Outlets the calling staff user may read inside an already validated tenant. Blank or malformed ids are
+     * INVALID_ARGUMENT; an unknown user, an inactive user or membership and a user without outlet access are all
+     * rejected with the same PERMISSION_DENIED as a rejected tenant (fail closed, no existence evidence).
+     */
+    public List<UUID> requireMemberOutlets(UUID tenantId, String rawUserId) {
+        if (rawUserId == null || rawUserId.isBlank()) {
+            throw Status.INVALID_ARGUMENT.withDescription("user_id must not be blank").asRuntimeException();
+        }
+        UUID userId;
+        try {
+            userId = UUID.fromString(rawUserId.trim());
+        } catch (IllegalArgumentException ex) {
+            throw Status.INVALID_ARGUMENT.withDescription("user_id must be a valid UUID").asRuntimeException();
+        }
+        List<UUID> outletIds = outletAccessRepository.findActiveOutletIds(tenantId, userId);
+        if (outletIds.isEmpty()) {
+            throw Status.PERMISSION_DENIED.withDescription(TENANT_NOT_PERMITTED_MESSAGE).asRuntimeException();
+        }
+        return outletIds;
     }
 
     public int clampLimit(int requested) {

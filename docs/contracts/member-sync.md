@@ -28,7 +28,7 @@ Fixtures: `member-sync.example.json`, `phone-normalization-cases.json`.
 ## 2. Java sender behavior (`MemberSyncClient`)
 
 - Triggered AFTER the owning transaction commits: owner at `FreeTierOnboardingService.complete(...)`, cashier at `CashierInvitationService.claim(...)` (also when the invitation was already claimed by the same user, because the call is idempotent and heals an earlier failed sync).
-- Sent fields: `tenant_name` = tenant business name, `full_name` = `StaffUserEntity.fullName`, `phone_number` = `StaffUserEntity.phoneNumber` (already normalized when stored), `role` from the membership, `status` = `ACTIVE`. If the user has no phone: skip and log at WARN with ids only.
+- Sent fields: `tenant_name` = tenant business name, `full_name` = `StaffUserEntity.fullName`, `phone_number` = `StaffUserEntity.phoneNumber` (already normalized when stored), `role` from the membership, `status` = `ACTIVE`, or `DISABLED` when the owner deactivates the cashier membership (deactivate/reactivate re-publish the member after commit). If the user has no phone: skip and log at WARN with ids only.
 - Disabled (no-op, INFO log once) when `app.ai-service.base-url` is blank. Default is blank, so existing tests and deployments are unaffected.
 - Timeouts: connect 2 s, read 5 s. Up to 3 attempts, backoff 200 ms then 800 ms; retry on I/O errors and 5xx only, never on 4xx.
 - Never throws into the business transaction/response path. Failure is logged (tenant id + user id + HTTP status/class only).

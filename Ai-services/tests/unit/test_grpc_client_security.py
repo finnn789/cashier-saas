@@ -15,6 +15,7 @@ from app.integrations.grpc.config import GrpcSettings, load_grpc_settings
 
 CLIENT_LOGGER = "app.integrations.grpc.client"
 SECRET = "unit-test-secret-key-0123456789"
+USER = "user-1"
 
 
 def _rpc_error(code: grpc.StatusCode, details: str = "denied") -> grpc.aio.AioRpcError:
@@ -40,7 +41,7 @@ def _catalog_response() -> Mock:
     item = Mock()
     item.id = "item-1"
     item.name = "Kopi"
-    item.price = 18000
+    item.price_amount = "18000.00"
     item.is_available = True
     item.category = "BEVERAGE"
     response = Mock()
@@ -54,7 +55,7 @@ def _order_response() -> Mock:
     response.order_number = "ORD-1"
     response.status = "PROCESSING"
     response.payment_status = "PAID"
-    response.total_amount = 45000
+    response.total = "45000.00"
     response.created_at = "2026-11-02T10:00:00Z"
     return response
 
@@ -92,7 +93,7 @@ class GrpcClientMetadataTests(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client._stub.GetCatalogItem = AsyncMock(return_value=_catalog_response())
 
-        items = await client.get_catalog_items(tenant_id="tenant-1", query="kopi")
+        items = await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
 
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["id"], "item-1")
@@ -105,7 +106,7 @@ class GrpcClientMetadataTests(unittest.IsolatedAsyncioTestCase):
         client = _client()
         client._stub.GetOrderStatus = AsyncMock(return_value=_order_response())
 
-        status = await client.get_order_status(tenant_id="tenant-1", order_number="ORD-1")
+        status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-1")
 
         self.assertIsNotNone(status)
         self.assertEqual(status["order_number"], "ORD-1")
@@ -121,7 +122,7 @@ class GrpcClientFailClosedTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(client, "get_channel", new_callable=AsyncMock) as get_channel:
             with self.assertLogs(CLIENT_LOGGER, level="WARNING") as logs:
-                items = await client.get_catalog_items(tenant_id="tenant-1", query="kopi")
+                items = await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
 
         self.assertEqual(items, [])
         client._stub.GetCatalogItem.assert_not_called()
@@ -134,7 +135,7 @@ class GrpcClientFailClosedTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(client, "get_channel", new_callable=AsyncMock) as get_channel:
             with self.assertLogs(CLIENT_LOGGER, level="WARNING") as logs:
-                status = await client.get_order_status(tenant_id="tenant-1", order_number="ORD-1")
+                status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-1")
 
         self.assertIsNone(status)
         client._stub.GetOrderStatus.assert_not_called()
@@ -146,7 +147,7 @@ class GrpcClientLimitClampTests(unittest.IsolatedAsyncioTestCase):
     async def _sent_limit(self, requested: int) -> int:
         client = _client()
         client._stub.GetCatalogItem = AsyncMock(return_value=_catalog_response())
-        await client.get_catalog_items(tenant_id="tenant-1", query="kopi", limit=requested)
+        await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi", limit=requested)
         request = client._stub.GetCatalogItem.await_args.args[0]
         return request.limit
 
@@ -166,7 +167,7 @@ class GrpcClientLimitClampTests(unittest.IsolatedAsyncioTestCase):
     async def test_default_limit_is_ten(self) -> None:
         client = _client()
         client._stub.GetCatalogItem = AsyncMock(return_value=_catalog_response())
-        await client.get_catalog_items(tenant_id="tenant-1", query="kopi")
+        await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
         request = client._stub.GetCatalogItem.await_args.args[0]
         self.assertEqual(request.limit, 10)
 
@@ -187,7 +188,7 @@ class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
                     side_effect=_rpc_error(code, details=f"rejected {SECRET}")
                 )
                 with self.assertLogs(CLIENT_LOGGER, level="WARNING") as logs:
-                    items = await client.get_catalog_items(tenant_id="tenant-1", query="kopi")
+                    items = await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
 
                 self.assertEqual(items, [])
                 joined = "\n".join(logs.output)
@@ -203,7 +204,7 @@ class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
                 )
                 with self.assertLogs(CLIENT_LOGGER, level="WARNING") as logs:
                     status = await client.get_order_status(
-                        tenant_id="tenant-1", order_number="ORD-1"
+                        tenant_id="tenant-1", user_id=USER, order_number="ORD-1"
                     )
 
                 self.assertIsNone(status)
@@ -214,7 +215,7 @@ class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_key_warning_never_contains_key_value(self) -> None:
         client = _client(service_key="")
         with self.assertLogs(CLIENT_LOGGER, level="WARNING") as logs:
-            await client.get_catalog_items(tenant_id="tenant-1", query="kopi")
+            await client.get_catalog_items(tenant_id="tenant-1", user_id=USER, query="kopi")
         self.assertNotIn(SECRET, "\n".join(logs.output))
 
     async def test_order_not_found_still_returns_none(self) -> None:
@@ -222,7 +223,7 @@ class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
         client._stub.GetOrderStatus = AsyncMock(
             side_effect=_rpc_error(grpc.StatusCode.NOT_FOUND, details="missing")
         )
-        status = await client.get_order_status(tenant_id="tenant-1", order_number="ORD-X")
+        status = await client.get_order_status(tenant_id="tenant-1", user_id=USER, order_number="ORD-X")
         self.assertIsNone(status)
 
 

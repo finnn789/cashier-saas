@@ -33,6 +33,7 @@ public class FnbSalesReportRepository {
                 .with("salesOrder.orderNumber")
                 .with("salesOrder.status")
                 .with("payment.method")
+                .with("payment.methodLabel")
                 .with("salesOrder.subtotal")
                 .with("salesOrder.total")
                 .with("payment.amountPaid")
@@ -103,12 +104,15 @@ public class FnbSalesReportRepository {
         return paidSalesQuery(tenantId, outletId, start, end, status, method)
                 .selectNew(MethodRow.class)
                 .with("payment.method")
+                .with("payment.methodLabel")
                 .with("COUNT(payment.id)")
                 .with("COALESCE(SUM(salesOrder.subtotal - salesOrder.discountAmount), 0)")
                 .with("COALESCE(SUM(payment.amountPaid - payment.changeAmount), 0)")
                 .end()
                 .groupBy("payment.method")
+                .groupBy("payment.methodLabel")
                 .orderByAsc("payment.method")
+                .orderByAsc("payment.methodLabel")
                 .getResultList();
     }
 
@@ -139,6 +143,7 @@ public class FnbSalesReportRepository {
         public final String orderNumber;
         public final OrderStatus status;
         public final PaymentMethod method;
+        public final String methodLabel;
         public final BigDecimal subtotal;
         public final BigDecimal total;
         public final BigDecimal amountPaid;
@@ -150,12 +155,13 @@ public class FnbSalesReportRepository {
         public final Instant paidAt;
 
         public TransactionRow(UUID orderId, String orderNumber, OrderStatus status, PaymentMethod method,
-                              BigDecimal subtotal, BigDecimal total, BigDecimal amountPaid, BigDecimal change,
+                              String methodLabel, BigDecimal subtotal, BigDecimal total, BigDecimal amountPaid, BigDecimal change,
                               BigDecimal discount, BigDecimal tax, BigDecimal service, String receipt, Instant paidAt) {
             this.orderId = orderId;
             this.orderNumber = orderNumber;
             this.status = status;
             this.method = method;
+            this.methodLabel = methodLabel;
             this.subtotal = subtotal;
             this.total = total;
             this.amountPaid = amountPaid;
@@ -207,12 +213,14 @@ public class FnbSalesReportRepository {
 
     public static class MethodRow {
         public final PaymentMethod method;
+        public final String methodLabel;
         public final long count;
         public final BigDecimal netSales;
         public final BigDecimal amountCollected;
 
-        public MethodRow(PaymentMethod method, Long count, BigDecimal netSales, BigDecimal amountCollected) {
+        public MethodRow(PaymentMethod method, String methodLabel, Long count, BigDecimal netSales, BigDecimal amountCollected) {
             this.method = method;
+            this.methodLabel = methodLabel;
             this.count = count;
             this.netSales = netSales;
             this.amountCollected = amountCollected;

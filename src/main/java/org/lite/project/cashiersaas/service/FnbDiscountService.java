@@ -18,7 +18,6 @@ import org.lite.project.cashiersaas.exception.runtime.OperationConflictException
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbDiscountRepository;
-import org.lite.project.cashiersaas.repository.FnbGatewayAttemptRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class FnbDiscountService {
     private final MerchantAccessGuard guard;
     private final FnbOrderRepository orders;
-    private final FnbGatewayAttemptRepository attempts;
     private final FnbDiscountRepository discounts;
     private final AuditLogRepository audit;
 
@@ -40,9 +38,6 @@ public class FnbDiscountService {
         SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId)
                 .orElseThrow(ResourceNotFoundException::new);
         orders.refreshOrder(order);
-        if (attempts.pendingForOrder(principal.getTenantId(), outletId, orderId).isPresent()) {
-            throw new OperationConflictException("Gateway attempt masih tertunda.");
-        }
         if (discounts.byOrder(principal.getTenantId(), outletId, orderId).isPresent()) {
             throw new OperationConflictException("Diskon pesanan sudah ditetapkan.");
         }

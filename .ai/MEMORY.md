@@ -1,9 +1,15 @@
 # Project memory
 
-Memory version: 70
-Updated: 2026-11-12 (Asia/Jakarta)
+Memory version: 76
+Updated: 2026-11-13 (Asia/Jakarta)
 
 ## Evidence-qualified state
+
+- TASK-078 — M5 VERIFIED (`mvnw -B verify` 473 unit + 121 IT green), NOT COMMITTED (2026-11-14); details in TASKS.md.
+- PRD v2.1 (2026-11-13): record-only cashier, QRIS not a payment feature, non-cash labels, mock gateway to be removed, petty cash in M5; see DECISIONS "PRD v2.1".
+- PRD v2 (2026-11-13): `PRD-MVP.md` rewritten for the pivot with milestones M4-M8; see `.ai/DECISIONS.md` "PRD v2".
+- TASK-077 — VERIFIED, NOT COMMITTED (2026-11-13): M4 cash shifts + owner refund, V7; `mvnw -B verify` 445 unit + 105 IT green (with TASK-076); packet `tasks/TASK-077.md`, details in TASKS.md.
+- TASK-076 — VERIFIED (Java), Python tests NOT RUN, NOT COMMITTED (2026-11-13): group A fixes on branch `fix/flow-controls-a` @ `038a2f7`; decisions in `.ai/DECISIONS.md` "Flow controls A"; packet `tasks/TASK-076.md`. Canonical 70 -> 73.
 
 - TASK-075 — VERIFIED, NOT COMMITTED (2026-11-12): pivot Wave B on `refactor/pivot-cashier-ai`: statuses OPEN/COMPLETED/CANCELLED + V6 (verified on PG17 incl. abort guard), server-side hold bill via `PUT .../fnb/orders/{orderId}/items`, CORS `app.cors.allowed-origins` with fail-fast validation, `GET /api/v1/public/plans` re-permitted, Telegram status labels, Postman/docs aligned. `mvnw -B verify` 385 unit + 80 IT green. UI pending in Antigravity (`prompts/refactore_feature_and_uui.md`). Canonical 69 -> 70.
 

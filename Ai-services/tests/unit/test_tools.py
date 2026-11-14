@@ -1,28 +1,36 @@
-"""Unit tests for tool definitions, registry, and system tools."""
+"""Unit tests for tool definitions and registry."""
 
-import asyncio
+import json
 import unittest
+from unittest.mock import AsyncMock, Mock
 
-from app.tools import CatalogSearchTool, CpuUsageTool, ToolRegistry, get_default_tool_registry
+from app.ai.graph.tools_adapter import json_schema_to_pydantic_model
+from app.integrations.grpc.client import CashierGrpcClient
+from app.tools import CatalogSearchTool, OrderStatusTool, ToolRegistry, get_default_tool_registry
 
 
 class ToolsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_cpu_usage_tool_schema_and_execution(self) -> None:
-        tool = CpuUsageTool()
-        schema = tool.to_openrouter_schema()
-        self.assertEqual(schema["type"], "function")
-        self.assertEqual(schema["function"]["name"], "check_laptop_cpu_usage")
+    async def test_tool_schema_hides_tenant_and_user(self) -> None:
+        for tool in (CatalogSearchTool(), OrderStatusTool()):
+            schema = tool.to_openrouter_schema()
+            self.assertEqual(schema["type"], "function")
+            properties = schema["function"]["parameters"]["properties"]
+            self.assertNotIn("tenant_id", properties)
+            self.assertNotIn("user_id", properties)
 
-        result = await tool.execute(tenant_id="tenant-123")
-        self.assertIn("cpu_usage_percent", result)
-        self.assertIn("status", result)
-        self.assertIsInstance(result["cpu_usage_percent"], float)
-        self.assertGreaterEqual(result["cpu_usage_percent"], 0.0)
-        self.assertLessEqual(result["cpu_usage_percent"], 100.0)
+    def test_adapter_schema_drops_tenant_and_user(self) -> None:
+        model = json_schema_to_pydantic_model("t_args", {
+            "type": "object",
+            "properties": {"query": {"type": "string"}, "tenant_id": {"type": "string"}, "user_id": {"type": "string"}},
+            "required": ["query", "tenant_id", "user_id"],
+        })
+        self.assertEqual(set(model.model_fields), {"query"})
 
     async def test_registry_registration_and_dispatch(self) -> None:
+        client = Mock(spec=CashierGrpcClient)
+        client.get_catalog_items = AsyncMock(return_value=[])
         registry = ToolRegistry()
-        tool = CpuUsageTool()
+        tool = CatalogSearchTool(client=client)
         registry.register(tool)
 
         # Duplicate registration raises ValueError
@@ -31,16 +39,19 @@ class ToolsTests(unittest.IsolatedAsyncioTestCase):
 
         schemas = registry.get_openrouter_schemas()
         self.assertEqual(len(schemas), 1)
-        self.assertEqual(schemas[0]["function"]["name"], "check_laptop_cpu_usage")
+        self.assertEqual(schemas[0]["function"]["name"], "search_catalog_menu")
 
-        # Dispatch valid tool
+        # Dispatch valid tool: user_id comes from the trusted argument, never from the model
         dispatch_res = await registry.dispatch(
-            tool_name="check_laptop_cpu_usage",
-            arguments_json="{}",
+            tool_name="search_catalog_menu",
+            arguments_json=json.dumps({"query": "kopi", "user_id": "attacker"}),
             tenant_id="tenant-123",
+            user_id="user-1",
         )
         self.assertTrue(dispatch_res["success"])
-        self.assertIn("cpu_usage_percent", dispatch_res["data"])
+        client.get_catalog_items.assert_awaited_once_with(
+            tenant_id="tenant-123", user_id="user-1", query="kopi"
+        )
 
         # Dispatch unknown tool
         unknown_res = await registry.dispatch(
@@ -52,7 +63,7 @@ class ToolsTests(unittest.IsolatedAsyncioTestCase):
 
         # Dispatch malformed json
         bad_json_res = await registry.dispatch(
-            tool_name="check_laptop_cpu_usage",
+            tool_name="search_catalog_menu",
             arguments_json="invalid json",
             tenant_id="tenant-123",
         )
@@ -60,8 +71,8 @@ class ToolsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_tool_registry(self) -> None:
         registry = get_default_tool_registry()
-        self.assertIsNotNone(registry.get_tool("check_laptop_cpu_usage"))
+        self.assertIsNone(registry.get_tool("check_laptop_cpu_usage"))
         self.assertIsNotNone(registry.get_tool("search_catalog_menu"))
         self.assertIsNotNone(registry.get_tool("check_order_status"))
         schemas = registry.get_openrouter_schemas()
-        self.assertEqual(len(schemas), 3)
+        self.assertEqual(len(schemas), 2)

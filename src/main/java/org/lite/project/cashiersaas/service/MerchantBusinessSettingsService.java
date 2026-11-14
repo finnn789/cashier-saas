@@ -56,7 +56,8 @@ public class MerchantBusinessSettingsService {
                 values.address(), values.phoneNumber(), values.taxRate(), values.serviceChargeRate(), values.timeZone());
         boolean outletChanged = outlet.updateBusinessSettings(values.outletName(), values.timeZone(), values.outletAddress(),
                 values.outletPhoneNumber());
-        if (tenantChanged || outletChanged) {
+        boolean footerChanged = tenant.changeReceiptFooter(values.receiptFooter());
+        if (tenantChanged || outletChanged || footerChanged) {
             auditLogs.persist(AuditLogEntity.recordAction(tenant, outlet, context.getMembership().getUser(),
                     AuditLogEntity.Action.BUSINESS_SETTINGS_CHANGED, outlet.getId(), null,
                     "{\"before\":" + before + ",\"after\":" + details(tenant, outlet) + "}"));
@@ -74,7 +75,7 @@ public class MerchantBusinessSettingsService {
         return new Values(requiredName(request.getBusinessName(), "Nama bisnis", 120), logoUrl, currency,
                 optional(request.getAddress()), optional(request.getPhoneNumber()), rate(request.getTaxRate()),
                 rate(request.getServiceChargeRate()), requiredName(request.getOutletName(), "Nama outlet", 120),
-                optional(request.getOutletAddress()), optional(request.getOutletPhoneNumber()), timeZone);
+                optional(request.getOutletAddress()), optional(request.getOutletPhoneNumber()), timeZone, optional(request.getReceiptFooter()));
     }
 
     private void validateCurrency(String currency) {
@@ -142,7 +143,7 @@ public class MerchantBusinessSettingsService {
                 + "\",\"serviceChargeRate\":\"" + tenant.getServiceChargeRate() + "\",\"outletName\":\""
                 + escape(outlet.getName()) + "\",\"outletAddress\":" + nullable(outlet.getAddress())
                 + ",\"outletPhoneNumber\":" + nullable(outlet.getPhoneNumber()) + ",\"timeZone\":\""
-                + escape(outlet.getTimeZone()) + "\"}";
+                + escape(outlet.getTimeZone()) + "\",\"receiptFooter\":" + nullable(tenant.getReceiptFooter()) + "}";
     }
 
     private String nullable(String value) {
@@ -178,5 +179,5 @@ public class MerchantBusinessSettingsService {
 
     private record Values(String businessName, String logoUrl, String currency, String address, String phoneNumber,
                           BigDecimal taxRate, BigDecimal serviceChargeRate, String outletName, String outletAddress,
-                          String outletPhoneNumber, String timeZone) { }
+                          String outletPhoneNumber, String timeZone, String receiptFooter) { }
 }

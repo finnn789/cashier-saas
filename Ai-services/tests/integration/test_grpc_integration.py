@@ -6,6 +6,7 @@ the full end-to-end request-response cycle over network sockets.
 """
 
 import unittest
+from decimal import Decimal
 from typing import Any
 
 import grpc
@@ -14,6 +15,8 @@ import grpc.aio
 from app.integrations.grpc.client import CashierGrpcClient
 from app.integrations.grpc.config import GrpcSettings
 from app.integrations.grpc.generated import cashier_service_pb2, cashier_service_pb2_grpc
+
+USER_ID = "11111111-1111-1111-1111-111111111111"
 
 
 class InMemoryCashierServicer(cashier_service_pb2_grpc.CashierServiceServicer):
@@ -35,21 +38,21 @@ class InMemoryCashierServicer(cashier_service_pb2_grpc.CashierServiceServicer):
             cashier_service_pb2.CatalogItem(
                 id="item-int-001",
                 name="Nasi Goreng Spesial",
-                price=25000,
+                price_amount="25000.00",
                 is_available=True,
                 category="Food",
             ),
             cashier_service_pb2.CatalogItem(
                 id="item-int-002",
                 name="Nasi Uduk Betawi",
-                price=18000,
+                price_amount="18000.00",
                 is_available=True,
                 category="Food",
             ),
             cashier_service_pb2.CatalogItem(
                 id="item-int-003",
                 name="Es Teh Manis",
-                price=5000,
+                price_amount="5000.00",
                 is_available=True,
                 category="Beverage",
             ),
@@ -84,7 +87,7 @@ class InMemoryCashierServicer(cashier_service_pb2_grpc.CashierServiceServicer):
             order_number=request.order_number,
             status="COMPLETED",
             payment_status="PAID",
-            total_amount=43000,
+            total="43000.00",
             created_at="2026-10-30T11:00:00Z",
         )
 
@@ -132,6 +135,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
 
         result: list[dict[str, Any]] = await self.client.get_catalog_items(
             tenant_id=tenant_id,
+            user_id=USER_ID,
             query=query,
             limit=limit,
         )
@@ -142,6 +146,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
         print(f"  --> SERVER RECEIVED: tenant_id='{srv_req.tenant_id}', query='{srv_req.query}', limit={srv_req.limit}")
 
         self.assertEqual(srv_req.tenant_id, tenant_id)
+        self.assertEqual(srv_req.user_id, USER_ID)
         self.assertEqual(srv_req.query, query)
         self.assertEqual(srv_req.limit, limit)
 
@@ -152,13 +157,13 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["id"], "item-int-001")
         self.assertEqual(result[0]["name"], "Nasi Goreng Spesial")
-        self.assertEqual(result[0]["price"], 25000)
+        self.assertEqual(result[0]["price"], Decimal("25000.00"))
         self.assertEqual(result[0]["is_available"], True)
         self.assertEqual(result[0]["category"], "Food")
 
         self.assertEqual(result[1]["id"], "item-int-002")
         self.assertEqual(result[1]["name"], "Nasi Uduk Betawi")
-        self.assertEqual(result[1]["price"], 18000)
+        self.assertEqual(result[1]["price"], Decimal("18000.00"))
 
     async def test_real_get_order_status_roundtrip(self) -> None:
         """Integration: verify real get_order_status RPC returns complete order record."""
@@ -172,6 +177,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
 
         result: dict[str, Any] | None = await self.client.get_order_status(
             tenant_id=tenant_id,
+            user_id=USER_ID,
             order_number=order_number,
         )
 
@@ -181,6 +187,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
         print(f"  --> SERVER RECEIVED: tenant_id='{srv_req.tenant_id}', order_number='{srv_req.order_number}'")
 
         self.assertEqual(srv_req.tenant_id, tenant_id)
+        self.assertEqual(srv_req.user_id, USER_ID)
         self.assertEqual(srv_req.order_number, order_number)
 
         # Verify client output
@@ -193,7 +200,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["order_number"], order_number)
         self.assertEqual(result["status"], "COMPLETED")
         self.assertEqual(result["payment_status"], "PAID")
-        self.assertEqual(result["total_amount"], 43000)
+        self.assertEqual(result["total_amount"], Decimal("43000.00"))
         self.assertEqual(result["created_at"], "2026-10-30T11:00:00Z")
 
     async def test_real_get_order_status_not_found(self) -> None:
@@ -207,6 +214,7 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
 
         result = await self.client.get_order_status(
             tenant_id=tenant_id,
+            user_id=USER_ID,
             order_number=order_number,
         )
 
@@ -224,11 +232,11 @@ class TestCashierGrpcIntegration(unittest.IsolatedAsyncioTestCase):
         print("\n" + "=" * 65)
         print("[INTEGRATION TEST: Server Stopped Fallback]")
         print("  --> Calling get_catalog_items after server shutdown...")
-        catalog_result = await self.client.get_catalog_items(tenant_id=tenant_id, query="kopi")
+        catalog_result = await self.client.get_catalog_items(tenant_id=tenant_id, user_id=USER_ID, query="kopi")
         print(f"  <-- CLIENT RECEIVED: {catalog_result}")
 
         print("  --> Calling get_order_status after server shutdown...")
-        order_result = await self.client.get_order_status(tenant_id=tenant_id, order_number="ORD-X")
+        order_result = await self.client.get_order_status(tenant_id=tenant_id, user_id=USER_ID, order_number="ORD-X")
         print(f"  <-- CLIENT RECEIVED: {order_result}")
         print("=" * 65)
 

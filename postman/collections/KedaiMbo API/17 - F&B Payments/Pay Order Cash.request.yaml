@@ -1,0 +1,19 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/payments"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "method": "CASH",
+      "amountTendered": 100000.00,
+      "idempotencyKey": "{{paymentKey}}"
+    }
+description: |-
+  Pembayaran tunai (hanya dicatat). amountTendered minimal sama dengan total; kembalian dihitung server. Jangan kirim labelId untuk CASH (400). Wajib ada shift terbuka milik pembayar (409 "Buka shift terlebih dahulu ..." bila tidak). Gunakan paymentKey yang sama saat retry; ganti untuk pesanan lain. Nomor struk berbentuk INV-YYYYMMDD-NNNN.
+order: 1000

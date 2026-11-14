@@ -66,6 +66,13 @@ public class FnbInventoryRepository {
                 .setFirstResult(page * size).setMaxResults(size).getResultList();
     }
 
+    public List<InventoryMovementEntity> saleMovements(UUID tenant, UUID outlet, UUID orderId) {
+        return criteriaBuilderFactory.create(entityManager, InventoryMovementEntity.class, MOVEMENT.getMetadata().getName())
+                .where(MOVEMENT.tenantId.toString()).eq(tenant).where(MOVEMENT.outletId.toString()).eq(outlet)
+                .where(MOVEMENT.orderId.toString()).eq(orderId).where(MOVEMENT.type.toString()).eq(InventoryMovementEntity.Type.SALE)
+                .orderByAsc(MOVEMENT.inventoryItem.id.toString()).getResultList();
+    }
+
     public Optional<InventoryMovementEntity> movementByKey(UUID tenant, String idempotencyKey) {
         return criteriaBuilderFactory.create(entityManager, InventoryMovementEntity.class, MOVEMENT.getMetadata().getName())
                 .where(MOVEMENT.tenantId.toString()).eq(tenant).where(MOVEMENT.idempotencyKey.toString()).eq(idempotencyKey)

@@ -61,10 +61,10 @@ public class FnbSalesReportService {
         List<FnbSalesReportRepository.TransactionRow> rows = reports.transactions(principal.getTenantId(), outletId,
                 query.start, query.end, filter.getOrderStatus(), filter.getPaymentMethod(), 0, MAX_CSV_ROWS);
         if (rows.size() > MAX_CSV_ROWS) throw new InvalidOperationException("Ekspor melebihi batas 10000 baris; persempit rentang tanggal.");
-        StringBuilder content = new StringBuilder("Order Number,Receipt Number,Status,Payment Method,Paid At,Net Sales,Total,Amount Collected,Discount,Tax,Service Charge\r\n");
+        StringBuilder content = new StringBuilder("Order Number,Receipt Number,Status,Payment Method,Payment Label,Paid At,Net Sales,Total,Amount Collected,Discount,Tax,Service Charge\r\n");
         for (FnbSalesReportRepository.TransactionRow row : rows) {
             content.append(csv(row.orderNumber)).append(',').append(csv(row.receipt)).append(',')
-                    .append(csv(String.valueOf(row.status))).append(',').append(csv(String.valueOf(row.method))).append(',')
+                    .append(csv(String.valueOf(row.status))).append(',').append(csv(String.valueOf(row.method))).append(',').append(csv(row.methodLabel)).append(',')
                     .append(csv(row.paidAt.atZone(query.zone).toString())).append(',')
                     .append(csv(row.subtotal.subtract(row.discount).toPlainString())).append(',')
                     .append(csv(row.total.toPlainString())).append(',')

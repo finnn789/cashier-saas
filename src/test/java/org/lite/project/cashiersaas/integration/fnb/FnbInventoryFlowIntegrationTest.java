@@ -185,6 +185,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private MvcResult payCash(MerchantFixture actor, String orderId, String key) throws Exception {
+        api.ensureShift(actor);
         return api.send(post(orders(actor) + "/" + orderId + "/payments").header(AUTH, actor.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content(paymentJson("CASH", "1000000", key)), 200, 201);
     }
@@ -378,52 +379,33 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertLedgerMatchesBalance(telur);
     }
 
-    // ------------------------------------------------------------------ 4. mock gateway
+    // ------------------------------------------------------------------ 4. manual non-cash payment
 
     @Test
-    void mockGatewayDeductsStockOnlyWhenResolvedSucceededAndExactlyOnce() throws Exception {
-        MerchantFixture owner = api.onboardOwner("inv-gateway");
+    void manualNonCashPaymentDeductsStockExactlyOnce() throws Exception {
+        MerchantFixture owner = api.onboardOwner("inv-noncash");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Matcha", PRICE);
         String matcha = createIngredient(owner, "Bubuk Matcha", "g", "10", "100");
         setRecipe(owner, productRecipeUrl(owner, productId), recipeJson(matcha, "18"));
         String orderId = createOrder(owner, productId, 2);
         String total = ApiTestSupport.read(getOrder(owner, orderId), "$.data.total");
         String payUrl = orders(owner) + "/" + orderId + "/payments";
+        String body = "{\"method\":\"MANUAL_NON_CASH\",\"amountTendered\":" + total + ",\"labelId\":\""
+                + api.firstActiveLabelId(owner) + "\",\"idempotencyKey\":\"nc-" + UUID.randomUUID() + "\"}";
+        api.openShift(owner, "0.00");
 
-        // Attempt 1 is initiated and resolved FAILED: nothing is deducted.
-        MvcResult first = api.send(post(payUrl).header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content(paymentJson("MOCK_GATEWAY", total, "gw-" + UUID.randomUUID())), 200, 201);
-        assertEquals("PENDING", ApiTestSupport.read(first, "$.data.gatewayOutcome"));
-        String failedAttempt = ApiTestSupport.read(first, "$.data.attemptId");
-        assertDecimal("100", balance(matcha), "initiate must not deduct");
-        assertEquals(0, saleMovements(orderId));
-
-        MvcResult failed = api.send(post(orders(owner) + "/" + orderId + "/mock-payments/" + failedAttempt + "/resolve")
-                .header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"outcome\":\"FAILED\"}"), 200);
-        assertEquals("FAILED", ApiTestSupport.read(failed, "$.data.gatewayOutcome"));
-        assertTrue(warnings(failed).isEmpty());
-        assertDecimal("100", balance(matcha), "FAILED outcome deducts nothing");
-        assertEquals(0, saleMovements(orderId));
-        assertEquals("UNPAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-
-        // Attempt 2 succeeds: deducted once, with a warning-free response (64 left, above reorder level 10).
-        MvcResult second = api.send(post(payUrl).header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content(paymentJson("MOCK_GATEWAY", total, "gw-" + UUID.randomUUID())), 200, 201);
-        String attemptId = ApiTestSupport.read(second, "$.data.attemptId");
-        String resolveUrl = orders(owner) + "/" + orderId + "/mock-payments/" + attemptId + "/resolve";
-        MvcResult settled = api.send(post(resolveUrl).header(AUTH, owner.bearer())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"outcome\":\"SUCCEEDED\"}"), 200);
-        assertEquals("SUCCEEDED", ApiTestSupport.read(settled, "$.data.gatewayOutcome"));
-        assertTrue(warnings(settled).isEmpty());
-        assertDecimal("64", balance(matcha), "SUCCEEDED deducts 2 x 18");
+        MvcResult paid = api.send(post(payUrl).header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content(body), 200, 201);
+        assertEquals("MANUAL_NON_CASH", ApiTestSupport.read(paid, "$.data.method"));
+        assertTrue(warnings(paid).isEmpty());
+        assertDecimal("64", balance(matcha), "non-cash payment deducts 2 x 18");
         assertEquals(1, saleMovements(orderId));
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
 
-        // Resolving the same terminal outcome again is a replay and must not deduct again.
-        api.send(post(resolveUrl).header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"outcome\":\"SUCCEEDED\"}"), 200);
-        assertDecimal("64", balance(matcha), "terminal replay deducts nothing more");
+        // Replaying the same key is answered from the stored payment and must not deduct again.
+        api.send(post(payUrl).header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON).content(body),
+                200, 201);
+        assertDecimal("64", balance(matcha), "replay deducts nothing more");
         assertEquals(1, saleMovements(orderId));
         assertLedgerMatchesBalance(matcha);
     }

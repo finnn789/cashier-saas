@@ -421,6 +421,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     @Test
     void parallelPaymentsOfDifferentOrdersDeductTheSharedIngredientExactlyOncePerOrder() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-d");
+        api.openShift(owner, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Biji Kopi", "g", "10", "1000");
         setRecipe(owner, productId, item, "50");
@@ -459,6 +460,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     @Test
     void parallelPaymentsOfOneOrderWithTheSameKeySettleAndDeductOnce() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-e1");
+        api.openShift(owner, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Biji Kopi", "g", "10", "1000");
         setRecipe(owner, productId, item, "50");
@@ -496,6 +498,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     @Test
     void parallelPaymentsOfOneOrderWithDifferentKeysAllowExactlyOneAndDeductOnce() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-e2");
+        api.openShift(owner, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Biji Kopi", "g", "10", "1000");
         setRecipe(owner, productId, item, "50");
@@ -532,6 +535,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     @Test
     void mixedPaymentsRestocksAndWastesFinishWithoutDeadlockAndKeepTheLedgerConsistent() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-f");
+        api.openShift(owner, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Biji Kopi", "g", "10", "1000");
         setRecipe(owner, productId, item, "50");
@@ -577,6 +581,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     @Test
     void negativeStockDoesNotBlockParallelPaymentsAndReportsMinusWarnings() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-g");
+        api.openShift(owner, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Susu", "g", "10", "100");
         setRecipe(owner, productId, item, "50");
@@ -629,6 +634,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     void paymentRacingWithCancelLeavesExactlyOneConsistentOutcomePerOrder() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-h");
         MerchantFixture cashier = api.onboardCashier(owner, "conc-h-cashier");
+        api.openShift(cashier, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Biji Kopi", "g", "10", "10000");
         setRecipe(owner, productId, item, "50");
@@ -689,6 +695,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
     void paymentRacingWithDiscountKeepsTheChargedTotalAndTheDiscountRowConsistent() throws Exception {
         MerchantFixture owner = api.onboardOwner("conc-i");
         MerchantFixture cashier = api.onboardCashier(owner, "conc-i-cashier");
+        api.openShift(cashier, "0.00");
         String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
         String item = createIngredient(owner, "Biji Kopi", "g", "10", "10000");
         setRecipe(owner, productId, item, "50");

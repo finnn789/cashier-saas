@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/business-settings"
+method: PUT
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "businessName": "Kedai Contoh",
+      "logoUrl": "https://cdn.example.com/logo.png",
+      "currency": "IDR",
+      "address": "Jl. Contoh 1",
+      "phoneNumber": "+6221123456",
+      "taxRate": 11.00,
+      "serviceChargeRate": 5.00,
+      "outletName": "Outlet Utama",
+      "outletAddress": "Jl. Contoh 1",
+      "outletPhoneNumber": "+6221123456",
+      "timeZone": "Asia/Jakarta",
+      "receiptFooter": "Terima kasih, sampai jumpa lagi!"
+    }
+description: |-
+  Hanya OWNER. PUT mengganti seluruh dokumen; receiptFooter (opsional, maks 200) dicetak di bawah struk. Dikosongkan atau dihilangkan = footer dihapus.
+order: 2000

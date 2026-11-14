@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders?page=0&size=20&from=2026-11-14&to=2026-11-14"
+method: GET
+headers:
+  Accept: application/json
+description: |-
+  Filter tanggal: from dan to (tanggal ISO menurut zona waktu outlet, harus berpasangan, maksimal 366 hari; selain itu 400). Tambahkan &orderNumber=<nomor pesanan> untuk pencarian persis (setelah di-trim). Ubah tanggal sesuai data lokal.
+order: 4000

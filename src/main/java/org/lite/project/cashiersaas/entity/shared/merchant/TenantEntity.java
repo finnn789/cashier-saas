@@ -13,6 +13,7 @@ import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.shared.StatusConstants;
 
 import java.util.Objects;
@@ -52,6 +53,8 @@ public class TenantEntity extends MutableBaseEntity {
     private String onboardingRequestFingerprint;
     @Column(name = "profile_completed_at")
     private Instant profileCompletedAt;
+    @Column(name = "receipt_footer", length = 200)
+    private String receiptFooter;
 
     public static TenantEntity startFreeTier(StaffUserEntity owner, BusinessTypeEntity type, String key, String fingerprint) {
         TenantEntity tenant = new TenantEntity();
@@ -100,6 +103,15 @@ public class TenantEntity extends MutableBaseEntity {
             this.serviceChargeRate = serviceChargeRate;
             this.timeZone = timeZone;
         }
+        return changed;
+    }
+
+    public boolean changeReceiptFooter(String footer) {
+        String normalized = footer == null || footer.isBlank() ? null : footer.trim();
+        if (normalized != null && normalized.length() > 200)
+            throw new InvalidOperationException("Footer struk maksimal 200 karakter.");
+        boolean changed = !Objects.equals(receiptFooter, normalized);
+        receiptFooter = normalized;
         return changed;
     }
 

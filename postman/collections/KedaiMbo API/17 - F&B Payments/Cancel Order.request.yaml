@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/cancel"
+method: POST
+headers:
+  - key: Accept
+    value: application/json
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "reason": "Pelanggan membatalkan"
+    }
+description: |-
+  Batalkan pesanan OPEN/UNPAID dengan alasan. Pesanan lunas tidak dapat dibatalkan (gunakan Refund Order di folder 16). Kasir tidak dapat membatalkan pesanan yang sudah diberi diskon.
+order: 4000

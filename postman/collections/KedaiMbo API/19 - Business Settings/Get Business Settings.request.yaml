@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/business-settings"
+method: GET
+headers:
+  Accept: application/json
+description: |-
+  Hanya OWNER. Menyertakan receiptFooter bila diisi.
+order: 1000

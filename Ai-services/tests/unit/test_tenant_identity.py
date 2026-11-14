@@ -190,6 +190,7 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         identity = await self.verify(self.service())
         self.assertEqual(identity.status, VERIFIED)
         self.assertEqual((identity.tenant_id, identity.role), (self.tenant_a, "OWNERMERCHANT"))
+        self.assertEqual(identity.java_user_id, java_user)
         self.assertEqual([option.name for option in identity.options], ["Kopi Senja"])
         self.assertEqual(self.fake.memberships[self.user_id], {self.tenant_a: java_user})
         self.assertEqual(self.fake.selection[self.user_id], self.tenant_a)
@@ -345,6 +346,7 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         fallback = uuid4()
         identity = await self.service(fallback).identify(**self.profile)
         self.assertEqual((identity.status, identity.tenant_id, identity.role), (FALLBACK, fallback, None))
+        self.assertIsNone(identity.java_user_id)
         self.assertTrue(identity.can_chat)
 
     async def test_fallback_never_overrides_a_verified_tenant(self) -> None:

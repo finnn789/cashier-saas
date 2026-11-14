@@ -10,10 +10,12 @@ import org.lite.project.cashiersaas.enums.OrderStatus;
 import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.enums.ServiceType;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
+import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Tag("unit")
@@ -25,7 +27,7 @@ class SalesOrderEntityTest {
 
         SalesOrderEntity order = SalesOrderEntity.pos(tenant, outlet,
                 new SalesOrderEntity.PosDetails("checkout-key-0001", "fingerprint", "POS-ORDER-1",
-                        ServiceType.DINE_IN, "Customer"),
+                        ServiceType.DINE_IN, "Customer", null),
                 new SalesOrderEntity.Charges(new BigDecimal("100.00"),
                         new BigDecimal("11.00"), new BigDecimal("5.00")));
 
@@ -50,12 +52,12 @@ class SalesOrderEntityTest {
 
         SalesOrderEntity order = SalesOrderEntity.pos(tenant, outlet,
                 new SalesOrderEntity.PosDetails("checkout-key-0001", "fingerprint", "POS-ORDER-1",
-                        ServiceType.TAKEAWAY, "Customer"), charges);
+                        ServiceType.TAKEAWAY, "Customer", null), charges);
 
         assertEquals(ServiceType.TAKEAWAY, order.getServiceType());
         assertThrows(InvalidOperationException.class, () -> SalesOrderEntity.pos(tenant, outlet,
                 new SalesOrderEntity.PosDetails("checkout-key-0002", "fingerprint", "POS-ORDER-2",
-                        null, "Customer"), charges));
+                        null, "Customer", null), charges));
     }
 
     private static SalesOrderEntity openOrder() {
@@ -63,7 +65,7 @@ class SalesOrderEntityTest {
         OutletEntity outlet = OutletEntity.open(tenant, "Outlet", "Asia/Jakarta", null, null);
         SalesOrderEntity order = SalesOrderEntity.pos(tenant, outlet,
                 new SalesOrderEntity.PosDetails("checkout-key-0001", "fingerprint", "POS-ORDER-1",
-                        ServiceType.DINE_IN, "Customer"),
+                        ServiceType.DINE_IN, "Customer", null),
                 new SalesOrderEntity.Charges(new BigDecimal("100.00"), new BigDecimal("10.00"), new BigDecimal("5.00")));
         order.snapshotRates(new BigDecimal("10"), new BigDecimal("5"));
         return order;
@@ -124,7 +126,7 @@ class SalesOrderEntityTest {
     void replaceLinesRecomputesTotalsOnOpenUnpaidOrder() {
         SalesOrderEntity order = openOrder();
 
-        order.replaceLines(ServiceType.TAKEAWAY, "Budi", charges("200.00", "20.00", "10.00"));
+        order.replaceLines(ServiceType.TAKEAWAY, "Budi", null, charges("200.00", "20.00", "10.00"));
 
         assertEquals(ServiceType.TAKEAWAY, order.getServiceType());
         assertEquals("Budi", order.getCustomerLabel());
@@ -143,23 +145,71 @@ class SalesOrderEntityTest {
         SalesOrderEntity paid = openOrder();
         paid.confirmPaid();
         assertThrows(InvalidOperationException.class,
-                () -> paid.replaceLines(ServiceType.DINE_IN, "Budi", charges));
+                () -> paid.replaceLines(ServiceType.DINE_IN, "Budi", null, charges));
         assertEquals(new BigDecimal("115.00"), paid.getTotal());
 
         SalesOrderEntity cancelled = openOrder();
         cancelled.cancel("Batal");
         assertThrows(InvalidOperationException.class,
-                () -> cancelled.replaceLines(ServiceType.DINE_IN, "Budi", charges));
+                () -> cancelled.replaceLines(ServiceType.DINE_IN, "Budi", null, charges));
 
         SalesOrderEntity discounted = openOrder();
         discounted.applyDiscount(new BigDecimal("10.00"));
         assertThrows(InvalidOperationException.class,
-                () -> discounted.replaceLines(ServiceType.DINE_IN, "Budi", charges));
+                () -> discounted.replaceLines(ServiceType.DINE_IN, "Budi", null, charges));
         assertEquals(new BigDecimal("100.00"), discounted.getSubtotal());
 
         SalesOrderEntity open = openOrder();
-        assertThrows(InvalidOperationException.class, () -> open.replaceLines(null, "Budi", charges));
+        assertThrows(InvalidOperationException.class, () -> open.replaceLines(null, "Budi", null, charges));
         assertEquals(ServiceType.DINE_IN, open.getServiceType());
         assertEquals(new BigDecimal("115.00"), open.getTotal());
+    }
+
+    @Test
+    void orderNoteIsStoredByPosAndReplaceLinesAndNullClearsIt() {
+        TenantEntity tenant = new TenantEntity();
+        OutletEntity outlet = OutletEntity.open(tenant, "Outlet", "Asia/Jakarta", null, null);
+        SalesOrderEntity order = SalesOrderEntity.pos(tenant, outlet,
+                new SalesOrderEntity.PosDetails("checkout-key-0001", "fingerprint", "POS-ORDER-1",
+                        ServiceType.DINE_IN, null, "tanpa es"), charges("100.00", "10.00", "5.00"));
+        assertEquals("tanpa es", order.getOrderNote());
+        assertNull(order.getCustomerLabel());
+
+        order.replaceLines(ServiceType.DINE_IN, "Budi", "extra pedas", charges("100.00", "10.00", "5.00"));
+        assertEquals("extra pedas", order.getOrderNote());
+
+        order.replaceLines(ServiceType.DINE_IN, null, null, charges("100.00", "10.00", "5.00"));
+        assertNull(order.getOrderNote());
+        assertNull(order.getCustomerLabel());
+    }
+
+    @Test
+    void markRefundedOnAPaidOrderKeepsItCompletedAndSetsRefunded() {
+        SalesOrderEntity order = openOrder();
+        order.confirmPaid();
+
+        order.markRefunded();
+
+        assertEquals(PaymentStatus.REFUNDED, order.getPaymentStatus());
+        assertEquals(OrderStatus.COMPLETED, order.getStatus());
+    }
+
+    @Test
+    void markRefundedRejectsOpenCancelledAndAlreadyRefundedOrders() {
+        SalesOrderEntity open = openOrder();
+        OperationConflictException ex = assertThrows(OperationConflictException.class, open::markRefunded);
+        assertEquals("Hanya pesanan lunas yang dapat direfund.", ex.getMessage());
+        assertEquals(PaymentStatus.UNPAID, open.getPaymentStatus());
+
+        SalesOrderEntity cancelled = openOrder();
+        cancelled.cancel("Batal");
+        assertThrows(OperationConflictException.class, cancelled::markRefunded);
+        assertEquals(OrderStatus.CANCELLED, cancelled.getStatus());
+
+        SalesOrderEntity refunded = openOrder();
+        refunded.confirmPaid();
+        refunded.markRefunded();
+        assertThrows(OperationConflictException.class, refunded::markRefunded);
+        assertEquals(PaymentStatus.REFUNDED, refunded.getPaymentStatus());
     }
 }

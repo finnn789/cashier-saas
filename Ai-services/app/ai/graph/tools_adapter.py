@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # ContextVar storing tenant_id for the current execution context
 current_tenant_id: ContextVar[str] = ContextVar("current_tenant_id", default="")
+# ContextVar storing the verified Java user id (sent as user_id to the backend)
+current_java_user_id: ContextVar[str] = ContextVar("current_java_user_id", default="")
 
 
 def json_schema_to_pydantic_model(
@@ -25,8 +27,8 @@ def json_schema_to_pydantic_model(
 ) -> type[BaseModel]:
     """Convert JSON Schema parameters dictionary into a Pydantic BaseModel.
 
-    tenant_id is strictly filtered out so that LLMs cannot view or tamper with
-    tenant context.
+    tenant_id and user_id are strictly filtered out so that LLMs cannot view or
+    tamper with tenant or user context.
     """
     if not parameters or not isinstance(parameters, dict):
         return create_model(model_name)
@@ -34,9 +36,10 @@ def json_schema_to_pydantic_model(
     properties: dict[str, Any] = parameters.get("properties", {})
     required: set[str] = set(parameters.get("required", []))
 
-    # Strict tenant isolation guard: never expose tenant_id to LLM schema
-    safe_properties = {k: v for k, v in properties.items() if k != "tenant_id"}
-    safe_required = {r for r in required if r != "tenant_id"}
+    # Strict isolation guard: never expose tenant_id/user_id to LLM schema
+    hidden = {"tenant_id", "user_id"}
+    safe_properties = {k: v for k, v in properties.items() if k not in hidden}
+    safe_required = {r for r in required if r not in hidden}
 
     type_map: dict[str, Any] = {
         "string": str,
@@ -92,15 +95,18 @@ def adapt_tool(
                 f"Tenant ID context is required to execute tool '{tool.name}' "
                 "but was not provided in static binding or current_tenant_id context."
             )
-        # Never pass tenant_id from kwargs, only from trusted context
-        safe_kwargs = {k: v for k, v in kwargs.items() if k != "tenant_id"}
+        # Never pass tenant_id/user_id from kwargs, only from trusted context
+        safe_kwargs = {k: v for k, v in kwargs.items() if k not in ("tenant_id", "user_id")}
+        effective_user_id = current_java_user_id.get().strip() or None
         started = time.perf_counter()
         logger.info(
             "Adapted tool execution started",
             extra={"event": "adapted_tool_started", "tool_name": tool.name},
         )
         try:
-            result = await tool.execute(tenant_id=effective_tenant_id, **safe_kwargs)
+            result = await tool.execute(
+                tenant_id=effective_tenant_id, user_id=effective_user_id, **safe_kwargs
+            )
         except Exception as exc:
             logger.warning(
                 "Adapted tool execution failed",

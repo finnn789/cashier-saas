@@ -10,8 +10,10 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
+import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,11 +35,13 @@ class GrpcTenantAccessPolicyTest {
     private static final String UNKNOWN = "33333333-3333-3333-3333-333333333333";
 
     private TenantRepository tenantRepository;
+    private MembershipOutletAccessRepository outletAccessRepository;
     private GrpcTenantAccessPolicy policy;
 
     @BeforeEach
     void setUp() {
         tenantRepository = mock(TenantRepository.class);
+        outletAccessRepository = mock(MembershipOutletAccessRepository.class);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ACTIVE))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(INACTIVE))).thenReturn(false);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(UNKNOWN))).thenReturn(false);
@@ -51,12 +55,15 @@ class GrpcTenantAccessPolicyTest {
     }
 
     private GrpcTenantAccessPolicy policy(GrpcSecurityProperties properties) {
-        return new GrpcTenantAccessPolicy(tenantRepository, properties);
+        return new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository, properties);
     }
 
     private static StatusRuntimeException rejection(GrpcTenantAccessPolicy policy, String raw) {
         return assertThrows(StatusRuntimeException.class, () -> policy.requireAllowedTenant(raw));
     }
+
+    private static final UUID USER = UUID.fromString("55555555-5555-5555-5555-555555555555");
+    private static final UUID OUTLET = UUID.fromString("66666666-6666-6666-6666-666666666666");
 
     @Test
     void acceptsActiveTenantFoundInTheDatabase() {
@@ -215,5 +222,45 @@ class GrpcTenantAccessPolicyTest {
         assertEquals("none", GrpcTenantAccessPolicy.shortTenantRef(null));
         assertEquals("none", GrpcTenantAccessPolicy.shortTenantRef(""));
         assertEquals("none", GrpcTenantAccessPolicy.shortTenantRef("   "));
+    }
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "	"})
+    void blankUserIsInvalidArgumentWithoutTouchingTheDatabase(String raw) {
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class,
+                () -> policy.requireMemberOutlets(UUID.fromString(ACTIVE), raw));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, ex.getStatus().getCode());
+        verifyNoInteractions(outletAccessRepository);
+    }
+
+    @Test
+    void nullAndMalformedUserAreInvalidArgument() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        assertEquals(Status.Code.INVALID_ARGUMENT, assertThrows(StatusRuntimeException.class,
+                () -> policy.requireMemberOutlets(tenant, null)).getStatus().getCode());
+        assertEquals(Status.Code.INVALID_ARGUMENT, assertThrows(StatusRuntimeException.class,
+                () -> policy.requireMemberOutlets(tenant, "not-a-uuid")).getStatus().getCode());
+        verifyNoInteractions(outletAccessRepository);
+    }
+
+    @Test
+    void userWithoutActiveOutletAccessIsPermissionDeniedWithTheTenantMessage() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of());
+
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class,
+                () -> policy.requireMemberOutlets(tenant, USER.toString()));
+
+        assertEquals(Status.Code.PERMISSION_DENIED, ex.getStatus().getCode());
+        assertEquals("Tenant is not permitted for this service", ex.getStatus().getDescription());
+        assertFalse(String.valueOf(ex.getStatus().getDescription()).contains(USER.toString()));
+    }
+
+    @Test
+    void memberOutletsAreReturnedForAnActiveMember() {
+        UUID tenant = UUID.fromString(ACTIVE);
+        when(outletAccessRepository.findActiveOutletIds(tenant, USER)).thenReturn(List.of(OUTLET));
+
+        assertEquals(List.of(OUTLET), policy.requireMemberOutlets(tenant, "  " + USER.toString().toUpperCase() + " "));
     }
 }

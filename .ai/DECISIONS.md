@@ -25,6 +25,26 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - Old product-scoped group/option/option-recipe endpoints are replaced, no compatibility routes. Migration V5 backfills and drops `option_groups.product_id`.
 - The inventory PR is not merged; Phase 2 is a stacked branch on `feature/fnb-inventory-recipe` (user decision, merge skipped).
 
+## PRD v2.1 — record-only cashier — 2026-11-13
+
+- Explicit user decision: the app only RECORDS transactions; QRIS is not a payment feature (no QRIS display, no gateway, no EDC). Payment methods = cash and non-cash; non-cash requires an owner-defined label (e.g. "QRIS", "Transfer BCA") stored as a text snapshot.
+- Mock gateway, attempt and resolve flow are to be deleted from code in M5 (DB data kept); supersedes the "flag" decision of Flow controls A for the long term.
+- M5 adds petty-cash expenses inside a shift (reduce expected cash), opening cash prefilled from the last counted cash, sequential receipt number + full receipt, optional customer name + order note, order list filters, fast cashier UI.
+
+## PRD v2 — 2026-11-13
+
+- On the user's request `PRD-MVP.md` was rewritten as v2 (cashier cafe + owner AI assistant, single outlet). It is the product source of truth from now on and absorbs the 2026-11-12 pivot and "Flow controls A".
+- Milestones: M4 cashier controls (TASK-076, shifts + cash, void/refund), M5 receipts + local payment (sequential receipt number, full receipt, QRIS manual, optional customer name), M6 owner data (unit cost / COGS, stock count, reports per hour/cashier/shift), M7 AI (daily summary, restock, anomalies, read-only), M8 pilot.
+- Orchestrator defaults written into the PRD (user may revise): payment requires an open shift of the receiving user; one open shift per user per outlet; refund is full only, owner only, order stays COMPLETED with payment REFUNDED, stock returned via SALE_REVERSAL; receipt number `INV-YYYYMMDD-NNNN` per outlet per day.
+
+## Flow controls A — 2026-11-13
+
+- Explicit user decisions after the 2026-11-13 business-flow audit (group A, TASK-076):
+- Mock gateway stays but behind `app.payment.mock-gateway.enabled` (default false; true in demo/test profiles).
+- A CASHIER may cancel an OPEN unpaid order only when it has no discount; a discounted order can be cancelled only by the owner (403 for the cashier).
+- Owner can list outlet cashiers, deactivate/reactivate them (sessions revoked, AI member status DISABLED/ACTIVE) and reset a cashier password to a one-time temporary password; self-service password change for every user. Reset refused when the cashier account belongs to another tenant.
+- gRPC money fields become decimal strings; gRPC calls carry the Java user id and are scoped to that member's active outlets; the AI CPU tool is removed.
+
 ## Pivot: cashier-first POS + owner AI assistant — 2026-11-12
 
 - Explicit user decision: the product becomes a plain cashier (POS) for small F&B; the AI assistant for the owner (and later a web chat for cashiers) is the differentiator. The AI feature itself is NOT part of the refactor.

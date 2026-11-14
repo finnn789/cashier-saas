@@ -261,7 +261,7 @@ class MerchantBusinessSettingsServiceTest {
         Fixture fixture = fixture();
         SalesOrderEntity existingOrder = SalesOrderEntity.pos(fixture.tenant(), fixture.outlet(),
                 new SalesOrderEntity.PosDetails("existing-order", "fingerprint", "POS-001",
-                        ServiceType.TAKEAWAY, "Customer"),
+                        ServiceType.TAKEAWAY, "Customer", null),
                 new SalesOrderEntity.Charges(new BigDecimal("100.00"), new BigDecimal("10.00"),
                         new BigDecimal("5.00")));
         existingOrder.snapshotRates(fixture.tenant().getTaxRate(), fixture.tenant().getServiceChargeRate());
@@ -317,6 +317,70 @@ class MerchantBusinessSettingsServiceTest {
         assertTrue(parsed.path("after").path("logoUrl").isNull());
         assertEquals(beforeName, parsed.path("before").path("businessName").asText());
         assertEquals(afterName, parsed.path("after").path("businessName").asText());
+    }
+
+    @Test
+    void receiptFooterIsTrimmedStoredAndAuditedBeforeAndAfter() throws Exception {
+        Fixture fixture = fixture();
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setReceiptFooter("  Terima kasih, sampai jumpa!  ");
+
+        MerchantBusinessSettingsResponse response = service.update(owner, outletId, request);
+
+        assertEquals("Terima kasih, sampai jumpa!", fixture.tenant().getReceiptFooter());
+        assertEquals("Terima kasih, sampai jumpa!", response.getReceiptFooter());
+        ArgumentCaptor<AuditLogEntity> audit = ArgumentCaptor.forClass(AuditLogEntity.class);
+        verify(auditLogs).persist(audit.capture());
+        JsonNode details = new ObjectMapper().readTree(audit.getValue().getDetails());
+        assertTrue(details.path("before").path("receiptFooter").isNull());
+        assertEquals("Terima kasih, sampai jumpa!", details.path("after").path("receiptFooter").asText());
+    }
+
+    @Test
+    void blankReceiptFooterClearsAnExistingFooterAndAudits() throws Exception {
+        Fixture fixture = fixture();
+        fixture.tenant().changeReceiptFooter("Footer lama");
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setReceiptFooter("   ");
+
+        MerchantBusinessSettingsResponse response = service.update(owner, outletId, request);
+
+        assertNull(fixture.tenant().getReceiptFooter());
+        assertNull(response.getReceiptFooter());
+        ArgumentCaptor<AuditLogEntity> audit = ArgumentCaptor.forClass(AuditLogEntity.class);
+        verify(auditLogs).persist(audit.capture());
+        JsonNode details = new ObjectMapper().readTree(audit.getValue().getDetails());
+        assertEquals("Footer lama", details.path("before").path("receiptFooter").asText());
+        assertTrue(details.path("after").path("receiptFooter").isNull());
+    }
+
+    @Test
+    void unchangedReceiptFooterWritesNoAudit() {
+        Fixture fixture = fixture();
+        fixture.tenant().changeReceiptFooter("Sama");
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setReceiptFooter(" Sama ");
+
+        service.update(owner, outletId, request);
+
+        assertEquals("Sama", fixture.tenant().getReceiptFooter());
+        verifyNoInteractions(auditLogs);
+    }
+
+    @Test
+    void receiptFooterLongerThan200CharactersIsRejectedWithoutAudit() {
+        Fixture fixture = fixture();
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setReceiptFooter("x".repeat(201));
+
+        assertThrows(InvalidOperationException.class, () -> service.update(owner, outletId, request));
+
+        assertNull(fixture.tenant().getReceiptFooter());
+        verifyNoInteractions(auditLogs);
     }
 
     private void assertRejected(java.util.function.Consumer<MerchantBusinessSettingsRequest> mutation) {

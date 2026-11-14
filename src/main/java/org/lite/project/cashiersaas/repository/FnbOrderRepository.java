@@ -17,6 +17,7 @@ import org.lite.project.cashiersaas.enums.PaymentStatus;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,13 +51,25 @@ public class FnbOrderRepository {
                 .where(ORDER.id.toString()).eq(orderId).setMaxResults(1).getResultList().stream().findFirst();
     }
 
+    public int countOpenUnpaid(UUID tenantId, UUID outletId) {
+        return Math.toIntExact(entityManager.createQuery("select count(o) from SalesOrderEntity o where o.tenant.id = :tenantId "
+                        + "and o.outlet.id = :outletId and o.status = :status and o.paymentStatus = :paymentStatus", Long.class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("status", OrderStatus.OPEN).setParameter("paymentStatus", PaymentStatus.UNPAID)
+                .getSingleResult());
+    }
+
+    /** createdAt in [from, to) when both are given (both or none); orderNumber is an exact match. */
     public List<SalesOrderEntity> page(UUID tenantId, UUID outletId, int page, int size,
-                                       OrderStatus status, PaymentStatus paymentStatus, OrderSource source) {
+                                       OrderStatus status, PaymentStatus paymentStatus, OrderSource source,
+                                       Instant from, Instant to, String orderNumber) {
         var query = criteriaBuilderFactory.create(entityManager, SalesOrderEntity.class, ORDER.getMetadata().getName())
                 .where(ORDER.tenant.id.toString()).eq(tenantId).where(ORDER.outlet.id.toString()).eq(outletId);
         if (status != null) query.where(ORDER.status.toString()).eq(status);
         if (paymentStatus != null) query.where(ORDER.paymentStatus.toString()).eq(paymentStatus);
         if (source != null) query.where(ORDER.source.toString()).eq(source);
+        if (from != null) query.where(ORDER.createdAt.toString()).ge(from).where(ORDER.createdAt.toString()).lt(to);
+        if (orderNumber != null) query.where(ORDER.orderNumber.toString()).eq(orderNumber);
         return query.orderByDesc(ORDER.createdAt.toString()).orderByDesc(ORDER.id.toString())
                 .setFirstResult(page * size).setMaxResults(size + 1).getResultList();
     }

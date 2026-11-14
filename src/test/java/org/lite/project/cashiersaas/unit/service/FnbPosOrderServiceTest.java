@@ -9,7 +9,6 @@ import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbPosOrderRequest;
 import org.lite.project.cashiersaas.dto.response.FnbStaffOrderResponse;
 import org.lite.project.cashiersaas.entity.fnb.DiscountEntity;
-import org.lite.project.cashiersaas.entity.fnb.FnbGatewayAttemptEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
@@ -26,7 +25,6 @@ import org.lite.project.cashiersaas.exception.runtime.OperationConflictException
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbDiscountRepository;
-import org.lite.project.cashiersaas.repository.FnbGatewayAttemptRepository;
 import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.lite.project.cashiersaas.service.FnbOrderPricingService;
 import org.lite.project.cashiersaas.service.FnbPosOrderService;
@@ -46,6 +44,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -61,7 +60,6 @@ class FnbPosOrderServiceTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbOrderRepository orders;
     @Mock private FnbOrderPricingService pricing;
-    @Mock private FnbGatewayAttemptRepository attempts;
     @Mock private FnbDiscountRepository discounts;
     @Mock private AuditLogRepository audit;
     @InjectMocks private FnbPosOrderService service;
@@ -86,7 +84,7 @@ class FnbPosOrderServiceTest {
         ReflectionTestUtils.setField(tenant, "serviceChargeRate", new BigDecimal("2"));
         order = withId(SalesOrderEntity.pos(tenant, outlet,
                 new SalesOrderEntity.PosDetails("checkout-key-0001", "fingerprint", "POS-ORDER-1",
-                        ServiceType.DINE_IN, "Budi"),
+                        ServiceType.DINE_IN, "Budi", null),
                 new SalesOrderEntity.Charges(new BigDecimal("100.00"), new BigDecimal("10.00"), new BigDecimal("5.00"))),
                 orderId);
         order.snapshotRates(new BigDecimal("10"), new BigDecimal("5"));
@@ -202,14 +200,21 @@ class FnbPosOrderServiceTest {
     }
 
     @Test
-    void pendingGatewayAttemptIsRejected() {
+    void orderNoteIsTrimmedStoredAndBlankClearsNoteAndCustomerLabel() {
         when(orders.byId(tenantId, outletId, orderId)).thenReturn(Optional.of(order));
-        when(attempts.pendingForOrder(tenantId, outletId, orderId)).thenReturn(Optional.of(new FnbGatewayAttemptEntity()));
+        stubPricing();
 
-        assertThrows(OperationConflictException.class,
-                () -> service.replaceItems(principal, outletId, orderId, request(ServiceType.DINE_IN, "Budi", 1)));
+        service.replaceItems(principal, outletId, orderId, request(ServiceType.TAKEAWAY, "Siti", 1, "  tanpa gula  "));
+        assertEquals("tanpa gula", order.getOrderNote());
+        assertEquals("Siti", order.getCustomerLabel());
 
-        verifyUntouched();
+        service.replaceItems(principal, outletId, orderId, request(ServiceType.TAKEAWAY, "   ", 1, "   "));
+        assertNull(order.getOrderNote());
+        assertNull(order.getCustomerLabel());
+
+        service.replaceItems(principal, outletId, orderId, request(ServiceType.TAKEAWAY, null, 1, null));
+        assertNull(order.getOrderNote());
+        assertNull(order.getCustomerLabel());
     }
 
     @Test
@@ -231,7 +236,24 @@ class FnbPosOrderServiceTest {
         assertEquals(new BigDecimal("100.00"), order.getSubtotal());
     }
 
+    private void stubPricing() {
+        ProductEntity product = withId(new ProductEntity(), productId);
+        ReflectionTestUtils.setField(product, "name", "Es Teh");
+        ReflectionTestUtils.setField(product, "price", new BigDecimal("50.00"));
+        FnbOrderPricingService.LineInput input = new FnbOrderPricingService.LineInput(productId, 1, "less ice", List.of());
+        when(pricing.price(eq(tenantId), eq(outletId), anyList(), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(new FnbOrderPricingService.PricedOrder(
+                        List.of(new FnbOrderPricingService.PricedLine(input, product, List.of(),
+                                new BigDecimal("50.00"), new BigDecimal("50.00"))),
+                        new BigDecimal("50.00"), new BigDecimal("5.00"), new BigDecimal("2.50"),
+                        new BigDecimal("57.50")));
+    }
+
     private FnbPosOrderRequest request(ServiceType serviceType, String customerLabel, int quantity) {
+        return request(serviceType, customerLabel, quantity, null);
+    }
+
+    private FnbPosOrderRequest request(ServiceType serviceType, String customerLabel, int quantity, String orderNote) {
         FnbPosOrderRequest.Item item = new FnbPosOrderRequest.Item();
         item.setProductId(productId);
         item.setQuantity(quantity);
@@ -240,6 +262,7 @@ class FnbPosOrderServiceTest {
         FnbPosOrderRequest request = new FnbPosOrderRequest();
         request.setServiceType(serviceType);
         request.setCustomerLabel(customerLabel);
+        request.setOrderNote(orderNote);
         request.setItems(List.of(item));
         return request;
     }

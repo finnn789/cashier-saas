@@ -44,11 +44,13 @@ public class CashierCatalogGrpcHandler extends CashierServiceGrpc.CashierService
             }
 
             UUID tenantId = tenantAccessPolicy.requireAllowedTenant(request.getTenantId());
+            List<UUID> outletIds = tenantAccessPolicy.requireMemberOutlets(tenantId, request.getUserId());
             int limit = tenantAccessPolicy.clampLimit(request.getLimit());
 
             CriteriaBuilder<ProductEntity> queryBuilder = criteriaBuilderFactory.create(entityManager, ProductEntity.class, "p")
                     .fetch("p.category")
                     .where("p.tenant.id").eq(tenantId)
+                    .where("p.outlet.id").in(outletIds)
                     .where("p.archived").eq(false)
                     .where("p.available").eq(true);
 
