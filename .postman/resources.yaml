@@ -7,10 +7,10 @@ cloudResources:
   flows:
     ../postman/flows/New flow.flow: 6ae0b623ab7a9eb1ec248f48
   specs:
-    ../E:/Java/cashier-saas/postman/specs/New Specification/index.yaml: 87169621-728d-46b6-8a4a-dd5b232254ef
+    ../postman/specs/New Specification/index.yaml: 87169621-728d-46b6-8a4a-dd5b232254ef
 resourceNameMappings:
   specs:
-    - ../E:/Java/cashier-saas/postman/specs/New Specification/index.yaml: New Specification
+    - ../postman/specs/New Specification/index.yaml: New Specification
 localResources:
   specs:
-    - ../E:/Java/cashier-saas/postman/specs/New Specification/index.yaml
+    - ../postman/specs/New Specification/index.yaml
