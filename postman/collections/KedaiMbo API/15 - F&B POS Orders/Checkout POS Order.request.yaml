@@ -26,11 +26,18 @@ body:
       ]
     }
 scripts:
-  - type: http:afterResponse
+  - type: afterResponse
     code: |-
       if (pm.response.code >= 200 && pm.response.code < 300) {
        const r = pm.response.json();
        if (r.success && r.data && (r.data.orderId || r.data.id)) pm.collectionVariables.set("orderId", r.data.orderId || r.data.id);
       }
+      pm.test("Checkout shows cashierName and no payment fields while unpaid", () => {
+       pm.response.to.have.status(201);
+       const d = pm.response.json().data;
+       pm.expect(d.cashierName).to.eql(pm.variables.get("fullName"));
+       pm.expect(d).to.not.have.property("methodLabel");
+       pm.expect(d).to.not.have.property("receiptNumber");
+      });
     language: text/javascript
 order: 1000

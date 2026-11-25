@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/products/{{productId}}/recipe"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Recipe costEstimate = 2 x 12.3425 rounded HALF_UP to 2 dp", () => {
+       pm.response.to.have.status(200);
+       pm.expect(Number(pm.response.json().data.lines[0].costEstimate)).to.eql(24.69);
+      });
+    language: text/javascript
+order: 4000

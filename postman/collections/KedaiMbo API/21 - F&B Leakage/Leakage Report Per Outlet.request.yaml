@@ -1,0 +1,19 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/reports/leakage"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data).to.have.property("stockCountId");
+      pm.expect(r.data).to.have.property("totalLoss");
+      pm.expect(r.data.lines).to.be.an("array");
+    language: text/javascript
+description: |-
+  Hanya OWNER. Laporan kebocoran bahan satu stok opname outlet. Tanpa stockCountId memakai stok opname terbaru; jika outlet belum punya stok opname (atau stockCountId milik outlet/tenant lain) respons 404. Untuk memilih opname tertentu, tambahkan query stockCountId=<UUID dari Stock Count History>.
+  Selisih (shortage) = stok sebelum opname - stok hasil hitung. Periode per bahan: dari opname sebelumnya (exclusive) sampai opname ini (inclusive); tanpa opname sebelumnya dihitung sejak mutasi pertama. theoreticalUsage = pemakaian SALE dan SALE_REVERSAL dalam periode; variancePct = shortage / theoreticalUsage x 100 (null jika theoreticalUsage 0); lossAmount = shortage x unitCost (null jika unitCost null, negatif jika surplus). flagged = shortage > 0 dan (variancePct > 5 atau theoreticalUsage 0). waste dan restock bersifat informasi; penyesuaian manual di luar opname ditampilkan sebagai manualAdjustment dan tidak dihitung sebagai kebocoran. lines diurutkan flagged dulu, lalu lossAmount turun.
+order: 2000

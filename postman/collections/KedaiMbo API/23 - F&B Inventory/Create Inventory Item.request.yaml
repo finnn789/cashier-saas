@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/inventory/items"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Beras KedaiMbo",
+      "unit": "kg",
+      "reorderLevel": 1
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+       const r = pm.response.json();
+       if (r.success && r.data && r.data.id) pm.collectionVariables.set("inventoryItemId", r.data.id);
+      }
+    language: text/javascript
+order: 1000

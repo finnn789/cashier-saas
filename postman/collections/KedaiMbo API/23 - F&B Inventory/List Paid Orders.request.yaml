@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders?page=0&size=20&paymentStatus=PAID"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Paid order list shows methodLabel CASH and the receiptNumber of the payment", () => {
+       pm.response.to.have.status(200);
+       const o = pm.response.json().data.orders.find(x => x.orderId === pm.collectionVariables.get("orderId"));
+       pm.expect(o, "paid order listed").to.exist;
+       pm.expect(o.methodLabel).to.eql("CASH");
+       pm.expect(o.receiptNumber).to.be.a("string").and.to.eql(pm.collectionVariables.get("paidReceiptNumber"));
+      });
+    language: text/javascript
+order: 7000

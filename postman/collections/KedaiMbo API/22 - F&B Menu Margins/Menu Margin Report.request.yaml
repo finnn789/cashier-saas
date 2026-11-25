@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/reports/menu-margins"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data).to.have.property("targetMarginPct");
+      pm.expect(r.data).to.have.property("belowTargetCount");
+      pm.expect(r.data.menus).to.be.an("array");
+    language: text/javascript
+description: |-
+  Hanya OWNER, paket PRO. HPP dan margin per menu satu outlet, dihitung live dari resep dikali harga beli rata-rata bahan outlet. Respons: outletId, outletName, targetMarginPct, belowTargetCount, menus[] (productId, name, categoryName, price, hpp, marginPct, status, suggestedPrice, missingCostItems). status: NO_RECIPE (belum ada resep), COST_UNKNOWN (bahan belum punya harga beli; nama bahan di missingCostItems), BELOW_TARGET (margin di bawah target), OK. marginPct null untuk NO_RECIPE/COST_UNKNOWN atau harga 0. suggestedPrice hanya untuk BELOW_TARGET (dibulatkan ke atas kelipatan Rp500). menus diurutkan BELOW_TARGET dulu (marginPct naik), lalu COST_UNKNOWN, NO_RECIPE, OK. Menu arsip tidak ikut; menu nonaktif (unavailable) ikut. Target margin diatur di Business Settings (targetMarginPct).
+order: 1000

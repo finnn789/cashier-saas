@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/orders/{{orderId}}/receipt"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      if (pm.response.code === 200) pm.collectionVariables.set("paidReceiptNumber", pm.response.json().data.receiptNumber);
+    language: text/javascript
+description: |-
+  Sumber nomor struk pembayaran untuk dicocokkan oleh List Paid Orders (Pay Order Cash tidak mengekspos nomor struk ke variabel).
+order: 6000

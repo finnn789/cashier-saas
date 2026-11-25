@@ -13,7 +13,7 @@ body:
       "openingCash": 100000.00
     }
 scripts:
-  - type: http:afterResponse
+  - type: afterResponse
     code: |-
       if (pm.response.code >= 200 && pm.response.code < 300) {
        const r = pm.response.json();

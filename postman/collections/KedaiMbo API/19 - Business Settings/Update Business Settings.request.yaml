@@ -17,6 +17,7 @@ body:
       "phoneNumber": "+6221123456",
       "taxRate": 11.00,
       "serviceChargeRate": 5.00,
+      "targetMarginPct": 60.00,
       "outletName": "Outlet Utama",
       "outletAddress": "Jl. Contoh 1",
       "outletPhoneNumber": "+6221123456",
@@ -24,5 +25,5 @@ body:
       "receiptFooter": "Terima kasih, sampai jumpa lagi!"
     }
 description: |-
-  Hanya OWNER. PUT mengganti seluruh dokumen; receiptFooter (opsional, maks 200) dicetak di bawah struk. Dikosongkan atau dihilangkan = footer dihapus.
+  Hanya OWNER. PUT mengganti seluruh dokumen; receiptFooter (opsional, maks 200) dicetak di bawah struk. Dikosongkan atau dihilangkan = footer dihapus. targetMarginPct (opsional, 0 sampai kurang dari 100, default 60) = target margin menu; dihilangkan = tidak berubah.
 order: 2000

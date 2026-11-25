@@ -10,6 +10,7 @@ body:
     {
       "fullName": "{{fullName}}",
       "email": "{{email}}",
+      "phoneNumber": "081234567890",
       "password": "{{password}}"
     }
 auth:

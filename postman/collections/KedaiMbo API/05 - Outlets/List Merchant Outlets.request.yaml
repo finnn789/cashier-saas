@@ -4,7 +4,7 @@ method: GET
 headers:
   Accept: application/json
 scripts:
-  - type: http:afterResponse
+  - type: afterResponse
     code: |-
       pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
       pm.expect(pm.response.json().success).to.be.true;
