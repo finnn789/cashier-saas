@@ -327,6 +327,28 @@ class CashierGrpcClient:
             cashier_service_pb2.GetAnomaliesRequest(tenant_id=tenant_id, user_id=user_id, date=date),
         )
 
+    async def get_leakage_report(
+        self, *, tenant_id: str, user_id: str, date_from: str = "", date_to: str = ""
+    ) -> dict[str, Any] | None:
+        """Owner-only ingredient leakage per outlet from stock counts; empty dates = last 30 days."""
+        return await self._call_insight(
+            "GetLeakageReport",
+            cashier_service_pb2.GetLeakageReportRequest(
+                tenant_id=tenant_id, user_id=user_id, **{"from": date_from}, to=date_to
+            ),
+        )
+
+    async def get_menu_margins(
+        self, *, tenant_id: str, user_id: str, max_margin_pct: str = ""
+    ) -> dict[str, Any] | None:
+        """Owner-only HPP/margin per menu per outlet; empty max = only menus below target margin."""
+        return await self._call_insight(
+            "GetMenuMargins",
+            cashier_service_pb2.GetMenuMarginsRequest(
+                tenant_id=tenant_id, user_id=user_id, max_margin_pct=max_margin_pct
+            ),
+        )
+
     async def consume_ai_question(self, *, tenant_id: str, user_id: str) -> dict[str, Any] | None:
         """Owner-only quota check + count of one AI question.
 

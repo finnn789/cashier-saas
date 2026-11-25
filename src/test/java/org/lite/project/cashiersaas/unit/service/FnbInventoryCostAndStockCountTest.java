@@ -18,6 +18,8 @@ import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntit
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryMovementEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.StockCountEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.StockCountLineEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.Role;
@@ -27,6 +29,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.service.DigestService;
 import org.lite.project.cashiersaas.service.FnbInventoryService;
+import org.lite.project.cashiersaas.service.FnbMenuMarginService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -48,8 +51,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -63,6 +67,7 @@ class FnbInventoryCostAndStockCountTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbInventoryRepository inventory;
     @Mock private DigestService tokens;
+    @Mock private FnbMenuMarginService margins;
     @InjectMocks private FnbInventoryService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -95,6 +100,8 @@ class FnbInventoryCostAndStockCountTest {
         InventoryItemEntity item = item(itemId, "Susu");
         InventoryBalanceEntity balance = balance(item, "10", "5");
         stubMovementPath(principal, asOwner ? ownerContext : cashierContext, item, balance);
+        if (asOwner) when(margins.restockWarnings(tenantId, outletId, itemId, new BigDecimal("60.00")))
+                .thenReturn(List.of("Margin Kopi turun ke 50,00% (target 60,00%), saran harga Rp20.000"));
 
         FnbStockMovementResponse response = service.recordMovement(principal, outletId, itemId,
                 movement(InventoryMovementEntity.Type.RESTOCK, "10", price, "Kulakan", "k1"));
@@ -110,9 +117,24 @@ class FnbInventoryCostAndStockCountTest {
         assertEquals("fp(RESTOCK|" + itemId + "|10|Kulakan|" + plainPrice + ")", saved.getRequestFingerprint());
         if (asOwner) {
             assertDecimal(plainPrice, response.getUnitCost());
+            assertEquals(List.of("Margin Kopi turun ke 50,00% (target 60,00%), saran harga Rp20.000"), response.getMarginWarnings());
         } else {
             assertNull(response.getUnitCost(), "a cashier may send a price but never sees costs");
+            assertEquals(List.of(), response.getMarginWarnings());
+            verifyNoInteractions(margins);
         }
+    }
+
+    @Test
+    void pricedRestockThatLeavesTheAverageUnchangedDoesNotCheckMargins() {
+        InventoryItemEntity item = item(itemId, "Susu");
+        stubMovementPath(owner, ownerContext, item, balance(item, "10", "5"));
+
+        FnbStockMovementResponse response = service.recordMovement(owner, outletId, itemId,
+                movement(InventoryMovementEntity.Type.RESTOCK, "10", "5", "Kulakan", "k1"));
+
+        assertEquals(List.of(), response.getMarginWarnings());
+        verifyNoInteractions(margins);
     }
 
     @Test
@@ -316,6 +338,27 @@ class FnbInventoryCostAndStockCountTest {
         assertDecimal(expectedDifference, result.getDifference());
         assertEquals(saved.getId(), result.getMovementId());
         assertNotNull(result.getMovementId());
+        // the header and the line keep the numbers and the average cost at the count
+        ArgumentCaptor<StockCountEntity> headerCaptor = ArgumentCaptor.forClass(StockCountEntity.class);
+        ArgumentCaptor<StockCountLineEntity> lineCaptor = ArgumentCaptor.forClass(StockCountLineEntity.class);
+        verify(inventory).persist(headerCaptor.capture());
+        verify(inventory).persist(lineCaptor.capture());
+        StockCountEntity header = headerCaptor.getValue();
+        assertEquals(outletId, header.getOutletId());
+        assertEquals("k1", header.getIdempotencyKey());
+        assertEquals("fp(" + idA + "=" + expectedCounted + "|)", header.getRequestFingerprint());
+        assertEquals(ownerMembershipId, header.getActorMembershipId());
+        assertNull(header.getNote());
+        assertEquals(header.getId(), response.getStockCountId());
+        assertNotNull(response.getStockCountId());
+        StockCountLineEntity stored = lineCaptor.getValue();
+        assertSame(header, stored.getStockCount());
+        assertSame(item, stored.getInventoryItem());
+        assertDecimal("10", stored.getPreviousQuantity());
+        assertDecimal(expectedCounted, stored.getCountedQuantity());
+        assertDecimal(expectedDifference, stored.getDifference());
+        assertEquals(new BigDecimal("3.0000"), stored.getUnitCost());
+        assertEquals(saved.getId(), stored.getMovementId());
     }
 
     @Test
@@ -335,6 +378,10 @@ class FnbInventoryCostAndStockCountTest {
         assertEquals("fp(" + idA + "=9|Akhir bulan)", captor.getAllValues().get(0).getRequestFingerprint());
         assertEquals("Stok opname", captor.getAllValues().get(1).getReason());
         assertEquals("fp(" + idA + "=8|)", captor.getAllValues().get(1).getRequestFingerprint());
+        ArgumentCaptor<StockCountEntity> headers = ArgumentCaptor.forClass(StockCountEntity.class);
+        verify(inventory, times(2)).persist(headers.capture());
+        assertEquals("Akhir bulan", headers.getAllValues().get(0).getNote());
+        assertNull(headers.getAllValues().get(1).getNote());
     }
 
     @Test
@@ -356,6 +403,15 @@ class FnbInventoryCostAndStockCountTest {
         verify(inventory, times(1)).persist(captor.capture());
         assertSame(changed, captor.getValue().getInventoryItem());
         verify(inventory).lock(sameBalance);
+        // the zero-difference line is still stored, without a movement
+        ArgumentCaptor<StockCountLineEntity> lines = ArgumentCaptor.forClass(StockCountLineEntity.class);
+        verify(inventory, times(2)).persist(lines.capture());
+        StockCountLineEntity storedZero = lines.getAllValues().get(0);
+        assertSame(same, storedZero.getInventoryItem());
+        assertDecimal("10", storedZero.getPreviousQuantity());
+        assertDecimal("0", storedZero.getDifference());
+        assertNull(storedZero.getMovementId());
+        assertNotNull(lines.getAllValues().get(1).getMovementId());
         FnbStockCountLineResponse zero = response.getLines().get(0);
         assertEquals(idA, zero.getInventoryItemId());
         assertDecimal("10", zero.getPreviousQuantity());
@@ -380,6 +436,10 @@ class FnbInventoryCostAndStockCountTest {
         verify(inventory, never()).lock(any(InventoryBalanceEntity.class));
         assertDecimal("5", balanceCaptor.getValue().getQuantityOnHand());
         assertNull(persistedMovement().getUnitCost());
+        ArgumentCaptor<StockCountLineEntity> lineCaptor = ArgumentCaptor.forClass(StockCountLineEntity.class);
+        verify(inventory).persist(lineCaptor.capture());
+        assertNull(lineCaptor.getValue().getUnitCost());
+        assertDecimal("0", lineCaptor.getValue().getPreviousQuantity());
         assertDecimal("0", response.getLines().get(0).getPreviousQuantity());
         assertDecimal("5", response.getLines().get(0).getDifference());
     }
@@ -402,13 +462,13 @@ class FnbInventoryCostAndStockCountTest {
         FnbStockCountResponse response = service.stockCount(owner, outletId,
                 count("k1", null, line(idC, "3"), line(idA, "2"), line(idB, "4")));
 
+        // every balance is locked, in ascending item id, before the header (counted_at) and the movements are written
         InOrder order = inOrder(inventory);
         order.verify(inventory).lock(balanceA);
-        order.verify(inventory).persist(any(InventoryMovementEntity.class));
         order.verify(inventory).lock(balanceB);
-        order.verify(inventory).persist(any(InventoryMovementEntity.class));
         order.verify(inventory).lock(balanceC);
-        order.verify(inventory).persist(any(InventoryMovementEntity.class));
+        order.verify(inventory).persist(any(StockCountEntity.class));
+        order.verify(inventory, atLeastOnce()).persist(any(InventoryMovementEntity.class));
         assertEquals(List.of(idA, idB, idC), response.getLines().stream().map(FnbStockCountLineResponse::getInventoryItemId).toList());
         // the fingerprint is built from the sorted lines, so the request order does not matter
         ArgumentCaptor<InventoryMovementEntity> captor = ArgumentCaptor.forClass(InventoryMovementEntity.class);
@@ -483,6 +543,55 @@ class FnbInventoryCostAndStockCountTest {
         verify(inventory, never()).lock(any(InventoryBalanceEntity.class));
         verify(inventory, never()).persist(any(InventoryMovementEntity.class));
         verify(inventory, never()).persist(any(InventoryBalanceEntity.class));
+        // a count recorded before headers existed gets no header and no stored lines on replay
+        verify(inventory, never()).persist(any(StockCountEntity.class));
+        verify(inventory, never()).persist(any(StockCountLineEntity.class));
+        assertNull(response.getStockCountId());
+    }
+
+    @Test
+    void stockCountReplayByHeaderReturnsTheStoredLinesAndIdWithoutTouchingStock() {
+        InventoryItemEntity a = item(idA, "Susu");
+        StockCountEntity header = withId(StockCountEntity.record(tenantId, outletId, null, "k1", "fp(" + idA + "=8|)", ownerMembershipId),
+                UUID.randomUUID());
+        StockCountLineEntity stored = withId(StockCountLineEntity.record(tenantId, header, a, new BigDecimal("10"),
+                new BigDecimal("8"), new BigDecimal("-2"), new BigDecimal("3"), UUID.randomUUID()), UUID.randomUUID());
+        when(guard.requireOwner(owner, outletId)).thenReturn(ownerContext);
+        when(inventory.stockCountByKey(tenantId, "k1")).thenReturn(Optional.of(header));
+        when(inventory.stockCountLines(tenantId, header.getId())).thenReturn(List.of(stored));
+        stubDigest();
+
+        FnbStockCountResponse response = service.stockCount(owner, outletId, count("k1", null, line(idA, "8")));
+
+        assertEquals(header.getId(), response.getStockCountId());
+        FnbStockCountLineResponse replayed = response.getLines().get(0);
+        assertEquals(idA, replayed.getInventoryItemId());
+        assertDecimal("10", replayed.getPreviousQuantity());
+        assertDecimal("-2", replayed.getDifference());
+        assertEquals(stored.getMovementId(), replayed.getMovementId());
+        verify(inventory, never()).item(any(UUID.class), any(UUID.class), any(UUID.class));
+        verify(inventory, never()).lock(any(InventoryBalanceEntity.class));
+        verify(inventory, never()).persist(any(StockCountEntity.class));
+        verify(inventory, never()).persist(any(StockCountLineEntity.class));
+        verify(inventory, never()).persist(any(InventoryMovementEntity.class));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,8", "false,9"})
+    void stockCountHeaderKeyOfAnotherOutletOrContentIsAConflict(boolean otherOutlet, String counted) {
+        // the stored header is for item A counted as 8 in this outlet unless otherOutlet
+        StockCountEntity header = StockCountEntity.record(tenantId, otherOutlet ? UUID.randomUUID() : outletId, null, "k1",
+                "fp(" + idA + "=8|)", ownerMembershipId);
+        when(guard.requireOwner(owner, outletId)).thenReturn(ownerContext);
+        when(inventory.stockCountByKey(tenantId, "k1")).thenReturn(Optional.of(header));
+        stubDigest();
+
+        OperationConflictException error = assertThrows(OperationConflictException.class, () ->
+                service.stockCount(owner, outletId, count("k1", null, line(idA, counted))));
+
+        assertEquals("Kunci idempotensi telah digunakan.", error.getMessage());
+        verify(inventory, never()).persist(any(StockCountEntity.class));
+        verify(inventory, never()).lock(any(InventoryBalanceEntity.class));
     }
 
     @Test
@@ -583,11 +692,17 @@ class FnbInventoryCostAndStockCountTest {
     }
 
     private void stubMovementIds() {
-        doAnswer(invocation -> {
+        // lenient: strict stubs match persist overloads by name, so the movement and header stubs would reject each other's calls
+        lenient().doAnswer(invocation -> {
             InventoryMovementEntity saved = invocation.getArgument(0);
             ReflectionTestUtils.setField(saved, "id", UUID.randomUUID());
             return null;
         }).when(inventory).persist(any(InventoryMovementEntity.class));
+        lenient().doAnswer(invocation -> {
+            StockCountEntity saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", UUID.randomUUID());
+            return null;
+        }).when(inventory).persist(any(StockCountEntity.class));
     }
 
     private InventoryMovementEntity persistedMovement() {

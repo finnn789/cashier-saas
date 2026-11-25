@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
@@ -225,7 +226,8 @@ class MerchantBusinessSettingsServiceTest {
     @ValueSource(strings = {"currency-unknown", "currency-zero-decimals", "currency-three-decimals", "timezone",
             "tax-null", "tax-negative", "tax-over100", "tax-scale", "service-null", "service-negative",
             "service-over100", "service-scale", "logo-http", "logo-credentials", "logo-port0", "logo-port70000",
-            "business-null", "business-blank", "business-long", "outlet-null", "outlet-blank", "outlet-long"})
+            "business-null", "business-blank", "business-long", "outlet-null", "outlet-blank", "outlet-long",
+            "margin-negative", "margin-100", "margin-scale"})
     void rejectsInvalidValuesBeforeMutation(String scenario) {
         assertRejected(request -> {
             switch (scenario) {
@@ -251,6 +253,9 @@ class MerchantBusinessSettingsServiceTest {
                 case "outlet-null" -> request.setOutletName(null);
                 case "outlet-blank" -> request.setOutletName("  ");
                 case "outlet-long" -> request.setOutletName("a".repeat(121));
+                case "margin-negative" -> request.setTargetMarginPct(new BigDecimal("-0.01"));
+                case "margin-100" -> request.setTargetMarginPct(new BigDecimal("100"));
+                case "margin-scale" -> request.setTargetMarginPct(new BigDecimal("55.555"));
                 default -> throw new AssertionError("Unknown scenario: " + scenario);
             }
         });
@@ -355,6 +360,38 @@ class MerchantBusinessSettingsServiceTest {
         service.update(owner, outletId, request);
 
         assertEquals("Sama", fixture.tenant().getReceiptFooter());
+        verifyNoInteractions(auditLogs);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"70.5,70.50", "0,0.00", "99.99,99.99"})
+    void targetMarginIsStoredWithTwoDecimalsInclusiveOfZeroAndAuditedBeforeAndAfter(String requested, String stored) throws Exception {
+        Fixture fixture = fixture();
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setTargetMarginPct(new BigDecimal(requested));
+
+        MerchantBusinessSettingsResponse response = service.update(owner, outletId, request);
+
+        assertEquals(new BigDecimal(stored), fixture.tenant().getTargetMarginPct());
+        assertEquals(new BigDecimal(stored), response.getTargetMarginPct());
+        ArgumentCaptor<AuditLogEntity> audit = ArgumentCaptor.forClass(AuditLogEntity.class);
+        verify(auditLogs).persist(audit.capture());
+        JsonNode details = new ObjectMapper().readTree(audit.getValue().getDetails());
+        assertEquals("60.00", details.path("before").path("targetMarginPct").asText());
+        assertEquals(stored, details.path("after").path("targetMarginPct").asText());
+    }
+
+    @Test
+    void omittedTargetMarginLeavesTheCurrentTargetAndWritesNoAudit() {
+        Fixture fixture = fixture();
+        fixture.tenant().changeTargetMargin(new BigDecimal("70.00"));
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+
+        MerchantBusinessSettingsResponse response = service.update(owner, outletId, validRequest());
+
+        assertEquals(new BigDecimal("70.00"), fixture.tenant().getTargetMarginPct());
+        assertEquals(new BigDecimal("70.00"), response.getTargetMarginPct());
         verifyNoInteractions(auditLogs);
     }
 

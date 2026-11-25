@@ -60,6 +60,8 @@ public class TenantEntity extends MutableBaseEntity {
     private String receiptFooter;
     @Column(name = "premium_trial_started_at")
     private Instant premiumTrialStartedAt;
+    @Column(name = "target_margin_pct", nullable = false, precision = 5, scale = 2)
+    private BigDecimal targetMarginPct = new BigDecimal("60.00");
 
     public static TenantEntity startFreeTier(StaffUserEntity owner, BusinessTypeEntity type, String key, String fingerprint) {
         TenantEntity tenant = new TenantEntity();
@@ -128,6 +130,13 @@ public class TenantEntity extends MutableBaseEntity {
         boolean changed = !Objects.equals(receiptFooter, normalized);
         receiptFooter = normalized;
         return changed;
+    }
+
+    // A null target leaves the current one unchanged.
+    public boolean changeTargetMargin(BigDecimal target) {
+        if (target == null || !ratesDiffer(targetMarginPct, target)) return false;
+        targetMarginPct = target;
+        return true;
     }
 
     private boolean ratesDiffer(BigDecimal current, BigDecimal replacement) {

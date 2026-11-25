@@ -7,6 +7,10 @@ import com.cashier.grpc.v1.GetAnomaliesRequest;
 import com.cashier.grpc.v1.GetAnomaliesResponse;
 import com.cashier.grpc.v1.GetCatalogItemRequest;
 import com.cashier.grpc.v1.GetCatalogItemResponse;
+import com.cashier.grpc.v1.GetLeakageReportRequest;
+import com.cashier.grpc.v1.GetLeakageReportResponse;
+import com.cashier.grpc.v1.GetMenuMarginsRequest;
+import com.cashier.grpc.v1.GetMenuMarginsResponse;
 import com.cashier.grpc.v1.GetOrderStatusRequest;
 import com.cashier.grpc.v1.GetOrderStatusResponse;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
@@ -53,6 +57,16 @@ public class CashierGrpcService extends CashierServiceGrpc.CashierServiceImplBas
     @Override
     public void getAnomalies(GetAnomaliesRequest request, StreamObserver<GetAnomaliesResponse> responseObserver) {
         insightHandler.getAnomalies(request, responseObserver);
+    }
+
+    @Override
+    public void getLeakageReport(GetLeakageReportRequest request, StreamObserver<GetLeakageReportResponse> responseObserver) {
+        insightHandler.getLeakageReport(request, responseObserver);
+    }
+
+    @Override
+    public void getMenuMargins(GetMenuMarginsRequest request, StreamObserver<GetMenuMarginsResponse> responseObserver) {
+        insightHandler.getMenuMargins(request, responseObserver);
     }
 
     @Override

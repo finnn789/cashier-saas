@@ -155,13 +155,18 @@ public class FnbSalesReportService {
         return value;
     }
 
+    /** Shared date-range rule of the owner reports: end not before start and fewer than 366 days. */
+    public void requireValidRange(LocalDate startDate, LocalDate endDate) {
+        if (endDate.isBefore(startDate) || ChronoUnit.DAYS.between(startDate, endDate) >= MAX_DAYS) throw new InvalidOperationException("Rentang tanggal laporan tidak valid.");
+    }
+
     private Query query(MerchantAccessContext context, FnbSalesReportFilter filter) {
         ZoneId zone;
         try { zone = ZoneId.of(context.getOutlet().getTimeZone()); } catch (DateTimeException exception) { throw new InvalidOperationException("Zona waktu outlet tidak valid."); }
         LocalDate today = LocalDate.now(zone);
         LocalDate startDate = filter.getStartDate() == null ? today : filter.getStartDate();
         LocalDate endDate = filter.getEndDate() == null ? today : filter.getEndDate();
-        if (endDate.isBefore(startDate) || ChronoUnit.DAYS.between(startDate, endDate) >= MAX_DAYS) throw new InvalidOperationException("Rentang tanggal laporan tidak valid.");
+        requireValidRange(startDate, endDate);
         if (filter.getOrderStatus() == OrderStatus.OPEN || filter.getOrderStatus() == OrderStatus.CANCELLED) throw new InvalidOperationException("Filter status tidak berlaku untuk laporan penjualan.");
         int page = filter.getPage() == null ? 0 : filter.getPage(), size = filter.getSize() == null ? 20 : filter.getSize(), top = filter.getTopProducts() == null ? 10 : filter.getTopProducts();
         if (page < 0 || page > MAX_PAGE || size < 1 || size > MAX_SIZE || top < 1 || top > MAX_TOP) throw new InvalidOperationException("Batas laporan tidak valid.");

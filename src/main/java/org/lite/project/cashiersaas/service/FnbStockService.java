@@ -136,7 +136,7 @@ public class FnbStockService {
     }
 
     // Null when no active recipe line exists or any used ingredient has no average cost.
-    private static BigDecimal itemCost(int quantity, List<RecipeLineEntity> lines, Map<UUID, InventoryBalanceEntity> balances) {
+    static BigDecimal itemCost(int quantity, List<RecipeLineEntity> lines, Map<UUID, InventoryBalanceEntity> balances) {
         BigDecimal cost = BigDecimal.ZERO;
         boolean used = false;
         for (RecipeLineEntity line : lines) {

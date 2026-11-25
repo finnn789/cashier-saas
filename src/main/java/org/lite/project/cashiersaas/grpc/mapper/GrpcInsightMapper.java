@@ -2,13 +2,21 @@ package org.lite.project.cashiersaas.grpc.mapper;
 
 import com.cashier.grpc.v1.CashierAnomaly;
 import com.cashier.grpc.v1.LabelTotal;
+import com.cashier.grpc.v1.LeakageLine;
+import com.cashier.grpc.v1.MenuMargin;
 import com.cashier.grpc.v1.OutletAnomalies;
+import com.cashier.grpc.v1.OutletMenuMargins;
+import com.cashier.grpc.v1.OutletLeakage;
 import com.cashier.grpc.v1.OutletRestock;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import com.cashier.grpc.v1.ProductTotal;
 import com.cashier.grpc.v1.RestockSuggestion;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.dto.response.FnbCashierAnomaly;
+import org.lite.project.cashiersaas.dto.response.FnbLeakageLineResponse;
+import org.lite.project.cashiersaas.dto.response.FnbMenuMarginReportResponse;
+import org.lite.project.cashiersaas.dto.response.FnbMenuMarginResponse;
+import org.lite.project.cashiersaas.dto.response.FnbOutletLeakageResponse;
 import org.lite.project.cashiersaas.dto.response.FnbOwnerSalesInsight;
 import org.lite.project.cashiersaas.dto.response.FnbRestockSuggestion;
 import org.lite.project.cashiersaas.dto.response.FnbSalesPaymentBreakdownResponse;
@@ -106,6 +114,48 @@ public class GrpcInsightMapper {
                     .setBaselineDailyAverage(money(anomaly.getBaselineDailyAverage())));
         }
         return builder.build();
+    }
+
+    public OutletLeakage toLeakage(FnbOutletLeakageResponse outlet) {
+        OutletLeakage.Builder builder = OutletLeakage.newBuilder()
+                .setOutletId(outlet.getOutletId() != null ? outlet.getOutletId().toString() : "")
+                .setOutletName(text(outlet.getOutletName()))
+                .setStockCountCount(outlet.getStockCountCount())
+                .setTotalLoss(optionalDecimal(outlet.getTotalLoss()))
+                .setFlaggedCount(outlet.getFlaggedCount());
+        for (FnbLeakageLineResponse line : outlet.getLines()) {
+            builder.addLines(LeakageLine.newBuilder()
+                    .setName(text(line.getName()))
+                    .setUnit(text(line.getUnit()))
+                    .setTheoreticalUsage(optionalDecimal(line.getTheoreticalUsage()))
+                    .setShortage(optionalDecimal(line.getShortage()))
+                    .setVariancePct(optionalDecimal(line.getVariancePct()))
+                    .setLossAmount(optionalDecimal(line.getLossAmount()))
+                    .setWaste(optionalDecimal(line.getWaste())));
+        }
+        return builder.build();
+    }
+
+    public OutletMenuMargins toMenuMargins(FnbMenuMarginReportResponse report, List<FnbMenuMarginResponse> menus) {
+        OutletMenuMargins.Builder builder = OutletMenuMargins.newBuilder()
+                .setOutletId(report.getOutletId() != null ? report.getOutletId().toString() : "")
+                .setOutletName(text(report.getOutletName()))
+                .setTargetMarginPct(optionalDecimal(report.getTargetMarginPct()));
+        for (FnbMenuMarginResponse menu : menus) {
+            builder.addMenus(MenuMargin.newBuilder()
+                    .setName(text(menu.getName()))
+                    .setPrice(optionalDecimal(menu.getPrice()))
+                    .setHpp(optionalDecimal(menu.getHpp()))
+                    .setMarginPct(optionalDecimal(menu.getMarginPct()))
+                    .setStatus(text(menu.getStatus()))
+                    .setSuggestedPrice(optionalDecimal(menu.getSuggestedPrice())));
+        }
+        return builder.build();
+    }
+
+    /** Leakage values are unknown (not zero) when null, so they map to an empty string. */
+    private static String optionalDecimal(BigDecimal value) {
+        return value != null ? value.toPlainString() : "";
     }
 
     private static String money(BigDecimal value) {

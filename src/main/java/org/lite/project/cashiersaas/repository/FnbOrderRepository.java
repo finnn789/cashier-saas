@@ -6,10 +6,12 @@ import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.QSalesOrderEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
@@ -103,6 +105,32 @@ public class FnbOrderRepository {
                 .setParameter("paid", PaymentStatus.PAID).setParameter("cancelled", OrderStatus.CANCELLED).getResultList())
             counts.put((UUID) row[0], (Long) row[1]);
         return counts;
+    }
+
+    /** Order id to the full name of the staff who created it (FNB_ORDER_CREATED audit actor); orders without one are absent. */
+    public Map<UUID, String> creatorNames(UUID tenantId, UUID outletId, List<UUID> orderIds) {
+        Map<UUID, String> names = new HashMap<>();
+        if (orderIds.isEmpty()) return names;
+        for (Object[] row : entityManager.createQuery("select l.entityId, l.actor.fullName from AuditLogEntity l "
+                        + "where l.tenant.id = :tenantId and l.outlet.id = :outletId and l.action = :action "
+                        + "and l.entityId in :orderIds and l.actor is not null", Object[].class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("action", AuditLogEntity.Action.FNB_ORDER_CREATED.name())
+                .setParameter("orderIds", orderIds).getResultList())
+            names.put((UUID) row[0], (String) row[1]);
+        return names;
+    }
+
+    /** Order id to its payment (at most one per order), receiver fetched; unpaid orders are absent. */
+    public Map<UUID, PaymentEntity> paymentsByOrder(UUID tenantId, UUID outletId, List<UUID> orderIds) {
+        Map<UUID, PaymentEntity> payments = new HashMap<>();
+        if (orderIds.isEmpty()) return payments;
+        for (PaymentEntity payment : entityManager.createQuery("select p from PaymentEntity p join fetch p.receivedBy "
+                        + "where p.tenant.id = :tenantId and p.outlet.id = :outletId and p.salesOrder.id in :orderIds", PaymentEntity.class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("orderIds", orderIds).getResultList())
+            payments.put(payment.getSalesOrder().getId(), payment);
+        return payments;
     }
 
     public List<OrderItemEntity> items(UUID tenantId, UUID outletId, List<UUID> orderIds) {

@@ -12,6 +12,8 @@ from app.integrations.grpc.generated import cashier_service_pb2 as pb
 from app.tools.insights import (
     UNAVAILABLE,
     CashierAnomaliesTool,
+    LeakageReportTool,
+    MenuMarginsTool,
     RestockSuggestionsTool,
     SalesSummaryTool,
 )
@@ -58,6 +60,20 @@ CASES = [
         {"date": "2026-11-07"},
         pb.GetAnomaliesRequest,
         lambda: pb.GetAnomaliesResponse(tenant_id=TENANT),
+    ),
+    (
+        "get_leakage_report",
+        "GetLeakageReport",
+        {"date_from": "2026-11-01", "date_to": "2026-11-07"},
+        pb.GetLeakageReportRequest,
+        lambda: pb.GetLeakageReportResponse(tenant_id=TENANT),
+    ),
+    (
+        "get_menu_margins",
+        "GetMenuMargins",
+        {"max_margin_pct": "40"},
+        pb.GetMenuMarginsRequest,
+        lambda: pb.GetMenuMarginsResponse(tenant_id=TENANT),
     ),
 ]
 
@@ -166,6 +182,54 @@ class InsightClientTests(unittest.IsolatedAsyncioTestCase):
         )
         request = client._stub.GetAnomalies.await_args.args[0]
         self.assertEqual((request.user_id, request.date), (USER, "2026-11-07"))
+
+    async def test_leakage_and_margins_map_request_fields_and_nested_sections(self) -> None:
+        client = _client()
+        client._stub.GetLeakageReport = AsyncMock(
+            return_value=pb.GetLeakageReportResponse(
+                tenant_id=TENANT,
+                outlets=[
+                    pb.OutletLeakage(
+                        outlet_id=OUTLET,
+                        outlet_name="Kedai Senja",
+                        stock_count_count=2,
+                        total_loss="12500.00",
+                        flagged_count=1,
+                        lines=[pb.LeakageLine(name="Susu", unit="L", shortage="1.250", variance_pct="")],
+                    )
+                ],
+            )
+        )
+        client._stub.GetMenuMargins = AsyncMock(
+            return_value=pb.GetMenuMarginsResponse(
+                tenant_id=TENANT,
+                outlets=[
+                    pb.OutletMenuMargins(
+                        outlet_id=OUTLET,
+                        target_margin_pct="60.00",
+                        menus=[pb.MenuMargin(name="Latte", margin_pct="41.50", status="BELOW_TARGET")],
+                    )
+                ],
+            )
+        )
+
+        leakage = await client.get_leakage_report(
+            tenant_id=TENANT, user_id=USER, date_from="2026-11-01", date_to="2026-11-07"
+        )
+        margins = await client.get_menu_margins(tenant_id=TENANT, user_id=USER, max_margin_pct="40")
+
+        request = client._stub.GetLeakageReport.await_args.args[0]
+        self.assertEqual(
+            (request.user_id, getattr(request, "from"), request.to), (USER, "2026-11-01", "2026-11-07")
+        )
+        self.assertEqual(client._stub.GetMenuMargins.await_args.args[0].max_margin_pct, "40")
+        outlet = leakage["outlets"][0]
+        self.assertEqual((outlet["stock_count_count"], outlet["total_loss"]), (2, "12500.00"))
+        self.assertEqual(
+            (outlet["lines"][0]["shortage"], outlet["lines"][0]["variance_pct"]), ("1.250", "")
+        )
+        menu = margins["outlets"][0]["menus"][0]
+        self.assertEqual((menu["margin_pct"], menu["status"]), ("41.50", "BELOW_TARGET"))
 
     async def test_each_method_sends_service_key_metadata_and_timeout(self) -> None:
         for method, rpc, kwargs, request_class, response in CASES:
@@ -291,9 +355,15 @@ class InsightToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_none_from_client_gives_owner_only_message(self) -> None:
         client = _mock_client(
-            get_sales_summary=None, get_restock_suggestions=None, get_anomalies=None
+            get_sales_summary=None,
+            get_restock_suggestions=None,
+            get_anomalies=None,
+            get_leakage_report=None,
+            get_menu_margins=None,
         )
         results = [
+            await LeakageReportTool(client).execute(tenant_id=TENANT, user_id=USER),
+            await MenuMarginsTool(client).execute(tenant_id=TENANT, user_id=USER),
             await SalesSummaryTool(client).execute(
                 tenant_id=TENANT, user_id=USER, start_date="2026-11-01", end_date="2026-11-07"
             ),
@@ -308,8 +378,20 @@ class InsightToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("tidak tersedia", result["message"])
 
     async def test_missing_user_id_is_unavailable_without_calling_backend(self) -> None:
-        client = _mock_client(get_sales_summary={}, get_restock_suggestions={}, get_anomalies={})
+        client = _mock_client(
+            get_sales_summary={},
+            get_restock_suggestions={},
+            get_anomalies={},
+            get_leakage_report={},
+            get_menu_margins={},
+        )
         for user_id in (None, ""):
+            self.assertEqual(
+                await LeakageReportTool(client).execute(tenant_id=TENANT, user_id=user_id), UNAVAILABLE
+            )
+            self.assertEqual(
+                await MenuMarginsTool(client).execute(tenant_id=TENANT, user_id=user_id), UNAVAILABLE
+            )
             self.assertEqual(
                 await SalesSummaryTool(client).execute(
                     tenant_id=TENANT, user_id=user_id, start_date="2026-11-01", end_date="2026-11-07"
@@ -350,6 +432,145 @@ class InsightToolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("date", one_day["message"])
         client.get_sales_summary.assert_not_called()
         client.get_anomalies.assert_not_called()
+        client.get_leakage_report.assert_not_called()
+        client.get_menu_margins.assert_not_called()
+
+    async def test_leakage_rejects_bad_dates_and_ranges_but_allows_blank_and_92_days(self) -> None:
+        client = _mock_client(get_leakage_report={"outlets": []})
+        tool = LeakageReportTool(client)
+        for start, end, field in (
+            ("kemarin", "2026-11-07", "start_date"),
+            ("2026-11-01", "2026-13-01", "end_date"),
+            ("2026-11-08", "2026-11-07", "Rentang"),  # to before from
+            ("2026-01-01", "2026-04-03", "Rentang"),  # 93 days inclusive
+        ):
+            with self.subTest(start=start, end=end):
+                result = await tool.execute(tenant_id=TENANT, user_id=USER, start_date=start, end_date=end)
+                self.assertEqual(result["status"], "invalid_input")
+                self.assertIn(field, result["message"])
+        client.get_leakage_report.assert_not_called()
+
+        for start, end in (("", ""), (" 2026-01-01 ", "2026-04-02"), ("2026-11-01", "")):
+            await tool.execute(tenant_id=TENANT, user_id=USER, start_date=start, end_date=end)
+        self.assertEqual(
+            [call.kwargs for call in client.get_leakage_report.await_args_list],
+            [
+                {"tenant_id": TENANT, "user_id": USER, "date_from": "", "date_to": ""},
+                {"tenant_id": TENANT, "user_id": USER, "date_from": "2026-01-01", "date_to": "2026-04-02"},
+                {"tenant_id": TENANT, "user_id": USER, "date_from": "2026-11-01", "date_to": ""},
+            ],
+        )
+
+    async def test_leakage_formats_lines_with_dash_for_unknown_values_and_empty_cases(self) -> None:
+        full = {
+            "outlets": [
+                {
+                    "outlet_name": "Kedai Senja",
+                    "stock_count_count": 2,
+                    "total_loss": "12500.00",
+                    "flagged_count": 1,
+                    "lines": [
+                        {
+                            "name": "Susu",
+                            "unit": "L",
+                            "theoretical_usage": "10.000",
+                            "shortage": "1.250",
+                            "variance_pct": "",
+                            "loss_amount": "",
+                            "waste": "",
+                        }
+                    ],
+                },
+                {
+                    "outlet_name": "Kedai Pagi",
+                    "stock_count_count": 1,
+                    "total_loss": "",
+                    "flagged_count": 0,
+                    "lines": [],
+                },
+            ]
+        }
+
+        text = await LeakageReportTool(_mock_client(get_leakage_report=full)).execute(
+            tenant_id=TENANT, user_id=USER
+        )
+        empty = await LeakageReportTool(_mock_client(get_leakage_report={"outlets": []})).execute(
+            tenant_id=TENANT, user_id=USER
+        )
+
+        self.assertIn("Outlet Kedai Senja: 2 opname, total rugi Rp 12500.00, 1 bahan menyimpang", text)
+        self.assertIn(
+            "- Susu: pakai teoritis 10.000 L, selisih 1.250 L, persen -, rugi -, waste -", text
+        )
+        self.assertIn("Outlet Kedai Pagi: 1 opname, total rugi -, 0 bahan menyimpang", text)
+        self.assertIn("- Tidak ada bahan yang menyimpang.", text)
+        self.assertEqual(empty, "Belum ada stok opname pada periode ini.")
+
+    async def test_margins_validate_max_before_calling_backend(self) -> None:
+        client = _mock_client(get_menu_margins={"outlets": []})
+        tool = MenuMarginsTool(client)
+        for bad in ("abc", "-1", "101", "NaN", "Infinity"):
+            with self.subTest(value=bad):
+                result = await tool.execute(tenant_id=TENANT, user_id=USER, max_margin_pct=bad)
+                self.assertEqual(result["status"], "invalid_input")
+                self.assertIn("max_margin_pct", result["message"])
+        client.get_menu_margins.assert_not_called()
+
+        for ok in (None, "", " 40 ", "0", "100", 55):
+            await tool.execute(tenant_id=TENANT, user_id=USER, max_margin_pct=ok)
+        self.assertEqual(
+            [call.kwargs["max_margin_pct"] for call in client.get_menu_margins.await_args_list],
+            ["", "", "40", "0", "100", "55"],
+        )
+
+    async def test_margins_format_menus_with_dash_for_unknown_values_and_empty_cases(self) -> None:
+        payload = {
+            "outlets": [
+                {
+                    "outlet_name": "Kedai Senja",
+                    "target_margin_pct": "60.00",
+                    "menus": [
+                        {
+                            "name": "Latte",
+                            "price": "25000.00",
+                            "hpp": "12000.00",
+                            "margin_pct": "52.00",
+                            "status": "BELOW_TARGET",
+                            "suggested_price": "30000.00",
+                        },
+                        {
+                            "name": "Es Teh",
+                            "price": "5000.00",
+                            "hpp": "",
+                            "margin_pct": "",
+                            "status": "COST_UNKNOWN",
+                            "suggested_price": "",
+                        },
+                    ],
+                },
+                {"outlet_name": "Kedai Pagi", "target_margin_pct": "", "menus": []},
+            ]
+        }
+
+        text = await MenuMarginsTool(_mock_client(get_menu_margins=payload)).execute(
+            tenant_id=TENANT, user_id=USER
+        )
+        empty = await MenuMarginsTool(_mock_client(get_menu_margins={"outlets": []})).execute(
+            tenant_id=TENANT, user_id=USER
+        )
+
+        self.assertIn("Outlet Kedai Senja (target margin 60.00%)", text)
+        self.assertIn(
+            "- Latte: harga Rp 25000.00, HPP Rp 12000.00, margin 52.00%, status BELOW_TARGET, "
+            "saran harga Rp 30000.00",
+            text,
+        )
+        self.assertIn(
+            "- Es Teh: harga Rp 5000.00, HPP -, margin -, status COST_UNKNOWN, saran harga -", text
+        )
+        self.assertIn("Outlet Kedai Pagi (target margin -)", text)
+        self.assertIn("- Tidak ada menu yang sesuai.", text)
+        self.assertEqual(empty, "Belum ada outlet.")
 
 
 if __name__ == "__main__":

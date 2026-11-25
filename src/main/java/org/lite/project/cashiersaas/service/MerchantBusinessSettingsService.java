@@ -59,7 +59,8 @@ public class MerchantBusinessSettingsService {
         boolean outletChanged = outlet.updateBusinessSettings(values.outletName(), values.timeZone(), values.outletAddress(),
                 values.outletPhoneNumber());
         boolean footerChanged = tenant.changeReceiptFooter(values.receiptFooter());
-        if (tenantChanged || outletChanged || footerChanged) {
+        boolean marginChanged = tenant.changeTargetMargin(values.targetMarginPct());
+        if (tenantChanged || outletChanged || footerChanged || marginChanged) {
             auditLogs.persist(AuditLogEntity.recordAction(tenant, outlet, context.getMembership().getUser(),
                     AuditLogEntity.Action.BUSINESS_SETTINGS_CHANGED, outlet.getId(), null,
                     "{\"before\":" + before + ",\"after\":" + details(tenant, outlet) + "}"));
@@ -77,7 +78,17 @@ public class MerchantBusinessSettingsService {
         return new Values(requiredName(request.getBusinessName(), "Nama bisnis", 120), logoUrl, currency,
                 optional(request.getAddress()), optional(request.getPhoneNumber()), rate(request.getTaxRate()),
                 rate(request.getServiceChargeRate()), requiredName(request.getOutletName(), "Nama outlet", 120),
-                optional(request.getOutletAddress()), optional(request.getOutletPhoneNumber()), timeZone, optional(request.getReceiptFooter()));
+                optional(request.getOutletAddress()), optional(request.getOutletPhoneNumber()), timeZone, optional(request.getReceiptFooter()),
+                targetMargin(request.getTargetMarginPct()));
+    }
+
+    // Null means "leave unchanged".
+    private BigDecimal targetMargin(BigDecimal target) {
+        if (target == null) return null;
+        if (target.signum() < 0 || target.compareTo(new BigDecimal("100")) >= 0 || target.scale() > 2) {
+            throw new InvalidOperationException("Target margin harus antara 0 dan kurang dari 100 dengan maksimal dua angka desimal.");
+        }
+        return target.setScale(2, RoundingMode.UNNECESSARY);
     }
 
     private void validateCurrency(String currency) {
@@ -145,7 +156,8 @@ public class MerchantBusinessSettingsService {
                 + "\",\"serviceChargeRate\":\"" + tenant.getServiceChargeRate() + "\",\"outletName\":\""
                 + escape(outlet.getName()) + "\",\"outletAddress\":" + nullable(outlet.getAddress())
                 + ",\"outletPhoneNumber\":" + nullable(outlet.getPhoneNumber()) + ",\"timeZone\":\""
-                + escape(outlet.getTimeZone()) + "\",\"receiptFooter\":" + nullable(tenant.getReceiptFooter()) + "}";
+                + escape(outlet.getTimeZone()) + "\",\"receiptFooter\":" + nullable(tenant.getReceiptFooter())
+                + ",\"targetMarginPct\":\"" + tenant.getTargetMarginPct() + "\"}";
     }
 
     private String nullable(String value) {
@@ -181,5 +193,5 @@ public class MerchantBusinessSettingsService {
 
     private record Values(String businessName, String logoUrl, String currency, String address, String phoneNumber,
                           BigDecimal taxRate, BigDecimal serviceChargeRate, String outletName, String outletAddress,
-                          String outletPhoneNumber, String timeZone, String receiptFooter) { }
+                          String outletPhoneNumber, String timeZone, String receiptFooter, BigDecimal targetMarginPct) { }
 }

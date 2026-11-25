@@ -7,7 +7,10 @@ import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.RecipeLineEntity;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public final class FnbCatalogMapper {
     private FnbCatalogMapper() { }
@@ -20,6 +23,7 @@ public final class FnbCatalogMapper {
     public static FnbProductResponse product(ProductEntity entity) {
         FnbProductResponse response = new FnbProductResponse();
         response.setId(entity.getId()); response.setCategoryId(entity.getCategory().getId());
+        response.setCategoryName(entity.getCategory().getName());
         response.setName(entity.getName()); response.setDescription(entity.getDescription());
         response.setPrice(entity.getPrice()); response.setImageUrl(entity.getImageUrl());
         response.setAvailable(entity.isAvailable()); response.setArchived(entity.isArchived());
@@ -42,17 +46,19 @@ public final class FnbCatalogMapper {
         response.setAvailable(entity.isAvailable()); response.setDisplayOrder(entity.getDisplayOrder());
         return response;
     }
-    public static FnbRecipeResponse recipe(List<RecipeLineEntity> lines) {
+    // costByItem: line cost per inventory item id; an item without a known average cost is absent.
+    public static FnbRecipeResponse recipe(List<RecipeLineEntity> lines, Map<UUID, BigDecimal> costByItem) {
         FnbRecipeResponse response = new FnbRecipeResponse();
-        response.setLines(lines.stream().map(FnbCatalogMapper::recipeLine).toList());
+        response.setLines(lines.stream().map(line -> recipeLine(line, costByItem)).toList());
         return response;
     }
-    private static FnbRecipeResponse.Line recipeLine(RecipeLineEntity entity) {
+    private static FnbRecipeResponse.Line recipeLine(RecipeLineEntity entity, Map<UUID, BigDecimal> costByItem) {
         FnbRecipeResponse.Line line = new FnbRecipeResponse.Line();
         line.setInventoryItemId(entity.getInventoryItem().getId());
         line.setInventoryItemName(entity.getInventoryItem().getName());
         line.setUnit(entity.getInventoryItem().getUnit());
         line.setQuantityPerUnit(entity.getQuantityPerUnit());
+        line.setCostEstimate(costByItem.get(entity.getInventoryItem().getId()));
         return line;
     }
 }

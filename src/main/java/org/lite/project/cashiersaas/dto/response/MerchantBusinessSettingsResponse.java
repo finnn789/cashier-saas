@@ -24,4 +24,5 @@ public class MerchantBusinessSettingsResponse {
     private String outletPhoneNumber;
     private String timeZone;
     private String receiptFooter;
+    private BigDecimal targetMarginPct;
 }

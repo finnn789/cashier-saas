@@ -381,6 +381,9 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         String body = countJson(key, null, x, "80.5", y, "50");
         MvcResult first = postCount(owner, body);
         assertStatus(201, first);
+        String countId = ApiTestSupport.read(first, "$.data.stockCountId");
+        assertEquals(2, count("SELECT count(*) FROM stock_count_lines WHERE stock_count_id = ?::uuid", countId),
+                "the zero-difference line is stored too");
         Map<String, Object> lineX = single(first, "$.data.lines[?(@.inventoryItemId=='" + x + "')]");
         assertDec("100", lineX.get("previousQuantity"), "previous");
         assertDec("80.5", lineX.get("countedQuantity"), "counted");
@@ -399,6 +402,9 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         // Replay: same key and payload returns the same response and changes nothing.
         MvcResult replay = postCount(owner, body);
         assertStatus(201, replay);
+        assertEquals(countId, ApiTestSupport.read(replay, "$.data.stockCountId"), "replay returns the same stock count");
+        assertEquals(1, count("SELECT count(*) FROM stock_counts WHERE tenant_id = ?::uuid AND idempotency_key = ?",
+                owner.tenantId().toString(), key), "no second header");
         List<Map<String, Object>> firstLines = rows(first, "$.data.lines[*]");
         List<Map<String, Object>> replayLines = rows(replay, "$.data.lines[*]");
         assertEquals(firstLines.size(), replayLines.size());
