@@ -14,11 +14,11 @@ import java.util.UUID;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/v1/merchant/outlets/{outletId}/fnb/orders")
+@RequestMapping("/api/v1")
 public class FnbDiscountController {
     private final FnbDiscountService service;
 
-    @PostMapping("/{orderId}/discount")
+    @PostMapping({"/merchant/outlets/{outletId}/fnb/orders/{orderId}/discount", "/cashier/outlets/{outletId}/fnb/orders/{orderId}/discount"})
     public ApiResponse<FnbDiscountResponse> discount(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID outletId, @PathVariable UUID orderId, @Valid @RequestBody FnbDiscountRequest request) {
         return ApiResponse.success("Diskon diterapkan.", service.grant(principal, outletId, orderId, request));
     }

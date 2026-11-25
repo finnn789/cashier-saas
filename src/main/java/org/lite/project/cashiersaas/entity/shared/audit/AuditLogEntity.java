@@ -66,7 +66,11 @@ public class AuditLogEntity extends BaseEntity {
         OUTLET_CREATED("OUTLET"),
         OUTLET_UPDATED("OUTLET"),
         OUTLET_DEACTIVATED("OUTLET"),
-        OUTLET_REACTIVATED("OUTLET");
+        OUTLET_REACTIVATED("OUTLET"),
+        FNB_STOCK_MOVEMENT_RECORDED("INVENTORY_MOVEMENT"),
+        FNB_STOCK_COUNT_RECORDED("STOCK_COUNT"),
+        FNB_PURCHASE_RECORDED("PURCHASE"),
+        CATALOG_COPIED("OUTLET");
 
         private final String entityType;
 

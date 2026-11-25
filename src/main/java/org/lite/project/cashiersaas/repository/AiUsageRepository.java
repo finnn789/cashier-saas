@@ -65,6 +65,25 @@ public class AiUsageRepository {
                 .executeUpdate();
     }
 
+    /** Read-only month state; no row means nothing used yet. */
+    @Transactional(readOnly = true)
+    public Usage readUsage(UUID tenantId, LocalDate periodMonth, LocalDate today) {
+        Object[] row = (Object[]) entityManager.createNativeQuery("SELECT questions_used, bonus_questions, "
+                        + EFFECTIVE_DAY_QUESTIONS + " FROM ai_usage_periods WHERE tenant_id = :tenantId AND period_month = :periodMonth")
+                .setParameter("tenantId", tenantId).setParameter("periodMonth", periodMonth).setParameter("today", today)
+                .getResultStream().findFirst().orElse(null);
+        return row == null ? new Usage(0, 0, 0)
+                : new Usage(((Number) row[0]).intValue(), ((Number) row[1]).intValue(), ((Number) row[2]).intValue());
+    }
+
+    @Getter
+    @RequiredArgsConstructor
+    public static class Usage {
+        private final int questionsUsed;
+        private final int bonusQuestions;
+        private final int dayQuestions;
+    }
+
     @Getter
     @RequiredArgsConstructor
     public static class Quota {

@@ -2,6 +2,21 @@
 
 The PRD and explicit user instructions remain authoritative; this file records decisions captured during AI Services work.
 
+## RBAC for CASHIER — 2026-11-25
+
+- Explicit user decisions: CASHIER manages the catalog without touching prices (no price change, no archive, no recipe/HPP); CASHIER may restock, record waste, record purchases and create inventory items (opname, adjustment and cost data stay OWNER); CASHIER may discount up to an owner-set percentage; permissions are a fixed matrix per role in code (no per-cashier configuration). Matrix: `.ai/ARCHITECTURE.md` "RBAC permission matrix". Packet TASK-103.
+- Orchestrator interpretation (user may override): creating a product or an option sets a price, so it is OWNER only; the cashier limit default is 0% (no cashier discount until the owner sets it); a cashier is told the limit only by the server error message.
+- Explicit user decision: prices differ per outlet (already true: products are outlet-scoped). Add "copy menu to another outlet" (TASK-101) and a verification task (TASK-102).
+
+## AI is analysis only — 2026-11-25
+
+- Explicit user decision: the AI does analysis only and never performs or proposes actions. The slice 4 "AI Command Agent with approval" (`action_proposals`, AI write tools) is dropped. Supersedes "AI write actions are allowed only through proposal + explicit approval (slice 4)" below. AI tools stay read-only.
+
+## Slice 3b OCR deferred — 2026-11-25
+
+- Explicit user decision: skip receipt OCR (FR-AI-01) for now; no vision model chosen. When it resumes, receipt photos go to local disk first (path from env), not MinIO/R2. Manual purchases (TASK-100, V16) are the target document an OCR draft will fill.
+- Explicit user decision: keep TASK-094 J1, 096, 097, 098, 100 uncommitted in `feature/leakage-report` for now.
+
 ## PRD v3 and refactor-not-rebuild — 2026-11-20
 
 - Explicit user instruction: old PRD v2.2 removed; `PRD-MVP.md` is now PRD v3 ("Kasir SaaS Multi-Outlet dengan AI"). Its §0 reconciliation table is binding where the new document conflicts with the code: stack, layout, auth, money type and Java<->Python integration stay as in `AGENTS.md`; RLS, ArchUnit, transfers, Manager/PIN later; offline after pilot; plans and business rules kept in Lampiran A.

@@ -13,6 +13,8 @@ import org.lite.project.cashiersaas.entity.fnb.DiscountEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.enums.DiscountType;
+import org.lite.project.cashiersaas.enums.Permission;
+import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -34,7 +36,7 @@ public class FnbDiscountService {
     public FnbDiscountResponse grant(TenantPrincipal principal, UUID outletId, UUID orderId,
                                      FnbDiscountRequest request) {
         orders.lockOutlet(principal.getTenantId(), outletId);
-        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.ORDER_DISCOUNT);
         SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId)
                 .orElseThrow(ResourceNotFoundException::new);
         orders.refreshOrder(order);
@@ -46,6 +48,7 @@ public class FnbDiscountService {
         if (request.getType() == DiscountType.PERCENTAGE && request.getValue().compareTo(new BigDecimal("100")) > 0) {
             throw new InvalidOperationException("Persentase diskon tidak valid.");
         }
+        if (context.getMembership().getRole() != Role.OWNERMERCHANT) requireWithinCap(context, order, request, amount);
         order.applyDiscount(amount);
         DiscountEntity discount = DiscountEntity.grant(context.getTenant(), context.getOutlet(), order, request.getType(),
                 request.getValue(), amount, request.getReason().trim(), context.getMembership().getUser());
@@ -55,5 +58,18 @@ public class FnbDiscountService {
                 AuditLogEntity.Action.FNB_DISCOUNT_GRANTED, order.getId(), request.getReason().trim(),
                 "amount=" + amount.toPlainString()));
         return FnbPaymentMapper.discount(discount);
+    }
+
+    // Effective percent = percentage value, or nominal / subtotal * 100; compared as amount vs subtotal * cap / 100.
+    private void requireWithinCap(MerchantAccessContext context, SalesOrderEntity order, FnbDiscountRequest request,
+                                  BigDecimal amount) {
+        BigDecimal cap = context.getTenant().getCashierMaxDiscountPct();
+        boolean within = request.getType() == DiscountType.PERCENTAGE
+                ? request.getValue().compareTo(cap) <= 0
+                : order.getSubtotal().signum() > 0
+                        && amount.multiply(new BigDecimal("100")).compareTo(order.getSubtotal().multiply(cap)) <= 0;
+        if (!within) {
+            throw new InvalidOperationException("Diskon kasir maksimal " + cap.stripTrailingZeros().toPlainString() + "%.");
+        }
     }
 }

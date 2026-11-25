@@ -13,6 +13,7 @@ import java.util.UUID;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class FnbStaffOrderItemResponse {
     private UUID itemId;
+    private UUID productId;
     private String productName;
     private BigDecimal unitPrice;
     private int quantity;

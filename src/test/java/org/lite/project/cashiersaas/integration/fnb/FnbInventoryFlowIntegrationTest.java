@@ -457,7 +457,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 String.class, "init:" + kopi);
         assertNotEquals(ownerMembership, cashierMembership, "actor is the cashier, not the owner");
 
-        // Cashier ADJUSTMENT is hidden behind requireOwner: 404, and nothing changes.
+        // Cashier ADJUSTMENT needs STOCK_ADJUST (owner only): 404, and nothing changes.
         MvcResult adjust = postMovement(cashier, kopi,
                 movementJson("ADJUSTMENT", "-30", "Stok opname", "adj-" + UUID.randomUUID()));
         assertStatus(404, adjust);
@@ -491,6 +491,14 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertDecimal("110", balance(kopi), "130 - 30 + 10");
         assertEquals(5, movementsOfItem(kopi));
         assertLedgerMatchesBalance(kopi);
+
+        // A cashier may send a purchase price on a restock but never receives any cost field.
+        MvcResult priced = postMovement(cashier, kopi, "{\"type\":\"RESTOCK\",\"quantity\":10,\"unitCost\":7,"
+                + "\"idempotencyKey\":\"mv-" + UUID.randomUUID() + "\"}");
+        assertStatus(201, priced);
+        assertEquals("null", ApiTestSupport.read(priced, "$.data.unitCost"));
+        assertTrue(readList(priced, "$.data.marginWarnings").isEmpty());
+        assertEquals(List.of("null"), readList(listStock(cashier, null), "$.data[?(@.id=='" + kopi + "')].averageUnitCost"));
     }
 
     // ------------------------------------------------------------------ 9. movement idempotency and validation

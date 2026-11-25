@@ -100,6 +100,32 @@ public class FnbCatalogRepository {
                 .where(OPTION.tenant.id.toString()).eq(tenant).where(OPTION.outlet.id.toString()).eq(outlet)
                 .where(OPTION.optionGroup.id.toString()).eq(group).orderByAsc(OPTION.displayOrder.toString()).getResultList();
     }
+    /** Every category of the outlet including archived ones (their names still count for the unique name). */
+    public List<CategoryEntity> allCategories(UUID tenant, UUID outlet) {
+        return entityManager.createQuery("select c from CategoryEntity c where c.tenant.id = :tenant and c.outlet.id = :outlet",
+                        CategoryEntity.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).getResultList();
+    }
+    /** Options of all given groups in one query, in display order. */
+    public List<ProductOptionEntity> optionsOfGroups(UUID tenant, UUID outlet, List<UUID> groupIds) {
+        if (groupIds.isEmpty()) return List.of();
+        return entityManager.createQuery("select o from ProductOptionEntity o where o.tenant.id = :tenant and o.outlet.id = :outlet "
+                        + "and o.optionGroup.id in :groups order by o.displayOrder, o.name", ProductOptionEntity.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).setParameter("groups", groupIds).getResultList();
+    }
+    /** Every product to group link of the outlet with product and group loaded, in link display order. */
+    public List<ProductOptionGroupEntity> productGroupLinks(UUID tenant, UUID outlet) {
+        return entityManager.createQuery("select l from ProductOptionGroupEntity l join fetch l.product join fetch l.optionGroup "
+                        + "where l.tenant.id = :tenant and l.outlet.id = :outlet order by l.displayOrder", ProductOptionGroupEntity.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).getResultList();
+    }
+    /** True when the outlet owns any product or option group, archived ones included. */
+    public boolean hasProductsOrGroups(UUID tenant, UUID outlet) {
+        return !entityManager.createQuery("select p.id from ProductEntity p where p.tenant.id = :tenant and p.outlet.id = :outlet", UUID.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).setMaxResults(1).getResultList().isEmpty()
+                || !entityManager.createQuery("select g.id from OptionGroupEntity g where g.tenant.id = :tenant and g.outlet.id = :outlet", UUID.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).setMaxResults(1).getResultList().isEmpty();
+    }
     public void persist(CategoryEntity category) { entityManager.persist(category); }
     public void lock(CategoryEntity category) { entityManager.refresh(category, jakarta.persistence.LockModeType.PESSIMISTIC_READ); }
     public void lock(ProductEntity product) { entityManager.refresh(product, jakarta.persistence.LockModeType.PESSIMISTIC_READ); }

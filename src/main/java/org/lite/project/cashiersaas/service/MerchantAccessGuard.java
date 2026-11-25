@@ -3,6 +3,7 @@ package org.lite.project.cashiersaas.service;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.exception.runtime.OutletOverAllowanceException;
@@ -21,6 +22,14 @@ public class MerchantAccessGuard {
 
     public MerchantAccessContext requireOutlet(TenantPrincipal principal, UUID outletId) {
         return resolve(principal, outletId, true);
+    }
+
+    public MerchantAccessContext require(TenantPrincipal principal, UUID outletId, Permission permission) {
+        MerchantAccessContext context = resolve(principal, outletId, true);
+        if (!permission.allows(context.getMembership().getRole())) {
+            throw new ResourceNotFoundException();
+        }
+        return context;
     }
 
     public TenantMembershipEntity requireMember(TenantPrincipal principal) {

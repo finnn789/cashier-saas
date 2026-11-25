@@ -60,7 +60,8 @@ public class MerchantBusinessSettingsService {
                 values.outletPhoneNumber());
         boolean footerChanged = tenant.changeReceiptFooter(values.receiptFooter());
         boolean marginChanged = tenant.changeTargetMargin(values.targetMarginPct());
-        if (tenantChanged || outletChanged || footerChanged || marginChanged) {
+        boolean capChanged = tenant.changeCashierMaxDiscount(values.cashierMaxDiscountPct());
+        if (tenantChanged || outletChanged || footerChanged || marginChanged || capChanged) {
             auditLogs.persist(AuditLogEntity.recordAction(tenant, outlet, context.getMembership().getUser(),
                     AuditLogEntity.Action.BUSINESS_SETTINGS_CHANGED, outlet.getId(), null,
                     "{\"before\":" + before + ",\"after\":" + details(tenant, outlet) + "}"));
@@ -79,7 +80,16 @@ public class MerchantBusinessSettingsService {
                 optional(request.getAddress()), optional(request.getPhoneNumber()), rate(request.getTaxRate()),
                 rate(request.getServiceChargeRate()), requiredName(request.getOutletName(), "Nama outlet", 120),
                 optional(request.getOutletAddress()), optional(request.getOutletPhoneNumber()), timeZone, optional(request.getReceiptFooter()),
-                targetMargin(request.getTargetMarginPct()));
+                targetMargin(request.getTargetMarginPct()), cashierMaxDiscount(request.getCashierMaxDiscountPct()));
+    }
+
+    // Null means "leave unchanged".
+    private BigDecimal cashierMaxDiscount(BigDecimal cap) {
+        if (cap == null) return null;
+        if (cap.signum() < 0 || cap.compareTo(new BigDecimal("100")) > 0 || cap.scale() > 2) {
+            throw new InvalidOperationException("Batas diskon kasir harus antara 0 dan 100 dengan maksimal dua angka desimal.");
+        }
+        return cap.setScale(2, RoundingMode.UNNECESSARY);
     }
 
     // Null means "leave unchanged".
@@ -157,7 +167,8 @@ public class MerchantBusinessSettingsService {
                 + escape(outlet.getName()) + "\",\"outletAddress\":" + nullable(outlet.getAddress())
                 + ",\"outletPhoneNumber\":" + nullable(outlet.getPhoneNumber()) + ",\"timeZone\":\""
                 + escape(outlet.getTimeZone()) + "\",\"receiptFooter\":" + nullable(tenant.getReceiptFooter())
-                + ",\"targetMarginPct\":\"" + tenant.getTargetMarginPct() + "\"}";
+                + ",\"targetMarginPct\":\"" + tenant.getTargetMarginPct()
+                + "\",\"cashierMaxDiscountPct\":\"" + tenant.getCashierMaxDiscountPct() + "\"}";
     }
 
     private String nullable(String value) {
@@ -193,5 +204,6 @@ public class MerchantBusinessSettingsService {
 
     private record Values(String businessName, String logoUrl, String currency, String address, String phoneNumber,
                           BigDecimal taxRate, BigDecimal serviceChargeRate, String outletName, String outletAddress,
-                          String outletPhoneNumber, String timeZone, String receiptFooter, BigDecimal targetMarginPct) { }
+                          String outletPhoneNumber, String timeZone, String receiptFooter, BigDecimal targetMarginPct,
+                          BigDecimal cashierMaxDiscountPct) { }
 }

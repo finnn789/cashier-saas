@@ -52,6 +52,7 @@ public final class FnbStaffOrderMapper {
     private static FnbStaffOrderItemResponse item(OrderItemEntity item, List<OrderItemOptionEntity> options) {
         FnbStaffOrderItemResponse response = new FnbStaffOrderItemResponse();
         response.setItemId(item.getId());
+        if (item.getProduct() != null) response.setProductId(item.getProduct().getId());
         response.setProductName(item.getProductNameSnapshot());
         response.setUnitPrice(item.getUnitPriceSnapshot());
         response.setQuantity(item.getQuantity());
