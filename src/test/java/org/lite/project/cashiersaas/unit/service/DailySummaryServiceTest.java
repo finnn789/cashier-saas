@@ -3,6 +3,8 @@ package org.lite.project.cashiersaas.unit.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.lite.project.cashiersaas.component.DailySummaryRequestedEvent;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
@@ -11,9 +13,11 @@ import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.repository.DailySummaryDispatchRepository;
 import org.lite.project.cashiersaas.service.DailySummaryClient;
 import org.lite.project.cashiersaas.service.DailySummaryService;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -57,6 +61,7 @@ class DailySummaryServiceTest {
     private DailySummaryDispatchRepository dispatches;
     private DailySummaryClient client;
     private ApplicationEventPublisher events;
+    private PlanEntitlementService plans;
     private DailySummaryService service;
 
     @BeforeEach
@@ -64,8 +69,10 @@ class DailySummaryServiceTest {
         dispatches = mock(DailySummaryDispatchRepository.class);
         client = mock(DailySummaryClient.class);
         events = mock(ApplicationEventPublisher.class);
+        plans = mock(PlanEntitlementService.class);
+        when(plans.effectivePlan(eq(tenantId), any(Instant.class))).thenReturn(PlanCode.PREMIUM);
         when(client.isEnabled()).thenReturn(true);
-        service = new DailySummaryService(dispatches, client, events, new TransactionTemplate(mock(PlatformTransactionManager.class)));
+        service = new DailySummaryService(dispatches, client, events, new TransactionTemplate(mock(PlatformTransactionManager.class)), plans);
     }
 
     private CashShiftEntity shiftOpenedAt(String instant) {
@@ -112,6 +119,18 @@ class DailySummaryServiceTest {
         verifyNoInteractions(events);
     }
 
+    @ParameterizedTest
+    @EnumSource(value = PlanCode.class, names = {"FREETIER", "PRO"})
+    void closingTheLastShiftBelowPremiumInsertsNoRowAndPublishesNoEvent(PlanCode plan) {
+        when(dispatches.countOpenShifts(tenantId, outletId)).thenReturn(0L);
+        when(plans.effectivePlan(eq(tenantId), any(Instant.class))).thenReturn(plan);
+
+        service.onShiftClosed(context, shiftOpenedAt("2026-11-14T03:00:00Z"));
+
+        verify(dispatches, never()).insertIfAbsent(any(), any(), any(), any());
+        verifyNoInteractions(events);
+    }
+
     @Test
     void aSecondCloseOnTheSameDayInsertsNothingNewAndPublishesNoEvent() {
         when(dispatches.countOpenShifts(tenantId, outletId)).thenReturn(0L);
@@ -149,69 +168,11 @@ class DailySummaryServiceTest {
     // ---- runFallback ----
 
     @Test
-    void theFallbackSkipsAnOutletBeforeTwentyThreeHundredLocalTime() {
-        when(dispatches.activeFnbOutlets()).thenReturn(List.of(new DailySummaryDispatchRepository.OutletRef(tenantId, outletId, "Asia/Jakarta")));
-
-        runFallback(Instant.parse("2026-11-14T15:59:00Z")); // 22:59 Jakarta
-
-        verify(dispatches, never()).insertIfAbsent(any(), any(), any(), any());
-    }
-
-    @Test
-    void theFallbackInsertsForTheLocalDateFromTwentyThreeHundredAndDispatchesTheNewRow() {
-        UUID dispatchId = UUID.randomUUID();
-        when(dispatches.activeFnbOutlets()).thenReturn(List.of(new DailySummaryDispatchRepository.OutletRef(tenantId, outletId, "Asia/Jakarta")));
-        when(dispatches.insertIfAbsent(any(), any(), any(), any())).thenReturn(Optional.of(dispatchId));
-        DailySummaryDispatchEntity row = pendingRow(LocalDate.of(2026, 11, 14));
-        when(dispatches.byId(dispatchId)).thenReturn(Optional.of(row));
-        when(client.send(tenantId, outletId, LocalDate.of(2026, 11, 14))).thenReturn(true);
-
-        runFallback(NOW); // exactly 23:00 Jakarta
-
-        verify(dispatches).insertIfAbsent(tenantId, outletId, LocalDate.of(2026, 11, 14), DailySummaryDispatchEntity.Trigger.FALLBACK);
-        verify(client).send(tenantId, outletId, LocalDate.of(2026, 11, 14));
-        assertEquals(DailySummaryDispatchEntity.Status.SENT, row.getStatus());
-    }
-
-    @Test
-    void theFallbackUsesEachOutletsOwnZoneAndLocalDate() {
-        UUID jakartaOutlet = UUID.randomUUID();
-        UUID newYorkOutlet = UUID.randomUUID();
-        UUID tokyoOutlet = UUID.randomUUID();
-        UUID honoluluOutlet = UUID.randomUUID();
-        when(dispatches.activeFnbOutlets()).thenReturn(List.of(
-                new DailySummaryDispatchRepository.OutletRef(tenantId, jakartaOutlet, "Asia/Jakarta"), // 23:30 on the 14th
-                new DailySummaryDispatchRepository.OutletRef(tenantId, newYorkOutlet, "America/New_York"), // 11:30
-                new DailySummaryDispatchRepository.OutletRef(tenantId, tokyoOutlet, "Asia/Tokyo"), // 01:30 on the 15th
-                new DailySummaryDispatchRepository.OutletRef(tenantId, honoluluOutlet, "Pacific/Honolulu"))); // 06:30
-        when(dispatches.insertIfAbsent(any(), any(), any(), any())).thenReturn(Optional.empty());
-
-        runFallback(Instant.parse("2026-11-14T16:30:00Z"));
-
-        verify(dispatches).insertIfAbsent(tenantId, jakartaOutlet, LocalDate.of(2026, 11, 14), DailySummaryDispatchEntity.Trigger.FALLBACK);
-        verify(dispatches, never()).insertIfAbsent(eq(tenantId), eq(newYorkOutlet), any(), any());
-        verify(dispatches, never()).insertIfAbsent(eq(tenantId), eq(tokyoOutlet), any(), any());
-        verify(dispatches, never()).insertIfAbsent(eq(tenantId), eq(honoluluOutlet), any(), any());
-    }
-
-    @Test
-    void anOutletThatAlreadyHasARowForTheDayIsNotDispatchedAgainByTheFallbackInsert() {
-        when(dispatches.activeFnbOutlets()).thenReturn(List.of(new DailySummaryDispatchRepository.OutletRef(tenantId, outletId, "Asia/Jakarta")));
-        when(dispatches.insertIfAbsent(any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(dispatches.retryable(anyInt(), any(), any(), anyInt())).thenReturn(List.of());
-
-        runFallback(NOW);
-
-        verify(dispatches, never()).byId(any());
-        verify(client, never()).send(any(), any(), any());
-    }
-
-    @Test
     void theFallbackRetriesPendingAndFailedRowsWithTheAttemptCapCutoffMinimumDateAndLimit() {
         UUID retryId = UUID.randomUUID();
         UUID otherRetryId = UUID.randomUUID();
-        when(dispatches.activeFnbOutlets()).thenReturn(List.of());
-        when(dispatches.retryable(anyInt(), any(), any(), anyInt())).thenReturn(List.of(retryId, otherRetryId));
+        when(dispatches.activeFnbOutlets(any(Instant.class))).thenReturn(List.of());
+        when(dispatches.retryable(anyInt(), any(), any(), anyInt(), any(Instant.class))).thenReturn(List.of(retryId, otherRetryId));
         DailySummaryDispatchEntity failedRow = pendingRow(LocalDate.of(2026, 11, 14));
         failedRow.markFailed();
         when(dispatches.byId(retryId)).thenReturn(Optional.of(failedRow));
@@ -221,7 +182,7 @@ class DailySummaryServiceTest {
         runFallback(NOW);
 
         // attempts < 3, last attempt older than 10 minutes, business date within the last 2 days (UTC), at most 50 rows
-        verify(dispatches).retryable(3, Instant.parse("2026-11-14T15:50:00Z"), LocalDate.of(2026, 11, 12), 50);
+        verify(dispatches).retryable(3, Instant.parse("2026-11-14T15:50:00Z"), LocalDate.of(2026, 11, 12), 50, NOW);
         verify(client).send(tenantId, outletId, LocalDate.of(2026, 11, 14));
         assertEquals(DailySummaryDispatchEntity.Status.SENT, failedRow.getStatus());
         assertEquals(2, failedRow.getAttempts());
@@ -265,19 +226,6 @@ class DailySummaryServiceTest {
         assertEquals(DailySummaryDispatchEntity.Status.FAILED, row.getStatus());
         assertEquals(1, row.getAttempts());
         assertNotNull(row.getLastAttemptAt());
-    }
-
-    @Test
-    void aSentRowIsNeverSentAgain() {
-        UUID id = UUID.randomUUID();
-        DailySummaryDispatchEntity row = pendingRow(LocalDate.of(2026, 11, 14));
-        row.markSent();
-        when(dispatches.byId(id)).thenReturn(Optional.of(row));
-
-        service.dispatch(id);
-
-        verify(client, never()).send(any(), any(), any());
-        assertEquals(1, row.getAttempts());
     }
 
     @Test

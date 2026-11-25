@@ -1,0 +1,24 @@
+$kind: http-example
+name: 409 Conflict - outlet aktif terakhir
+request:
+  method: POST
+  url: "{{baseUrl}}/api/v1/merchant/outlets/{{targetOutletId}}/deactivate"
+  headers:
+    - key: Accept
+      value: "application/json"
+response:
+  statusCode: 409
+  statusText: Conflict
+  headers:
+    - key: Content-Type
+      value: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "success": false,
+        "code": 409,
+        "message": "Outlet aktif terakhir tidak dapat dinonaktifkan.",
+        "timestamp": "2026-11-14T10:00:00"
+      }
+order: 1000

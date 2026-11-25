@@ -6,3 +6,4 @@ headers:
 auth:
   type: noauth
 order: 1000
+examples: ./.resources/List Available Plans.resources/examples/

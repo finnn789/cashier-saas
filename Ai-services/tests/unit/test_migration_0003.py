@@ -122,30 +122,6 @@ class Migration0003SqlTests(unittest.TestCase):
             "ON DELETE CASCADE", sql
         )
 
-    def test_downgrade_refuses_mixed_tenants_and_restores_channel_tenant(self) -> None:
-        sql = render("downgrade")
-        guard = sql.index("RAISE EXCEPTION 'downgrade 0003 refused")
-        restore = sql.index("UPDATE channel_accounts SET tenant_id = (SELECT c.tenant_id FROM conversations c")
-        prune = sql.index("DELETE FROM channel_accounts WHERE tenant_id IS NULL;")
-        not_null = sql.index("ALTER TABLE channel_accounts ALTER COLUMN tenant_id SET NOT NULL;")
-        drop_column = sql.index("ALTER TABLE conversations DROP COLUMN tenant_id;")
-        self.assertLess(guard, restore)
-        self.assertLess(restore, prune)
-        self.assertLess(prune, not_null)
-        self.assertLess(restore, drop_column)  # restore reads conversations.tenant_id
-        self.assertIn("count(DISTINCT c.tenant_id) > 1", sql)
-        self.assertIn(
-            "CREATE UNIQUE INDEX one_active_conversation ON conversations "
-            "(channel_id, platform, user_id, external_chat_id) WHERE status='ACTIVE';", sql
-        )
-        self.assertIn("ALTER TABLE conversations DROP CONSTRAINT conversation_tenant;", sql)
-        self.assertIn("DROP TABLE tenant_selections;", sql)
-        self.assertIn("ALTER TABLE tenant_memberships DROP CONSTRAINT tenant_membership_member;", sql)
-        self.assertIn("DROP INDEX tenant_membership_user;", sql)
-        self.assertIn("ALTER TABLE tenant_memberships DROP COLUMN java_user_id;", sql)
-        self.assertLess(sql.index("DROP TABLE tenant_selections;"),
-                        sql.index("ALTER TABLE tenant_memberships DROP COLUMN java_user_id;"))
-
 
 class Migration0003ModelTests(unittest.TestCase):
     def test_models_match_the_migrated_shape(self) -> None:

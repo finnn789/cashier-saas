@@ -55,4 +55,4 @@ Schema mendukung WhatsApp; webhook/sender WhatsApp belum diimplementasikan. Tran
 
 Gunakan database AI kosong/fresh untuk revision `0001_channels`. Snapshot baru bukan upgrade dari `0001_telegram`; database yang memakai revision lama memerlukan rencana migrasi tersendiri. Pekerjaan ini tidak menjalankan reset, migrasi, startup, database atau API nyata.
 
-Model dan snapshot migrasi cocok pada pemeriksaan metadata offline: 6 tabel, 31 kolom, 6 foreign key dan 3 indeks eksplisit. Source serta kode unit test disesuaikan. **READY FOR TESTING**, tes belum dijalankan. Bukti dan skenario berikutnya: [review](progress/channels-orchestrator-review.md).
+Model dan snapshot migrasi cocok pada pemeriksaan metadata offline: 6 tabel, 31 kolom, 6 foreign key dan 3 indeks eksplisit. Source serta kode unit test disesuaikan. **READY FOR TESTING**, tes belum dijalankan. Bukti dan skenario berikutnya: review lama (`progress/`, dihapus; lihat Git history).

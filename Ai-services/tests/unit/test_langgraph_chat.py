@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.ai.config import OpenRouterSettings
@@ -70,6 +71,13 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         # The tenant is per request: ChatService asks the channel for this tenant view.
         self.channels = Mock(spec=ChannelRepository)
         self.channels.for_tenant = Mock(return_value=self.repository)
+
+        # TASK-082: the quota gate runs before the graph; allowed by default.
+        self.grpc = Mock()
+        self.grpc.consume_ai_question = AsyncMock(return_value={
+            "allowed": True, "reason": "", "used": 1, "limit": 300, "warn": False,
+        })
+        self.grpc.record_ai_usage = AsyncMock()
 
         self.db_events: list[tuple[str, int]] = []
         self.history_pairs: list[tuple[str, str]] = [
@@ -138,7 +146,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_graph = AsyncMock()
         invoked_state_holder: list[dict[str, Any]] = []
 
-        async def fake_ainvoke(state: dict[str, Any]) -> dict[str, Any]:
+        async def fake_ainvoke(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
             # Verify graph executes outside of active DB transaction
             self.assertFalse(self.boundary.active)
             self.assertEqual(self.boundary.events[-1], ("commit", 1))
@@ -156,7 +164,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             }
 
         mock_graph.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-        service = ChatService(self.database, self.channels, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
 
         result = await service.handle(**self.input)
 
@@ -205,7 +213,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         """Verify extraction from last AIMessage when final_response key is absent."""
         mock_graph = AsyncMock()
 
-        async def fake_ainvoke(state: dict[str, Any]) -> dict[str, Any]:
+        async def fake_ainvoke(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
             return {
                 "messages": [
                     HumanMessage(content="Hai"),
@@ -216,7 +224,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             }
 
         mock_graph.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-        service = ChatService(self.database, self.channels, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
 
         result = await service.handle(**self.input)
         self.assertEqual(result, "Jawaban dari AIMessage langsung.")
@@ -244,7 +252,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
                 mock_graph = AsyncMock()
                 mock_graph.ainvoke.side_effect = error
 
-                service = ChatService(self.database, self.channels, graph=mock_graph)
+                service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
                 result = await service.handle(**self.input)
 
                 self.assertIn(expected, result)
@@ -285,7 +293,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
                 mock_graph = AsyncMock()
                 mock_graph.ainvoke.return_value = state
 
-                service = ChatService(self.database, self.channels, graph=mock_graph)
+                service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
                 result = await service.handle(**self.input)
 
                 self.assertIn(expected, result)
@@ -299,7 +307,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             "final_response": "Pesanan siap.",
         }
 
-        service = ChatService(self.database, self.channels, graph=mock_graph)
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
         result = await service.handle(**self.input)
 
         self.assertEqual(result, "Pesanan siap.")
@@ -309,13 +317,114 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
     # -------------------------------------------------------------------------
+    # 4. TASK-082: AI quota gate, recursion cap and token usage
+    # -------------------------------------------------------------------------
+
+    async def test_quota_refusal_returns_fixed_message_without_graph_or_assistant_message(self) -> None:
+        cases = (
+            ("PLAN_PREMIUM_REQUIRED", "paket Premium"),
+            ("MONTHLY_QUOTA_EXHAUSTED", "Kuota pertanyaan AI bulan ini sudah habis"),
+            ("DAILY_CAP_REACHED", "Batas harian 40 pertanyaan"),
+        )
+        for reason, expected in cases:
+            with self.subTest(reason=reason):
+                self.setUp()
+                self.grpc.consume_ai_question.return_value = {
+                    "allowed": False, "reason": reason, "used": 300, "limit": 300, "warn": True,
+                }
+                mock_graph = AsyncMock()
+                service = ChatService(
+                    self.database, self.channels, graph=mock_graph, grpc_client=self.grpc
+                )
+
+                result = await service.handle(**self.input)
+
+                self.assertIn(expected, result)
+                mock_graph.ainvoke.assert_not_awaited()
+                self.grpc.record_ai_usage.assert_not_awaited()
+                self.assertEqual(self._assistant_inserts(), [])
+                self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_quota_check_failure_fails_closed_without_calling_the_graph(self) -> None:
+        self.grpc.consume_ai_question.return_value = None
+        mock_graph = AsyncMock()
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
+
+        result = await service.handle(**self.input)
+
+        self.assertIn("Asisten sedang tidak tersedia", result)
+        mock_graph.ainvoke.assert_not_awaited()
+        self.assertEqual(self._assistant_inserts(), [])
+
+    async def test_quota_warning_is_appended_to_the_reply_but_not_persisted(self) -> None:
+        self.grpc.consume_ai_question.return_value = {
+            "allowed": True, "reason": "", "used": 240, "limit": 300, "warn": True,
+        }
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.return_value = {
+            "messages": [AIMessage(content="Pesanan siap.")],
+            "final_response": "Pesanan siap.",
+        }
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
+
+        result = await service.handle(**self.input)
+
+        self.assertEqual(result, "Pesanan siap.\n\nKuota AI: 240/300 pertanyaan bulan ini.")
+        self.repository.insert_message.assert_awaited_with(
+            self.connection, self.conversation_id, self.user_id, "tg-chat-200", "ASSISTANT",
+            "Pesanan siap.",
+        )
+
+    async def test_recursion_limit_returns_too_complex_reply_and_persists_no_assistant(self) -> None:
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.side_effect = GraphRecursionError("limit")
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
+
+        result = await service.handle(**self.input)
+
+        self.assertIn("terlalu rumit", result)
+        self.assertEqual(mock_graph.ainvoke.await_args.kwargs["config"], {"recursion_limit": 7})
+        self.assertEqual(self._assistant_inserts(), [])
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_question_is_consumed_for_the_verified_user_and_graph_usage_is_recorded(self) -> None:
+        java_user = uuid4()
+        mock_graph = AsyncMock()
+        mock_graph.ainvoke.return_value = {
+            "messages": [
+                HumanMessage(content="Omzet kemarin?"),
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "sales_summary", "args": {}, "id": "c1"}],
+                    usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+                ),
+                ToolMessage(content="{}", tool_call_id="c1"),
+                AIMessage(
+                    content="Omzet Rp1.000.",
+                    usage_metadata={"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+                ),
+            ],
+            "final_response": "Omzet Rp1.000.",
+        }
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
+
+        await service.handle(**self.input, java_user_id=java_user)
+
+        self.grpc.consume_ai_question.assert_awaited_once_with(
+            tenant_id=str(self.tenant_id), user_id=str(java_user)
+        )
+        self.grpc.record_ai_usage.assert_awaited_once_with(
+            tenant_id=str(self.tenant_id), input_tokens=150, output_tokens=30
+        )
+
+    # -------------------------------------------------------------------------
     # 3. Constructor Backward Compatibility & Graph Auto-construction
     # -------------------------------------------------------------------------
 
     async def test_init_with_unconfigured_ai_settings(self) -> None:
         ai_settings = OpenRouterSettings(openrouter_key="", ai_model="")
         ai_client = OpenRouterClient(ai_settings, session=Mock())
-        service = ChatService(self.database, self.channels, ai=ai_client)
+        service = ChatService(self.database, self.channels, ai=ai_client, grpc_client=self.grpc)
 
         # Unconfigured key still compiles graph or detects unconfigured at runtime
         result = await service.handle(**self.input)

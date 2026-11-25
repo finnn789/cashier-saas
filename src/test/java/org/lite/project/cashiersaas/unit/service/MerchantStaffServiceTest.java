@@ -22,6 +22,7 @@ import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.service.MemberSyncPublisher;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
 import org.lite.project.cashiersaas.service.MerchantStaffService;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -58,6 +59,7 @@ class MerchantStaffServiceTest {
     @Mock private AuditLogRepository audit;
     @Mock private MemberSyncPublisher publisher;
     @Mock private PasswordEncoder passwordEncoder;
+    @Mock private PlanEntitlementService planEntitlement;
     @InjectMocks private MerchantStaffService service;
 
     private final UUID tenantId = UUID.randomUUID();

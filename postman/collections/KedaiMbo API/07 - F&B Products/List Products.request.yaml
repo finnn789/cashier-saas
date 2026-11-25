@@ -3,4 +3,14 @@ url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/products"
 method: GET
 headers:
   Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Product list carries categoryName", () => {
+       pm.response.to.have.status(200);
+       const p = pm.response.json().data.find(x => x.id === pm.collectionVariables.get("productId"));
+       pm.expect(p, "created product listed").to.exist;
+       pm.expect(p.categoryName).to.eql("Makanan");
+      });
+    language: text/javascript
 order: 2000

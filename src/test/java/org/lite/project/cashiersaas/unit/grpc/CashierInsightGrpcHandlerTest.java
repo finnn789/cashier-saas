@@ -2,11 +2,17 @@ package org.lite.project.cashiersaas.unit.grpc;
 
 import com.cashier.grpc.v1.GetAnomaliesRequest;
 import com.cashier.grpc.v1.GetAnomaliesResponse;
+import com.cashier.grpc.v1.GetLeakageReportRequest;
+import com.cashier.grpc.v1.GetLeakageReportResponse;
+import com.cashier.grpc.v1.GetMenuMarginsRequest;
+import com.cashier.grpc.v1.GetMenuMarginsResponse;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
 import com.cashier.grpc.v1.GetSalesSummaryResponse;
 import com.cashier.grpc.v1.OutletAnomalies;
+import com.cashier.grpc.v1.OutletLeakage;
+import com.cashier.grpc.v1.OutletMenuMargins;
 import com.cashier.grpc.v1.OutletRestock;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import io.grpc.Status;
@@ -19,6 +25,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
+import org.lite.project.cashiersaas.dto.response.FnbMenuMarginReportResponse;
+import org.lite.project.cashiersaas.dto.response.FnbMenuMarginResponse;
+import org.lite.project.cashiersaas.dto.response.FnbOutletLeakageResponse;
 import org.lite.project.cashiersaas.dto.response.FnbOwnerSalesInsight;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
@@ -29,9 +38,13 @@ import org.lite.project.cashiersaas.grpc.mapper.GrpcInsightMapper;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
 import org.lite.project.cashiersaas.grpc.service.CashierInsightGrpcHandler;
 import org.lite.project.cashiersaas.repository.MerchantAccessRepository;
+import org.lite.project.cashiersaas.service.FnbLeakageService;
+import org.lite.project.cashiersaas.service.FnbMenuMarginService;
 import org.lite.project.cashiersaas.service.FnbOwnerInsightService;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -66,11 +79,15 @@ class CashierInsightGrpcHandlerTest {
     private GrpcTenantAccessPolicy policy;
     private MerchantAccessRepository accessRepository;
     private FnbOwnerInsightService insightService;
+    private FnbLeakageService leakageService;
+    private FnbMenuMarginService menuMarginService;
     private GrpcInsightMapper mapper;
     private CashierInsightGrpcHandler handler;
     private StreamObserver<GetSalesSummaryResponse> salesObserver;
     private StreamObserver<GetRestockSuggestionsResponse> restockObserver;
     private StreamObserver<GetAnomaliesResponse> anomalyObserver;
+    private StreamObserver<GetLeakageReportResponse> leakageObserver;
+    private StreamObserver<GetMenuMarginsResponse> marginObserver;
 
     @SuppressWarnings("unchecked")
     @BeforeEach
@@ -78,16 +95,21 @@ class CashierInsightGrpcHandlerTest {
         policy = mock(GrpcTenantAccessPolicy.class);
         accessRepository = mock(MerchantAccessRepository.class);
         insightService = mock(FnbOwnerInsightService.class);
+        leakageService = mock(FnbLeakageService.class);
+        menuMarginService = mock(FnbMenuMarginService.class);
         mapper = mock(GrpcInsightMapper.class);
         salesObserver = mock(StreamObserver.class);
         restockObserver = mock(StreamObserver.class);
         anomalyObserver = mock(StreamObserver.class);
-        handler = new CashierInsightGrpcHandler(policy, accessRepository, insightService, mapper);
+        leakageObserver = mock(StreamObserver.class);
+        marginObserver = mock(StreamObserver.class);
+        handler = new CashierInsightGrpcHandler(policy, accessRepository, insightService, leakageService,
+                menuMarginService, mapper);
         when(policy.requireAllowedTenant(TENANT)).thenReturn(tenantId);
         when(policy.requireOwnerOutlets(tenantId, USER)).thenReturn(List.of(outletId));
         org.springframework.test.util.ReflectionTestUtils.setField(outlet, "id", outletId);
         when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId), eq(Set.of(Role.OWNERMERCHANT)), any()))
-                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(ownerMembership, outlet)));
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(ownerMembership, outlet, true)));
     }
 
     private static GetSalesSummaryRequest sales(String start, String end) {
@@ -196,6 +218,127 @@ class CashierInsightGrpcHandlerTest {
         verify(anomalyObserver).onNext(response.capture());
         assertEquals(1, response.getValue().getOutletsCount());
         verify(anomalyObserver).onCompleted();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "garbage, ''",
+            "'', 2026-13-01",
+            "2026-11-07, 2026-11-01",
+            "2026-01-01, 2026-04-03"
+    })
+    void leakageRejectsBadDatesReversedAndRangesOf92DaysOrMoreAsInvalidArgument(String from, String to) {
+        handler.getLeakageReport(GetLeakageReportRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setFrom(from).setTo(to).build(),
+                leakageObserver);
+
+        ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+        verify(leakageObserver).onError(error.capture());
+        assertEquals(Status.Code.INVALID_ARGUMENT, assertInstanceOf(StatusRuntimeException.class, error.getValue()).getStatus().getCode());
+        verify(leakageObserver, never()).onNext(any());
+        verifyNoInteractions(leakageService, mapper);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            // longest allowed range (91 days apart), read in the tenant zone Asia/Jakarta (UTC+7)
+            "2026-01-01, 2026-04-02, 2025-12-31T17:00:00Z, 2026-04-02T17:00:00Z",
+            // no from: 30 days ending at `to`
+            "'', 2026-11-30, 2026-10-31T17:00:00Z, 2026-11-30T17:00:00Z"
+    })
+    void leakageReadsTheCalendarRangeInTheTenantZoneAndReturnsTheMappedOutlets(String from, String to, Instant start, Instant end) {
+        FnbOutletLeakageResponse outletLeakage = new FnbOutletLeakageResponse();
+        OutletLeakage row = OutletLeakage.newBuilder().setOutletId(outletId.toString()).build();
+        when(leakageService.outletsLeakage(tenantId, List.of(outletId), start, end, 10)).thenReturn(List.of(outletLeakage));
+        when(mapper.toLeakage(outletLeakage)).thenReturn(row);
+
+        handler.getLeakageReport(GetLeakageReportRequest.newBuilder().setTenantId(TENANT).setUserId(USER)
+                .setFrom(from).setTo(to).build(), leakageObserver);
+
+        ArgumentCaptor<GetLeakageReportResponse> response = ArgumentCaptor.forClass(GetLeakageReportResponse.class);
+        verify(leakageObserver).onNext(response.capture());
+        verify(leakageObserver).onCompleted();
+        assertEquals(TENANT, response.getValue().getTenantId());
+        assertEquals(List.of(row), response.getValue().getOutletsList());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"abc", "-1", "100.01", "NaN"})
+    void menuMarginsRejectAnInvalidMaxMarginAsInvalidArgument(String max) {
+        handler.getMenuMargins(GetMenuMarginsRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setMaxMarginPct(max).build(), marginObserver);
+
+        ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+        verify(marginObserver).onError(error.capture());
+        assertEquals(Status.Code.INVALID_ARGUMENT, assertInstanceOf(StatusRuntimeException.class, error.getValue()).getStatus().getCode());
+        verifyNoInteractions(menuMarginService, mapper);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "'', 'Kopi;Teh'",           // no max: only BELOW_TARGET menus
+            "50, 'Kopi;Teh'",           // max is inclusive; unknown margins never match
+            "70, 'Kopi;Roti;Teh'",
+            "49.99, 'Kopi'"
+    })
+    void menuMarginsFilterByTheMaxMarginKeepingTheServiceOrder(String max, String expectedNames) {
+        FnbMenuMarginReportResponse report = new FnbMenuMarginReportResponse();
+        report.setMenus(List.of(menu("Kopi", "BELOW_TARGET", "30.00"), menu("Roti", "OK", "70.00"),
+                menu("Teh", "BELOW_TARGET", "50.00"), menu("Susu", "COST_UNKNOWN", null), menu("Air", "NO_RECIPE", null)));
+        when(menuMarginService.outletMargins(tenantId, outletId)).thenReturn(report);
+        when(mapper.toMenuMargins(eq(report), any())).thenReturn(OutletMenuMargins.getDefaultInstance());
+
+        handler.getMenuMargins(GetMenuMarginsRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setMaxMarginPct(max).build(), marginObserver);
+
+        ArgumentCaptor<List<FnbMenuMarginResponse>> menus = ArgumentCaptor.forClass(List.class);
+        verify(mapper).toMenuMargins(eq(report), menus.capture());
+        assertEquals(List.of(expectedNames.split(";")), menus.getValue().stream().map(FnbMenuMarginResponse::getName).toList());
+        ArgumentCaptor<GetMenuMarginsResponse> response = ArgumentCaptor.forClass(GetMenuMarginsResponse.class);
+        verify(marginObserver).onNext(response.capture());
+        assertEquals(1, response.getValue().getOutletsCount());
+        verify(marginObserver).onCompleted();
+    }
+
+    @Test
+    void menuMarginsAreCappedAt30MenusPerOutletKeepingTheFirstOnes() {
+        FnbMenuMarginReportResponse report = new FnbMenuMarginReportResponse();
+        report.setMenus(java.util.stream.IntStream.range(0, 35).mapToObj(i -> menu("M" + i, "BELOW_TARGET", "10.00")).toList());
+        when(menuMarginService.outletMargins(tenantId, outletId)).thenReturn(report);
+        when(mapper.toMenuMargins(eq(report), any())).thenReturn(OutletMenuMargins.getDefaultInstance());
+
+        handler.getMenuMargins(GetMenuMarginsRequest.newBuilder().setTenantId(TENANT).setUserId(USER).build(), marginObserver);
+
+        ArgumentCaptor<List<FnbMenuMarginResponse>> menus = ArgumentCaptor.forClass(List.class);
+        verify(mapper).toMenuMargins(eq(report), menus.capture());
+        assertEquals(30, menus.getValue().size());
+        assertEquals("M0", menus.getValue().get(0).getName());
+        assertEquals("M29", menus.getValue().get(29).getName());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void leakageAndMarginRpcsAreDeniedLikeAnomaliesForANonOwnerOrNonPremiumTenant(boolean notPremium) {
+        StatusRuntimeException denied = Status.PERMISSION_DENIED.withDescription("Tenant is not permitted for this service").asRuntimeException();
+        if (notPremium) org.mockito.Mockito.doThrow(denied).when(policy).requirePremium(tenantId);
+        else when(policy.requireOwnerOutlets(tenantId, USER)).thenThrow(denied);
+
+        handler.getLeakageReport(GetLeakageReportRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setFrom("garbage").build(), leakageObserver);
+        handler.getMenuMargins(GetMenuMarginsRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setMaxMarginPct("garbage").build(), marginObserver);
+
+        ArgumentCaptor<Throwable> leakageError = ArgumentCaptor.forClass(Throwable.class);
+        ArgumentCaptor<Throwable> marginError = ArgumentCaptor.forClass(Throwable.class);
+        verify(leakageObserver).onError(leakageError.capture());
+        verify(marginObserver).onError(marginError.capture());
+        // permission is checked before any argument feedback
+        assertEquals(Status.Code.PERMISSION_DENIED, ((StatusRuntimeException) leakageError.getValue()).getStatus().getCode());
+        assertEquals(Status.Code.PERMISSION_DENIED, ((StatusRuntimeException) marginError.getValue()).getStatus().getCode());
+        verifyNoInteractions(leakageService, menuMarginService, accessRepository);
+    }
+
+    private static FnbMenuMarginResponse menu(String name, String status, String marginPct) {
+        FnbMenuMarginResponse menu = new FnbMenuMarginResponse();
+        menu.setName(name);
+        menu.setStatus(status);
+        menu.setMarginPct(marginPct == null ? null : new BigDecimal(marginPct));
+        return menu;
     }
 
     @Test

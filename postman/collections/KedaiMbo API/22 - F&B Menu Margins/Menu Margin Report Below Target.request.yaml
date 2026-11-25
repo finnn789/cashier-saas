@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/reports/menu-margins?belowTargetOnly=true"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data.menus).to.be.an("array");
+      r.data.menus.forEach((m) => pm.expect(m.status).to.eql("BELOW_TARGET"));
+    language: text/javascript
+description: |-
+  Hanya OWNER, paket PRO. Sama dengan Menu Margin Report, tetapi menus[] hanya berisi menu BELOW_TARGET (margin di bawah targetMarginPct), termasuk suggestedPrice untuk tiap menu. belowTargetCount tetap jumlah seluruh menu di bawah target outlet.
+order: 2000

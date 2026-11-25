@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/reports/leakage?from=2026-11-01&to=2026-11-14"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data).to.have.property("totalLoss");
+      pm.expect(r.data.outlets).to.be.an("array");
+    language: text/javascript
+description: |-
+  Hanya OWNER. Ringkasan kebocoran bahan lintas outlet yang bisa diakses owner (outlet melebihi jatah tidak ikut), memakai aturan akses yang sama dengan Consolidated Sales Report. Filter from dan to (YYYY-MM-DD, tanggal zona waktu outlet). Hanya stok opname dengan countedAt dalam rentang yang dihitung. outlets[] diurutkan totalLoss turun; tiap outlet berisi outletId, outletName, stockCountCount, totalLoss, flaggedCount, dan lines (baris flagged teratas). Rincian per opname lewat Leakage Report Per Outlet.
+order: 3000

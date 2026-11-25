@@ -16,5 +16,6 @@ public class FnbRecipeResponse {
         private String inventoryItemName;
         private String unit;
         private BigDecimal quantityPerUnit;
+        private BigDecimal costEstimate;
     }
 }

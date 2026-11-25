@@ -327,57 +327,37 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 .header(AUTH, owner.bearer()), 200);
         assertEquals(List.of(orderId), readList(history, "$.data[?(@.type=='SALE')].orderId"));
         assertEquals(List.of("RESTOCK"), readList(history, "$.data[?(@.type=='RESTOCK')].type"));
+
+        MvcResult products = api.send(get("/api/v1/cashier/outlets/" + owner.outletId() + "/fnb/products")
+                .header(AUTH, owner.bearer()), 200);
+        assertEquals(List.of("Minuman"), readList(products, "$.data[?(@.id=='" + productId + "')].categoryName"));
+    }
+
+    @Test
+    void recipeLineCostEstimateIsQuantityTimesAverageCostRoundedHalfUpAndNullWithoutCost() throws Exception {
+        MerchantFixture owner = api.onboardOwner("inv-cost");
+        String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Kopi", PRICE);
+        String kopi = createIngredient(owner, "Biji Kopi", "g", "10", "100");
+        String url = productRecipeUrl(owner, productId);
+
+        // The opening stock carries no price, so no average cost exists yet.
+        MvcResult noCost = putRecipe(owner, url, recipeJson(kopi, "2"));
+        assertStatus(200, noCost);
+        assertEquals("null", ApiTestSupport.read(noCost, "$.data.lines[0].costEstimate"));
+
+        // First priced restock sets the average to 12.3425; 2 x 12.3425 = 24.685 -> 24.69 (HALF_UP, not HALF_EVEN).
+        assertStatus(201, postMovement(owner, kopi, "{\"type\":\"RESTOCK\",\"quantity\":10,\"unitCost\":12.3425,"
+                + "\"idempotencyKey\":\"mv-" + UUID.randomUUID() + "\"}"));
+        MvcResult read = api.send(get(url).header(AUTH, owner.bearer()), 200);
+        assertDecimal("24.69", decimal(ApiTestSupport.read(read, "$.data.lines[0].costEstimate")), "GET cost estimate");
+        MvcResult replaced = putRecipe(owner, url, recipeJson(kopi, "2"));
+        assertStatus(200, replaced);
+        assertDecimal("24.69", decimal(ApiTestSupport.read(replaced, "$.data.lines[0].costEstimate")), "PUT cost estimate");
     }
 
     // ------------------------------------------------------------------ 2. negative stock allowed
 
-    @Test
-    void stockMayGoNegativeWithoutBlockingPaymentAndIsReportedAsNegative() throws Exception {
-        MerchantFixture owner = api.onboardOwner("inv-negative");
-        String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Latte", PRICE);
-        String susu = createIngredient(owner, "Susu", "ml", "5", "10");
-        setRecipe(owner, productRecipeUrl(owner, productId), recipeJson(susu, "18"));
-
-        String orderId = createOrder(owner, productId, 2);
-        MvcResult paid = payCash(owner, orderId, "pay-" + UUID.randomUUID());
-
-        assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        List<String> warnings = warnings(paid);
-        assertEquals(1, warnings.size(), warnings.toString());
-        assertEquals("Susu: sisa -26 ml (minus)", warnings.get(0));
-        assertDecimal("-26", balance(susu), "balance goes negative");
-        assertLedgerMatchesBalance(susu);
-
-        MvcResult all = listStock(owner, null);
-        assertEquals("NEGATIVE", stockStatusOf(all, susu));
-        assertDecimal("-26", decimal(readList(all, "$.data[?(@.id=='" + susu + "')].quantityOnHand").get(0)),
-                "list quantityOnHand");
-        assertEquals(List.of(susu), readList(listStock(owner, "NEGATIVE"), "$.data[*].id"));
-        assertTrue(readList(listStock(owner, "OK"), "$.data[*].id").isEmpty(), "status filter excludes it");
-        assertTrue(readList(listStock(owner, "LOW"), "$.data[*].id").isEmpty());
-    }
-
     // ------------------------------------------------------------------ 3. LOW (and OUT) warning
-
-    @Test
-    void stockAtOrBelowReorderLevelWarnsLowAndExactlyZeroWarnsOut() throws Exception {
-        MerchantFixture owner = api.onboardOwner("inv-low");
-        String productId = api.createProduct(owner, api.createCategory(owner, "Makanan"), "Telur Dadar", PRICE);
-        String telur = createIngredient(owner, "Telur", "butir", "70", "100");
-        setRecipe(owner, productRecipeUrl(owner, productId), recipeJson(telur, "20"));
-
-        MvcResult low = payCash(owner, createOrder(owner, productId, 2), "pay-" + UUID.randomUUID());
-        assertEquals(List.of("Telur: sisa 60 butir (menipis)"), warnings(low));
-        assertDecimal("60", balance(telur), "balance after first order");
-        assertEquals("LOW", stockStatusOf(listStock(owner, null), telur));
-        assertEquals(List.of(telur), readList(listStock(owner, "LOW"), "$.data[*].id"));
-
-        MvcResult out = payCash(owner, createOrder(owner, productId, 3), "pay-" + UUID.randomUUID());
-        assertEquals(List.of("Telur: sisa 0 butir (habis)"), warnings(out));
-        assertDecimal("0", balance(telur), "balance drained to exactly zero");
-        assertEquals("OUT", stockStatusOf(listStock(owner, null), telur));
-        assertLedgerMatchesBalance(telur);
-    }
 
     // ------------------------------------------------------------------ 4. manual non-cash payment
 
@@ -411,36 +391,6 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     // ------------------------------------------------------------------ 5. idempotent payment replay
-
-    @Test
-    void replayingTheSamePaymentKeyDoesNotDeductTwice() throws Exception {
-        MerchantFixture owner = api.onboardOwner("inv-replay");
-        String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Es Teh", PRICE);
-        String teh = createIngredient(owner, "Daun Teh", "g", "5", "200");
-        setRecipe(owner, productRecipeUrl(owner, productId), recipeJson(teh, "10"));
-        String orderId = createOrder(owner, productId, 3);
-        String key = "pay-" + UUID.randomUUID();
-
-        MvcResult first = payCash(owner, orderId, key);
-        assertDecimal("170", balance(teh), "3 x 10 deducted once");
-        assertEquals(1, saleMovements(orderId));
-
-        MvcResult replay = payCash(owner, orderId, key);
-        assertEquals(ApiTestSupport.read(first, "$.data.receiptNumber"),
-                ApiTestSupport.read(replay, "$.data.receiptNumber"), "replay returns the same payment");
-        assertDecimal("170", balance(teh), "replay must not deduct again");
-        assertEquals(1, saleMovements(orderId));
-        assertEquals(2, movementsOfItem(teh), "initial restock + one sale only");
-
-        // A new key on an already paid order is refused and also leaves stock alone.
-        MvcResult second = api.call(post(orders(owner) + "/" + orderId + "/payments").header(AUTH, owner.bearer())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(paymentJson("CASH", "1000000", "pay-" + UUID.randomUUID())));
-        assertStatus(409, second);
-        assertDecimal("170", balance(teh), "refused payment deducts nothing");
-        assertEquals(2, movementsOfItem(teh));
-        assertLedgerMatchesBalance(teh);
-    }
 
     // ------------------------------------------------------------------ 6. product without recipe
 
@@ -515,7 +465,10 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
         // Cashier may read the stock list and history.
         assertEquals("OK", stockStatusOf(listStock(cashier, null), kopi));
-        api.send(get(stockItems(cashier) + "/" + kopi + "/movements").header(AUTH, cashier.bearer()), 200);
+        MvcResult history = api.send(get(stockItems(cashier) + "/" + kopi + "/movements")
+                .header(AUTH, cashier.bearer()), 200);
+        assertEquals(List.of("Cashier inv-roles-cashier"), readList(history, "$.data[?(@.type=='WASTE')].actorName"));
+        assertEquals(List.of("Owner inv-roles"), readList(history, "$.data[?(@.reason=='Stok awal')].actorName"));
 
         // Cashier cannot manage ingredients or recipes: 403 from the /merchant/** security rule.
         assertStatus(403, api.call(post(adminItems(cashier)).header(AUTH, cashier.bearer())

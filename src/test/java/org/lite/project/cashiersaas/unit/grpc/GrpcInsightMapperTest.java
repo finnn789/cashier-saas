@@ -1,13 +1,21 @@
 package org.lite.project.cashiersaas.unit.grpc;
 
 import com.cashier.grpc.v1.CashierAnomaly;
+import com.cashier.grpc.v1.LeakageLine;
+import com.cashier.grpc.v1.MenuMargin;
 import com.cashier.grpc.v1.OutletAnomalies;
+import com.cashier.grpc.v1.OutletLeakage;
+import com.cashier.grpc.v1.OutletMenuMargins;
 import com.cashier.grpc.v1.OutletRestock;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.dto.response.FnbCashierAnomaly;
+import org.lite.project.cashiersaas.dto.response.FnbLeakageLineResponse;
+import org.lite.project.cashiersaas.dto.response.FnbMenuMarginReportResponse;
+import org.lite.project.cashiersaas.dto.response.FnbMenuMarginResponse;
+import org.lite.project.cashiersaas.dto.response.FnbOutletLeakageResponse;
 import org.lite.project.cashiersaas.dto.response.FnbOwnerSalesInsight;
 import org.lite.project.cashiersaas.dto.response.FnbRestockSuggestion;
 import org.lite.project.cashiersaas.dto.response.FnbSalesPaymentBreakdownResponse;
@@ -214,5 +222,84 @@ class GrpcInsightMapperTest {
         assertEquals("0", mapped.getValue());
         assertEquals("0", mapped.getBaselineDailyAverage());
         assertTrue(result.getAnomaliesCount() == 1);
+    }
+
+    @Test
+    void leakageMapsDecimalsAsPlainStringsAndUnknownValuesAsEmptyStrings() {
+        FnbLeakageLineResponse known = new FnbLeakageLineResponse();
+        known.setName("Susu");
+        known.setUnit("ml");
+        known.setTheoreticalUsage(new BigDecimal("1E+3"));
+        known.setShortage(new BigDecimal("100.000"));
+        known.setVariancePct(new BigDecimal("10.00"));
+        known.setLossAmount(new BigDecimal("1500.00"));
+        known.setWaste(new BigDecimal("0.000"));
+        FnbLeakageLineResponse unknown = new FnbLeakageLineResponse();
+        unknown.setName("Gula");
+        FnbOutletLeakageResponse outlet = new FnbOutletLeakageResponse();
+        outlet.setOutletId(outletId);
+        outlet.setOutletName("Kedai Mbo");
+        outlet.setStockCountCount(2);
+        outlet.setTotalLoss(new BigDecimal("1500.00"));
+        outlet.setFlaggedCount(1);
+        outlet.setLines(List.of(known, unknown));
+
+        OutletLeakage result = mapper.toLeakage(outlet);
+
+        assertEquals(outletId.toString(), result.getOutletId());
+        assertEquals("Kedai Mbo", result.getOutletName());
+        assertEquals(2, result.getStockCountCount());
+        assertEquals("1500.00", result.getTotalLoss());
+        assertEquals(1, result.getFlaggedCount());
+        LeakageLine mapped = result.getLines(0);
+        assertEquals("Susu", mapped.getName());
+        assertEquals("ml", mapped.getUnit());
+        assertEquals("1000", mapped.getTheoreticalUsage()); // 1E+3 is rendered without an exponent
+        assertEquals("100.000", mapped.getShortage());
+        assertEquals("10.00", mapped.getVariancePct());
+        assertEquals("1500.00", mapped.getLossAmount());
+        assertEquals("0.000", mapped.getWaste());
+        LeakageLine missing = result.getLines(1);
+        assertEquals("", missing.getUnit());
+        assertEquals("", missing.getTheoreticalUsage());
+        assertEquals("", missing.getVariancePct());
+        assertEquals("", missing.getLossAmount());
+    }
+
+    @Test
+    void menuMarginsMapDecimalsAsPlainStringsAndUnknownValuesAsEmptyStrings() {
+        FnbMenuMarginResponse below = new FnbMenuMarginResponse();
+        below.setName("Kopi Susu");
+        below.setPrice(new BigDecimal("18000.00"));
+        below.setHpp(new BigDecimal("12000.00"));
+        below.setMarginPct(new BigDecimal("33.33"));
+        below.setStatus("BELOW_TARGET");
+        below.setSuggestedPrice(new BigDecimal("30000.00"));
+        FnbMenuMarginResponse noRecipe = new FnbMenuMarginResponse();
+        noRecipe.setName("Air");
+        noRecipe.setPrice(new BigDecimal("3000.00"));
+        noRecipe.setStatus("NO_RECIPE");
+        FnbMenuMarginReportResponse report = new FnbMenuMarginReportResponse();
+        report.setOutletId(outletId);
+        report.setOutletName("Kedai Mbo");
+        report.setTargetMarginPct(new BigDecimal("60.00"));
+
+        OutletMenuMargins result = mapper.toMenuMargins(report, List.of(below, noRecipe));
+
+        assertEquals(outletId.toString(), result.getOutletId());
+        assertEquals("Kedai Mbo", result.getOutletName());
+        assertEquals("60.00", result.getTargetMarginPct());
+        MenuMargin mapped = result.getMenus(0);
+        assertEquals("Kopi Susu", mapped.getName());
+        assertEquals("18000.00", mapped.getPrice());
+        assertEquals("12000.00", mapped.getHpp());
+        assertEquals("33.33", mapped.getMarginPct());
+        assertEquals("BELOW_TARGET", mapped.getStatus());
+        assertEquals("30000.00", mapped.getSuggestedPrice());
+        MenuMargin missing = result.getMenus(1);
+        assertEquals("NO_RECIPE", missing.getStatus());
+        assertEquals("", missing.getHpp());
+        assertEquals("", missing.getMarginPct());
+        assertEquals("", missing.getSuggestedPrice());
     }
 }

@@ -51,8 +51,8 @@ public class FnbCatalogRepository {
     public List<ProductEntity> products(UUID tenant, UUID outlet) {
         return criteriaBuilderFactory.create(entityManager, ProductEntity.class, PRODUCT.getMetadata().getName())
                 .where(PRODUCT.tenant.id.toString()).eq(tenant).where(PRODUCT.outlet.id.toString()).eq(outlet)
-                .where(PRODUCT.archived.toString()).eq(false).orderByAsc(PRODUCT.displayOrder.toString())
-                .orderByAsc(PRODUCT.name.toString()).getResultList();
+                .where(PRODUCT.archived.toString()).eq(false).fetch(PRODUCT.category.toString())
+                .orderByAsc(PRODUCT.displayOrder.toString()).orderByAsc(PRODUCT.name.toString()).getResultList();
     }
     public Optional<OptionGroupEntity> group(UUID tenant, UUID outlet, UUID id) {
         return criteriaBuilderFactory.create(entityManager, OptionGroupEntity.class, GROUP.getMetadata().getName())

@@ -5,6 +5,7 @@ import org.lite.project.cashiersaas.dto.response.FnbStaffOrderOptionResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStaffOrderResponse;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 
 import java.util.List;
@@ -15,8 +16,10 @@ import java.util.stream.Collectors;
 public final class FnbStaffOrderMapper {
     private FnbStaffOrderMapper() { }
 
+    // creatorName is the order's audit creator; the paying cashier is the fallback. Payment is null while unpaid.
     public static FnbStaffOrderResponse order(SalesOrderEntity order, List<OrderItemEntity> items,
-                                              List<OrderItemOptionEntity> itemOptions) {
+                                              List<OrderItemOptionEntity> itemOptions, String creatorName,
+                                              PaymentEntity payment) {
         Map<UUID, List<OrderItemOptionEntity>> optionsByItem = itemOptions.stream()
                 .collect(Collectors.groupingBy(option -> option.getOrderItem().getId()));
         FnbStaffOrderResponse response = new FnbStaffOrderResponse();
@@ -36,6 +39,11 @@ public final class FnbStaffOrderMapper {
         response.setServiceChargeAmount(order.getServiceChargeAmount());
         response.setDiscountAmount(order.getDiscountAmount());
         response.setTotal(order.getTotal());
+        response.setCashierName(creatorName != null || payment == null ? creatorName : payment.getReceivedBy().getFullName());
+        if (payment != null) {
+            response.setMethodLabel(payment.getMethodLabel() != null ? payment.getMethodLabel() : payment.getMethod().name());
+            response.setReceiptNumber(payment.getReceiptNumber());
+        }
         response.setItems(items.stream().map(item -> item(item,
                 optionsByItem.getOrDefault(item.getId(), List.of()))).toList());
         return response;

@@ -182,13 +182,17 @@ class TwoTenantConversationTests(unittest.IsolatedAsyncioTestCase):
         channels.for_tenant = Mock(side_effect=store.view)
         seen_states: list[dict[str, Any]] = []
 
-        async def ainvoke(state: dict[str, Any]) -> dict[str, Any]:
+        async def ainvoke(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
             seen_states.append(state)
             return {"final_response": f"jawaban untuk {state['tenant_id']}"}
 
         graph = Mock()
         graph.ainvoke = AsyncMock(side_effect=ainvoke)
-        service = ChatService(TransactionFake(), channels, graph=graph)  # type: ignore[arg-type]
+        grpc = Mock()
+        grpc.consume_ai_question = AsyncMock(return_value={"allowed": True, "warn": False})
+        service = ChatService(
+            TransactionFake(), channels, graph=graph, grpc_client=grpc  # type: ignore[arg-type]
+        )
         base = {"external_user_id": "7", "external_chat_id": "71", "username": None,
                 "first_name": "First", "kind": "TEXT"}
         await service.handle(tenant_id=tenant_a, external_message_id="1", content="rahasia A", **base)
@@ -249,7 +253,11 @@ class VerifiedTenantReachesToolTests(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         registry.register(tool)
         graph = build_chat_graph(openrouter_key="sk-test", ai_model="mock-model", tools=registry)
-        service = ChatService(TransactionFake(), channels, tools=registry, graph=graph)  # type: ignore[arg-type]
+        grpc = Mock()
+        grpc.consume_ai_question = AsyncMock(return_value={"allowed": True, "warn": False})
+        service = ChatService(
+            TransactionFake(), channels, tools=registry, graph=graph, grpc_client=grpc  # type: ignore[arg-type]
+        )
         java_user = uuid4()
         membership = VerifiedMembership(verified, "Kopi Senja", java_user, "CASHIER", True)
         sender = Mock(spec=Sender)

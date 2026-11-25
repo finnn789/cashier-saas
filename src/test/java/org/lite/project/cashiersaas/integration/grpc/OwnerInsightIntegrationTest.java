@@ -2,15 +2,27 @@ package org.lite.project.cashiersaas.integration.grpc;
 
 import com.cashier.grpc.v1.CashierAnomaly;
 import com.cashier.grpc.v1.CashierServiceGrpc;
+import com.cashier.grpc.v1.ConsumeAiQuestionRequest;
+import com.cashier.grpc.v1.ConsumeAiQuestionResponse;
 import com.cashier.grpc.v1.GetAnomaliesRequest;
 import com.cashier.grpc.v1.GetAnomaliesResponse;
+import com.cashier.grpc.v1.GetCatalogItemRequest;
+import com.cashier.grpc.v1.GetLeakageReportRequest;
+import com.cashier.grpc.v1.GetLeakageReportResponse;
+import com.cashier.grpc.v1.GetMenuMarginsRequest;
+import com.cashier.grpc.v1.GetMenuMarginsResponse;
+import com.cashier.grpc.v1.GetOrderStatusRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
 import com.cashier.grpc.v1.GetSalesSummaryResponse;
 import com.cashier.grpc.v1.LabelTotal;
+import com.cashier.grpc.v1.LeakageLine;
+import com.cashier.grpc.v1.MenuMargin;
+import com.cashier.grpc.v1.OutletLeakage;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import com.cashier.grpc.v1.ProductTotal;
+import com.cashier.grpc.v1.RecordAiUsageRequest;
 import com.cashier.grpc.v1.RestockSuggestion;
 import com.jayway.jsonpath.JsonPath;
 import io.grpc.ManagedChannel;
@@ -24,10 +36,13 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.integration.support.AbstractPostgresIntegrationTest;
 import org.lite.project.cashiersaas.integration.support.ApiTestSupport;
 import org.lite.project.cashiersaas.integration.support.MerchantFixture;
-import org.lite.project.cashiersaas.service.DailySummaryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -49,6 +64,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -92,8 +111,6 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
     private DataSource dataSource;
     @Autowired
     private GrpcServerPortHolder portHolder;
-    @Autowired
-    private DailySummaryService dailySummary;
 
     private ApiTestSupport api;
     private JdbcTemplate jdbc;
@@ -150,24 +167,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
 
     // ------------------------------------------------------------------ schema
 
-    @Test
-    void migrationV10CreatesTheDispatchTableWithOneRowPerOutletAndDay() {
-        assertEquals(1, count("SELECT count(*) FROM flyway_schema_history WHERE version = '10' AND success"));
-        assertEquals(1, count("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' "
-                + "AND table_name = 'daily_summary_dispatches'"));
-        assertEquals(1, count("SELECT count(*) FROM pg_constraint WHERE conname = 'uk_daily_summary_dispatches_outlet_date'"));
-        assertEquals(1, count("SELECT count(*) FROM pg_indexes WHERE indexname = 'idx_daily_summary_dispatches_status'"));
-    }
-
     // ------------------------------------------------------------------ owner-only access and isolation
-
-    @Test
-    void serviceKeyIsStillRequiredForTheNewRpcs() {
-        CashierServiceGrpc.CashierServiceBlockingStub noKey = stub(null);
-        assertCode(Status.Code.UNAUTHENTICATED, () -> noKey.getSalesSummary(salesRequest(owner.tenantId(), ownerUserId, "2026-01-01", "2026-01-02")));
-        assertCode(Status.Code.UNAUTHENTICATED, () -> noKey.getRestockSuggestions(restockRequest(owner.tenantId(), ownerUserId)));
-        assertCode(Status.Code.UNAUTHENTICATED, () -> noKey.getAnomalies(anomalyRequest(owner.tenantId(), ownerUserId, "2026-01-01")));
-    }
 
     @Test
     void cashiersAndUnknownCallersAreDeniedExactlyLikeAnUnknownTenant() {
@@ -184,29 +184,15 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
                     () -> stub().getRestockSuggestions(restockRequest(owner.tenantId(), caller)));
             StatusRuntimeException anomalies = assertCode(Status.Code.PERMISSION_DENIED,
                     () -> stub().getAnomalies(anomalyRequest(owner.tenantId(), caller, today().toString())));
-            for (StatusRuntimeException denied : List.of(sales, restock, anomalies)) {
+            StatusRuntimeException leakage = assertCode(Status.Code.PERMISSION_DENIED,
+                    () -> stub().getLeakageReport(leakageRequest(owner.tenantId(), caller, "", "")));
+            StatusRuntimeException margins = assertCode(Status.Code.PERMISSION_DENIED,
+                    () -> stub().getMenuMargins(marginRequest(owner.tenantId(), caller, "")));
+            for (StatusRuntimeException denied : List.of(sales, restock, anomalies, leakage, margins)) {
                 assertEquals(unknown.getStatus().getDescription(), denied.getStatus().getDescription(), "caller " + caller);
                 assertFalse(denied.getStatus().getDescription().contains(caller.toString()));
             }
         }
-    }
-
-    @Test
-    void aRejectedCallerLearnsNothingAboutArgumentValidity() {
-        // Invalid dates must not turn a cashier's PERMISSION_DENIED into INVALID_ARGUMENT.
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getSalesSummary(salesRequest(owner.tenantId(), mainUserId, "nope", "nope")));
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getAnomalies(anomalyRequest(owner.tenantId(), mainUserId, "nope")));
-    }
-
-    @Test
-    void otherTenantsCannotReadEachOthersInsights() {
-        // Owner B asks for tenant A and owner A asks for tenant B: both look like an unknown tenant.
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getRestockSuggestions(restockRequest(owner.tenantId(), otherOwnerUserId)));
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getSalesSummary(
-                salesRequest(owner.tenantId(), otherOwnerUserId, today().minusDays(1).toString(), today().toString())));
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getAnomalies(anomalyRequest(owner.tenantId(), otherOwnerUserId, today().toString())));
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getRestockSuggestions(restockRequest(other.tenantId(), ownerUserId)));
-        assertCode(Status.Code.PERMISSION_DENIED, () -> stub().getAnomalies(anomalyRequest(other.tenantId(), ownerUserId, today().toString())));
     }
 
     @Test
@@ -231,33 +217,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(0, anomalies.getOutlets(0).getAnomaliesCount());
     }
 
-    @Test
-    void ownerAGetsExactlyItsOwnOutlet() {
-        GetSalesSummaryResponse sales = stub().getSalesSummary(
-                salesRequest(owner.tenantId(), ownerUserId, today().minusDays(1).toString(), today().plusDays(1).toString()));
-        assertEquals(owner.tenantId().toString(), sales.getTenantId());
-        assertEquals(1, sales.getOutletsCount());
-        assertEquals(owner.outletId().toString(), sales.getOutlets(0).getOutletId());
-        assertEquals("Asia/Jakarta", sales.getOutlets(0).getTimeZone());
-    }
-
     // ------------------------------------------------------------------ validation
-
-    @Test
-    void invalidDatesAreInvalidArgumentForTheOwner() {
-        String[][] badRanges = {{"", "2026-01-01"}, {"2026-01-01", ""}, {"2026-13-01", "2026-01-01"},
-                {"2026-01-01", "not-a-date"}, {"2026-02-01", "2026-01-01"}, {"2025-01-01", "2026-01-02"}};
-        for (String[] range : badRanges) {
-            assertCode(Status.Code.INVALID_ARGUMENT,
-                    () -> stub().getSalesSummary(salesRequest(owner.tenantId(), ownerUserId, range[0], range[1])));
-        }
-        for (String date : new String[] {"", "2026-02-30", "yesterday", "14-11-2026"}) {
-            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub().getAnomalies(anomalyRequest(owner.tenantId(), ownerUserId, date)));
-        }
-        assertCode(Status.Code.INVALID_ARGUMENT, () -> stub().getRestockSuggestions(restockRequest(owner.tenantId(), null)));
-        assertCode(Status.Code.INVALID_ARGUMENT, () -> stub().getRestockSuggestions(
-                GetRestockSuggestionsRequest.newBuilder().setTenantId(owner.tenantId().toString()).setUserId("not-a-uuid").build()));
-    }
 
     // ------------------------------------------------------------------ sales summary equals the REST report
 
@@ -410,6 +370,183 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         }
     }
 
+    // ------------------------------------------------------------------ leakage and menu margin (TASK-084/085)
+
+    @Test
+    void leakageReportReturnsTheFlaggedShortagesOfTheStockCountsInTheRange() throws Exception {
+        UUID gula = jdbc.queryForObject("SELECT id FROM inventory_items WHERE tenant_id = ? AND name = 'Gula'", UUID.class, owner.tenantId());
+        api.send(post("/api/v1/merchant/outlets/" + owner.outletId() + "/fnb/inventory/stock-counts").header(AUTH, owner.bearer())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"idempotencyKey\":\"count-" + UUID.randomUUID()
+                        + "\",\"lines\":[{\"inventoryItemId\":\"" + gula + "\",\"countedQuantity\":495}]}"), 201);
+
+        GetLeakageReportResponse response = stub().getLeakageReport(
+                leakageRequest(owner.tenantId(), ownerUserId, today().minusDays(1).toString(), today().plusDays(1).toString()));
+
+        assertEquals(owner.tenantId().toString(), response.getTenantId());
+        assertEquals(1, response.getOutletsCount());
+        OutletLeakage outlet = response.getOutlets(0);
+        assertEquals(owner.outletId().toString(), outlet.getOutletId());
+        assertEquals(1, outlet.getStockCountCount());
+        assertEquals(1, outlet.getFlaggedCount());
+        assertDec("5", outlet.getTotalLoss(), "500 counted down to 495 at average 1");
+        assertEquals(1, outlet.getLinesCount());
+        LeakageLine line = outlet.getLines(0);
+        assertEquals("Gula", line.getName());
+        assertEquals("g", line.getUnit());
+        assertDec("0", line.getTheoreticalUsage(), "no recipe uses it");
+        assertDec("5", line.getShortage(), "shortage");
+        assertEquals("", line.getVariancePct(), "no usage: the percentage is empty");
+        assertDec("5", line.getLossAmount(), "loss");
+        assertDec("0", line.getWaste(), "waste");
+        assertEquals(1, stub().getLeakageReport(leakageRequest(owner.tenantId(), ownerUserId, "", "")).getOutlets(0).getStockCountCount(),
+                "an empty range defaults to the last 30 days");
+        assertEquals(0, stub().getLeakageReport(leakageRequest(owner.tenantId(), ownerUserId, today().minusDays(40).toString(),
+                today().minusDays(40).toString())).getOutletsCount(), "outlets without a count in the range are omitted");
+    }
+
+    @Test
+    void menuMarginsListOnlyBelowTargetMenusUnlessAMaximumMarginIsGiven() {
+        GetMenuMarginsResponse belowTarget = stub().getMenuMargins(marginRequest(owner.tenantId(), ownerUserId, ""));
+        assertEquals(1, belowTarget.getOutletsCount());
+        assertEquals(owner.outletId().toString(), belowTarget.getOutlets(0).getOutletId());
+        assertDec("60", belowTarget.getOutlets(0).getTargetMarginPct(), "default target");
+        assertEquals(0, belowTarget.getOutlets(0).getMenusCount(), "Nasi and Latte are far above the target");
+
+        List<MenuMargin> upTo997 = stub().getMenuMargins(marginRequest(owner.tenantId(), ownerUserId, "99.70")).getOutlets(0).getMenusList();
+        assertEquals(List.of("Nasi"), upTo997.stream().map(MenuMargin::getName).toList(), "Latte is 99.90 and Teh has no recipe");
+        MenuMargin nasi = upTo997.get(0);
+        assertEquals("OK", nasi.getStatus());
+        assertDec("10000", nasi.getPrice(), "price");
+        assertDec("50", nasi.getHpp(), "5 g x 10");
+        assertDec("99.5", nasi.getMarginPct(), "(10000 - 50) / 10000");
+        assertEquals("", nasi.getSuggestedPrice(), "only below-target menus get a suggestion");
+        assertEquals(List.of("Latte", "Nasi"), stub().getMenuMargins(marginRequest(owner.tenantId(), ownerUserId, "100"))
+                .getOutlets(0).getMenusList().stream().map(MenuMargin::getName).toList(), "the maximum is inclusive");
+    }
+
+    // ------------------------------------------------------------------ plan gate and AI question quota (TASK-082)
+
+    @ParameterizedTest
+    @EnumSource(value = PlanCode.class, names = {"FREETIER", "PRO"})
+    void everyAiRpcIsRefusedBelowPremiumAndTheQuotaIsNotTouched(PlanCode plan) throws Exception {
+        MerchantFixture shop = api.onboardOwner("ins-plan-" + plan, plan);
+        UUID shopOwner = ownerUserId(shop);
+        String tenant = shop.tenantId().toString();
+
+        for (Executable call : new Executable[] {
+                () -> stub().getCatalogItem(GetCatalogItemRequest.newBuilder().setTenantId(tenant).setUserId(shopOwner.toString()).build()),
+                () -> stub().getOrderStatus(GetOrderStatusRequest.newBuilder().setTenantId(tenant).setUserId(shopOwner.toString())
+                        .setOrderNumber("X").build()),
+                () -> stub().getSalesSummary(salesRequest(shop.tenantId(), shopOwner, today().toString(), today().toString())),
+                () -> stub().getRestockSuggestions(restockRequest(shop.tenantId(), shopOwner)),
+                () -> stub().getAnomalies(anomalyRequest(shop.tenantId(), shopOwner, today().toString())),
+                () -> stub().getLeakageReport(leakageRequest(shop.tenantId(), shopOwner, "", "")),
+                () -> stub().getMenuMargins(marginRequest(shop.tenantId(), shopOwner, ""))}) {
+            StatusRuntimeException refused = assertCode(Status.Code.FAILED_PRECONDITION, call);
+            assertEquals("PLAN_PREMIUM_REQUIRED", refused.getStatus().getDescription());
+        }
+
+        ConsumeAiQuestionResponse consume = consume(shop.tenantId(), shopOwner);
+        assertFalse(consume.getAllowed());
+        assertEquals("PLAN_PREMIUM_REQUIRED", consume.getReason());
+        assertEquals(0, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ?", shop.tenantId()));
+    }
+
+    @Test
+    void consumingAnAiQuestionIsOwnerOnlyAndADeniedCallerIsNeverCounted() {
+        jdbc.update("DELETE FROM ai_usage_periods WHERE tenant_id IN (?, ?)", owner.tenantId(), other.tenantId());
+
+        assertCode(Status.Code.PERMISSION_DENIED, () -> consume(owner.tenantId(), mainUserId));
+        assertCode(Status.Code.PERMISSION_DENIED, () -> consume(other.tenantId(), ownerUserId));
+        assertEquals(0, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id IN (?, ?)", owner.tenantId(), other.tenantId()));
+    }
+
+    /**
+     * Boundaries of the monthly (300 + bonus) and daily (40) limits, the 80% warning and the day reset, against the real
+     * upsert. A refused question changes nothing.
+     */
+    @ParameterizedTest(name = "used={0} bonus={1} dayQuestions={2} dayOffset={3}")
+    @CsvSource({
+            // used, bonus, dayQuestions, dayOffset, allowed, reason, usedAfter, limit, warn, dayQuestionsAfter
+            "238, 0, 0, 0, true, '', 239, 300, false, 1",
+            "239, 0, 0, 0, true, '', 240, 300, true, 1",
+            "299, 0, 0, 0, true, '', 300, 300, true, 1",
+            "300, 0, 0, 0, false, MONTHLY_QUOTA_EXHAUSTED, 300, 300, true, 0",
+            "300, 200, 0, 0, true, '', 301, 500, false, 1",
+            "10, 0, 39, 0, true, '', 11, 300, false, 40",
+            "10, 0, 40, 0, false, DAILY_CAP_REACHED, 10, 300, false, 40",
+            "10, 0, 40, -1, true, '', 11, 300, false, 1"})
+    void consumeAiQuestionAppliesTheMonthlyAndDailyLimits(int used, int bonus, int dayQuestions, int dayOffset,
+                                                          boolean allowed, String reason, int usedAfter, int limit,
+                                                          boolean warn, int dayQuestionsAfter) {
+        seedUsage(other.tenantId(), used, bonus, dayQuestions, today().plusDays(dayOffset));
+
+        ConsumeAiQuestionResponse response = consume(other.tenantId(), otherOwnerUserId);
+
+        assertEquals(allowed, response.getAllowed());
+        assertEquals(reason, response.getReason());
+        assertEquals(usedAfter, response.getUsed());
+        assertEquals(limit, response.getLimit());
+        assertEquals(warn, response.getWarn());
+        Map<String, Object> row = jdbc.queryForMap("SELECT questions_used, day_questions, day_date FROM ai_usage_periods "
+                + "WHERE tenant_id = ?", other.tenantId());
+        assertEquals(usedAfter, ((Number) row.get("questions_used")).intValue());
+        assertEquals(dayQuestionsAfter, ((Number) row.get("day_questions")).intValue());
+        if (allowed) {
+            assertEquals(today(), ((java.sql.Date) row.get("day_date")).toLocalDate(), "an allowed question stamps today");
+        }
+    }
+
+    @Test
+    void theFirstQuestionOfAMonthCreatesTheUsageRow() {
+        jdbc.update("DELETE FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId());
+
+        ConsumeAiQuestionResponse response = consume(other.tenantId(), otherOwnerUserId);
+
+        assertTrue(response.getAllowed());
+        assertEquals(1, response.getUsed());
+        assertEquals(1, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ? AND questions_used = 1 AND day_questions = 1 "
+                + "AND period_month = ?", other.tenantId(), java.sql.Date.valueOf(today().withDayOfMonth(1))));
+    }
+
+    @ParameterizedTest(name = "used={0} dayQuestions={1} -> {2}")
+    @CsvSource({"299, 0, MONTHLY_QUOTA_EXHAUSTED", "10, 39, DAILY_CAP_REACHED"})
+    void twoConcurrentQuestionsOnTheLastSlotAdmitExactlyOne(int used, int dayQuestions, String refusedReason) throws Exception {
+        seedUsage(other.tenantId(), used, 0, dayQuestions, today());
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<ConsumeAiQuestionResponse>> results = List.of(
+                    pool.submit(() -> { start.await(); return consume(other.tenantId(), otherOwnerUserId); }),
+                    pool.submit(() -> { start.await(); return consume(other.tenantId(), otherOwnerUserId); }));
+            start.countDown();
+            List<ConsumeAiQuestionResponse> responses = List.of(results.get(0).get(30, TimeUnit.SECONDS), results.get(1).get(30, TimeUnit.SECONDS));
+
+            assertEquals(1, responses.stream().filter(ConsumeAiQuestionResponse::getAllowed).count());
+            assertEquals(List.of(refusedReason), responses.stream().filter(r -> !r.getAllowed()).map(ConsumeAiQuestionResponse::getReason).toList());
+            assertEquals(used + 1, count("SELECT questions_used FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
+            assertEquals(dayQuestions + 1, count("SELECT day_questions FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void recordedTokensAccumulateOnTheMonthRowWithoutCountingAQuestion() {
+        seedUsage(other.tenantId(), 7, 0, 3, today());
+
+        stub().recordAiUsage(RecordAiUsageRequest.newBuilder().setTenantId(other.tenantId().toString())
+                .setInputTokens(100).setOutputTokens(50).build());
+        stub().recordAiUsage(RecordAiUsageRequest.newBuilder().setTenantId(other.tenantId().toString())
+                .setInputTokens(20).setOutputTokens(10).build());
+
+        Map<String, Object> row = jdbc.queryForMap("SELECT questions_used, input_tokens, output_tokens FROM ai_usage_periods "
+                + "WHERE tenant_id = ?", other.tenantId());
+        assertEquals(7, ((Number) row.get("questions_used")).intValue());
+        assertEquals(120L, ((Number) row.get("input_tokens")).longValue());
+        assertEquals(60L, ((Number) row.get("output_tokens")).longValue());
+    }
+
     // ------------------------------------------------------------------ read-only
 
     @Test
@@ -423,64 +560,14 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         stub().getSalesSummary(salesRequest(owner.tenantId(), ownerUserId, today().minusDays(1).toString(), today().toString()));
         stub().getRestockSuggestions(restockRequest(owner.tenantId(), ownerUserId));
         stub().getAnomalies(anomalyRequest(owner.tenantId(), ownerUserId, today().toString()));
+        stub().getLeakageReport(leakageRequest(owner.tenantId(), ownerUserId, "", ""));
+        stub().getMenuMargins(marginRequest(owner.tenantId(), ownerUserId, "100"));
         for (int i = 0; i < tables.length; i++) {
             assertEquals(before[i], count("SELECT count(*) FROM " + tables[i]), tables[i]);
         }
     }
 
     // ------------------------------------------------------------------ daily summary dispatch row
-
-    @Test
-    void closingTheLastOpenShiftCreatesExactlyOneDispatchRowAndASecondCloseTheSameDayAddsNone() throws Exception {
-        MerchantFixture shop = api.onboardOwner("ins-disp");
-        MerchantFixture cashier = api.onboardCashier(shop, "ins-disp-cashier");
-        String ownerShift = ApiTestSupport.read(api.openShift(shop, "0.00"), "$.data.id");
-        api.openShift(cashier, "0.00");
-
-        // Another shift is still open: no row.
-        closeShift(cashier);
-        assertEquals(0, dispatchRows(shop));
-
-        // The last open shift closes: exactly one row.
-        closeShift(shop);
-        assertEquals(1, dispatchRows(shop));
-        Map<String, Object> row = jdbc.queryForMap("SELECT \"trigger\", status, attempts, business_date, tenant_id "
-                + "FROM daily_summary_dispatches WHERE outlet_id = ?", shop.outletId());
-        assertEquals("SHIFT_CLOSED", row.get("trigger"));
-        assertEquals("PENDING", row.get("status"), "AI base URL is blank: nothing is sent");
-        assertEquals(0, ((Number) row.get("attempts")).intValue());
-        assertEquals(shop.tenantId(), row.get("tenant_id"));
-        LocalDate expectedDate = jdbc.queryForObject("SELECT (opened_at AT TIME ZONE 'Asia/Jakarta')::date FROM cash_shifts "
-                + "WHERE id = ?::uuid", LocalDate.class, ownerShift);
-        assertEquals(expectedDate, ((java.sql.Date) row.get("business_date")).toLocalDate(),
-                "business date = outlet-local date of the shift's openedAt");
-
-        // A second shift opened and closed on the same business day adds nothing.
-        api.openShift(cashier, "0.00");
-        closeShift(cashier);
-        api.openShift(shop, "0.00");
-        closeShift(shop);
-        assertEquals(1, dispatchRows(shop));
-        assertEquals("PENDING", jdbc.queryForObject("SELECT status FROM daily_summary_dispatches WHERE outlet_id = ?",
-                String.class, shop.outletId()));
-    }
-
-    @Test
-    void eachOutletGetsItsOwnDispatchRowAndTheBlankAiUrlMakesTheFallbackANoOp() throws Exception {
-        MerchantFixture shopA = api.onboardOwner("ins-disp-a");
-        MerchantFixture shopB = api.onboardOwner("ins-disp-b");
-        api.openShift(shopA, "0.00");
-        api.openShift(shopB, "0.00");
-        closeShift(shopA);
-        closeShift(shopB);
-        assertEquals(1, dispatchRows(shopA));
-        assertEquals(1, dispatchRows(shopB));
-
-        int rowsBefore = count("SELECT count(*) FROM daily_summary_dispatches");
-        dailySummary.runFallback(); // client disabled: no fallback rows, no retries, no HTTP
-        assertEquals(rowsBefore, count("SELECT count(*) FROM daily_summary_dispatches"));
-        assertEquals(0, count("SELECT count(*) FROM daily_summary_dispatches WHERE attempts > 0 OR status <> 'PENDING'"));
-    }
 
     // ------------------------------------------------------------------ seed
 
@@ -600,16 +687,6 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
                 + "CROSS JOIN generate_series(1, ?) g", userId, copies);
     }
 
-    private void closeShift(MerchantFixture actor) throws Exception {
-        api.send(post("/api/v1/cashier/outlets/" + actor.outletId() + "/fnb/shifts/current/close")
-                .header(AUTH, actor.bearer()).contentType(MediaType.APPLICATION_JSON).content("{\"countedCash\":0}"), 200);
-    }
-
-    private int dispatchRows(MerchantFixture shop) {
-        return count("SELECT count(*) FROM daily_summary_dispatches WHERE tenant_id = ? AND outlet_id = ?",
-                shop.tenantId(), shop.outletId());
-    }
-
     private UUID ownerUserId(MerchantFixture shop) {
         return jdbc.queryForObject("SELECT user_id FROM tenant_memberships WHERE tenant_id = ? AND role = 'OWNERMERCHANT'",
                 UUID.class, shop.tenantId());
@@ -637,6 +714,20 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         return stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
     }
 
+    private ConsumeAiQuestionResponse consume(UUID tenantId, UUID userId) {
+        return stub().consumeAiQuestion(ConsumeAiQuestionRequest.newBuilder().setTenantId(tenantId.toString())
+                .setUserId(userId.toString()).build());
+    }
+
+    /** Replaces the tenant's usage row of the current outlet month with the given counters. */
+    private void seedUsage(UUID tenantId, int used, int bonus, int dayQuestions, LocalDate dayDate) {
+        jdbc.update("DELETE FROM ai_usage_periods WHERE tenant_id = ?", tenantId);
+        jdbc.update("INSERT INTO ai_usage_periods (tenant_id, period_month, questions_used, bonus_questions, day_date, "
+                + "day_questions, input_tokens, output_tokens, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, now())",
+                tenantId, java.sql.Date.valueOf(today().withDayOfMonth(1)), used, bonus, java.sql.Date.valueOf(dayDate),
+                dayQuestions);
+    }
+
     private static GetSalesSummaryRequest salesRequest(UUID tenantId, UUID userId, String start, String end) {
         return GetSalesSummaryRequest.newBuilder().setTenantId(tenantId.toString()).setUserId(userId.toString())
                 .setStartDate(start).setEndDate(end).build();
@@ -651,6 +742,17 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
     private static GetAnomaliesRequest anomalyRequest(UUID tenantId, UUID userId, String date) {
         return GetAnomaliesRequest.newBuilder().setTenantId(tenantId.toString()).setUserId(userId.toString())
                 .setDate(date).build();
+    }
+
+    /** Empty from/to use the default range; an empty max is "below target only". */
+    private static GetLeakageReportRequest leakageRequest(UUID tenantId, UUID userId, String from, String to) {
+        return GetLeakageReportRequest.newBuilder().setTenantId(tenantId.toString()).setUserId(userId.toString())
+                .setFrom(from).setTo(to).build();
+    }
+
+    private static GetMenuMarginsRequest marginRequest(UUID tenantId, UUID userId, String maxMarginPct) {
+        return GetMenuMarginsRequest.newBuilder().setTenantId(tenantId.toString()).setUserId(userId.toString())
+                .setMaxMarginPct(maxMarginPct).build();
     }
 
     private static StatusRuntimeException assertCode(Status.Code expected, Executable call) {

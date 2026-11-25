@@ -13,6 +13,7 @@ import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.enums.OnboardingIntent;
 import org.lite.project.cashiersaas.exception.ErrorMessage;
@@ -39,6 +40,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.zone.ZoneRulesException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -105,7 +107,8 @@ public class FreeTierOnboardingService {
         TenantMembershipEntity ownerMembership = membershipRepository.findActive(principal.getUserId(), tenantId)
                 .filter(membership -> membership.getRole() == Role.OWNERMERCHANT)
                 .orElseThrow(ResourceNotFoundException::new);
-        SubscriptionEntity subscription = subscriptionRepository.findActiveForTenant(tenantId)
+        SubscriptionEntity subscription = subscriptionRepository.findActiveAt(tenantId, Instant.now()).stream()
+                .filter(row -> row.getPlan() == PlanCode.FREETIER).findFirst()
                 .orElseThrow(() -> new OperationConflictException(ErrorMessage.SUBSCRIPTION_INACTIVE.getMessage()));
         String timeZone = validatedTimeZone(request.getTimeZone());
         String businessName = request.getBusinessName().trim();
@@ -129,7 +132,7 @@ public class FreeTierOnboardingService {
             // Idempotent re-complete: re-publish so an earlier failed Ai-services sync is healed.
             memberSyncPublisher.memberChanged(tenant, ownerMembership.getUser(), Role.OWNERMERCHANT, StatusConstants.ACTIVE);
             AuthSessionService.IssuedTokens tokens = authSessionService.selectMerchant(principal,
-                    ownerMembership, existingOutlet, subscription);
+                    ownerMembership, existingOutlet, List.of(subscription));
             return FreeTierMapper.toOwnerResponse(tokens.getAccessToken(), tokens.getExpiresAt(),
                     ownerMembership, existingOutlet);
         }
@@ -150,7 +153,7 @@ public class FreeTierOnboardingService {
         }
         memberSyncPublisher.memberChanged(tenant, owner, Role.OWNERMERCHANT, StatusConstants.ACTIVE);
         AuthSessionService.IssuedTokens tokens = authSessionService.selectMerchant(principal, ownerMembership, outlet,
-                subscription);
+                List.of(subscription));
         return FreeTierMapper.toOwnerResponse(tokens.getAccessToken(), tokens.getExpiresAt(), ownerMembership, outlet);
     }
 

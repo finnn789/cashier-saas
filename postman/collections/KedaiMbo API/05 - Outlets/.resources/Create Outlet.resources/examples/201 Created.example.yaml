@@ -1,0 +1,36 @@
+$kind: http-example
+name: 201 Created
+request:
+  method: POST
+  url: "{{baseUrl}}/api/v1/merchant/outlets"
+  headers:
+    - key: Accept
+      value: "application/json"
+    - key: Content-Type
+      value: "application/json"
+  body:
+    type: json
+    content: |-
+      {
+        "name": "Kedai Contoh Cabang 2",
+        "timeZone": "Asia/Makassar",
+        "address": "Jl. Cabang 2 No. 5",
+        "phoneNumber": "+6221123457"
+      }
+response:
+  statusCode: 201
+  statusText: Created
+  headers:
+    - key: Content-Type
+      value: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "success": true,
+        "code": 201,
+        "message": "Outlet dibuat.",
+        "data": { "id": "22222222-2222-4222-8222-222222222222", "name": "Kedai Contoh Cabang 2", "timeZone": "Asia/Makassar", "address": "Jl. Cabang 2 No. 5", "phoneNumber": "+6221123457", "active": true, "usable": true },
+        "timestamp": "2026-11-14T10:00:00"
+      }
+order: 1000

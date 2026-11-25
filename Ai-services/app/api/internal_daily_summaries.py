@@ -92,7 +92,7 @@ async def _summary_for(
         await client.get_anomalies(tenant_id=tenant_id, user_id=user_id, date=iso), outlet_id
     )
     text = build_summary(summary, day, restock, anomalies)
-    insight = await request_insight(text)
+    insight = await request_insight(text, client, tenant_id)
     return f"{text}\n\nCatatan: {insight}" if insight else text
 
 

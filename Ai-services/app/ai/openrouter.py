@@ -28,6 +28,8 @@ class Completion:
     response_id: str | None
     tool_calls: list[dict[str, Any]] | None = None
     raw_message: dict[str, Any] | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class OpenRouterClient:
@@ -94,6 +96,11 @@ class OpenRouterClient:
                 if response_id is not None and (not isinstance(response_id, str) or len(response_id) > 256):
                     raise AIError("AI_INVALID_RESPONSE")
 
+                usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+                prompt_tokens, completion_tokens = usage.get("prompt_tokens"), usage.get("completion_tokens")
+                input_tokens = max(0, prompt_tokens) if isinstance(prompt_tokens, int) else 0
+                output_tokens = max(0, completion_tokens) if isinstance(completion_tokens, int) else 0
+
                 if tool_calls:
                     return Completion(
                         content=answer or "",
@@ -101,6 +108,8 @@ class OpenRouterClient:
                         response_id=response_id,
                         tool_calls=tool_calls,
                         raw_message=message,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                     )
 
                 if not isinstance(answer, str) or not answer.strip():
@@ -108,7 +117,9 @@ class OpenRouterClient:
                 answer = answer.strip()
                 if len(answer) > 12000:
                     answer = answer[:12000] + "\n[Jawaban dipotong.]"
-                return Completion(answer, model, response_id)
+                return Completion(
+                    answer, model, response_id, input_tokens=input_tokens, output_tokens=output_tokens
+                )
         except (asyncio.TimeoutError, aiohttp.ClientError):
             # Transport failure may occur after the provider accepted the request.
             raise AIError("AI_TRANSPORT_UNKNOWN") from None

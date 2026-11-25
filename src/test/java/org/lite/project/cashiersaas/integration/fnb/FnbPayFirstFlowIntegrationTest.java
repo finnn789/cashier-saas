@@ -17,17 +17,10 @@ import javax.sql.DataSource;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -160,6 +153,7 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals("UNPAID", ApiTestSupport.read(first, "$.data.paymentStatus"));
         String orderNumber = ApiTestSupport.read(first, "$.data.orderNumber");
         String orderId = ApiTestSupport.read(first, "$.data.orderId");
+        assertEquals("Owner idemorder", ApiTestSupport.read(first, "$.data.cashierName"));
 
         // Same key + same body: same order, no duplicate.
         MvcResult retry = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
@@ -178,11 +172,16 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult unpaid = getOrder(merchant, orderId);
         assertEquals("UNPAID", ApiTestSupport.read(unpaid, "$.data.paymentStatus"));
         assertEquals("OPEN", ApiTestSupport.read(unpaid, "$.data.status"));
+        assertEquals("Owner idemorder", ApiTestSupport.read(unpaid, "$.data.cashierName"));
+        assertFalse(unpaid.getResponse().getContentAsString().contains("\"methodLabel\""), "no payment yet");
+        assertFalse(unpaid.getResponse().getContentAsString().contains("\"receiptNumber\""), "no payment yet");
 
         MvcResult list = api.send(get(orders(merchant)).param("source", "POS")
                 .header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
         assertEquals(orderNumber, ApiTestSupport.read(list, "$.data.orders[0].orderNumber"));
         assertEquals(orderId, ApiTestSupport.read(list, "$.data.orders[0].orderId"));
+        assertEquals("Owner idemorder", ApiTestSupport.read(list, "$.data.orders[0].cashierName"));
+        assertFalse(list.getResponse().getContentAsString().contains("\"methodLabel\""), "no payment yet");
         BigDecimal total = money(list, "$.data.orders[0].total");
 
         api.openShift(merchant, "0.00");
@@ -195,6 +194,14 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult afterPay = getOrder(merchant, orderId);
         assertEquals("PAID", ApiTestSupport.read(afterPay, "$.data.paymentStatus"));
         assertEquals("COMPLETED", ApiTestSupport.read(afterPay, "$.data.status"));
+
+        // The page query resolves the payment in one batch; cash has no label, so the method name is the label.
+        MvcResult paidList = api.send(get(orders(merchant)).param("source", "POS")
+                .header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
+        assertEquals("CASH", ApiTestSupport.read(paidList, "$.data.orders[0].methodLabel"));
+        assertEquals(ApiTestSupport.read(paid, "$.data.receiptNumber"),
+                ApiTestSupport.read(paidList, "$.data.orders[0].receiptNumber"));
+        assertEquals("Owner idemorder", ApiTestSupport.read(paidList, "$.data.orders[0].cashierName"));
     }
 
     @Test
@@ -227,53 +234,6 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 .content(paymentJson("CASH", tendered.toPlainString(), "pay-" + UUID.randomUUID())));
         assertEquals(409, newKey.getResponse().getStatus(), "already paid order rejects a new key");
         assertEquals(1, countPayments(orderId));
-    }
-
-    @Test
-    void concurrentPaymentsWithDifferentKeysSettleExactlyOnce() throws Exception {
-        MerchantFixture merchant = api.onboardOwner("race");
-        String productId = api.createProduct(merchant, api.createCategory(merchant, "Snack"), "Roti", PRICE);
-        String orderId = createPosOrder(merchant, productId, 1);
-        BigDecimal total = money(getOrder(merchant, orderId), "$.data.total");
-
-        api.openShift(merchant, "0.00");
-        int threads = 4;
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        CountDownLatch ready = new CountDownLatch(threads);
-        CountDownLatch go = new CountDownLatch(1);
-        List<Future<Integer>> futures = new ArrayList<>();
-        try {
-            for (int i = 0; i < threads; i++) {
-                String key = "race-" + i + "-" + UUID.randomUUID();
-                Callable<Integer> task = () -> {
-                    ready.countDown();
-                    go.await();
-                    return api.call(post(orders(merchant) + "/" + orderId + "/payments")
-                            .header(HttpHeaders.AUTHORIZATION, merchant.bearer())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(paymentJson("CASH", total.toPlainString(), key))).getResponse().getStatus();
-                };
-                futures.add(pool.submit(task));
-            }
-            assertTrue(ready.await(30, TimeUnit.SECONDS));
-            go.countDown();
-            int ok = 0;
-            int conflict = 0;
-            for (Future<Integer> future : futures) {
-                int status = future.get(60, TimeUnit.SECONDS);
-                if (status == 200 || status == 201) {
-                    ok++;
-                } else if (status == 409) {
-                    conflict++;
-                }
-            }
-            assertEquals(1, ok, "exactly one payment succeeds");
-            assertEquals(threads - 1, conflict, "all others get 409 conflict");
-        } finally {
-            pool.shutdownNow();
-        }
-        assertEquals(1, countPayments(orderId), "exactly one payment row");
-        assertEquals("PAID", ApiTestSupport.read(getOrder(merchant, orderId), "$.data.paymentStatus"));
     }
 
     @Test

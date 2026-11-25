@@ -1,0 +1,34 @@
+$kind: http-example
+name: 402 Payment Required - paket Freetier
+request:
+  method: POST
+  url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/orders/{{orderId}}/refund"
+  headers:
+    - key: Accept
+      value: "application/json"
+    - key: Idempotency-Key
+      value: "{{refundKey}}"
+    - key: Content-Type
+      value: "application/json"
+  body:
+    type: json
+    content: |-
+      {
+        "reason": "Pelanggan komplain"
+      }
+response:
+  statusCode: 402
+  statusText: Payment Required
+  headers:
+    - key: Content-Type
+      value: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "success": false,
+        "code": 402,
+        "message": "Fitur ini tersedia di paket Pro.",
+        "timestamp": "2026-11-14T10:00:00"
+      }
+order: 1000

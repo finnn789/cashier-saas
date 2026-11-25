@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      pm.expect(pm.response.json().success).to.be.true;
+    language: text/javascript
+description: |-
+  Hanya OWNER. Semua outlet milik tenant (aktif dan nonaktif). Tiap outlet memuat id, name, timeZone, address, phoneNumber, active, usable. usable=false berarti outlet aktif tetapi melebihi jatah paket (lihat allowedOutlets): operasional ditolak 402 sampai outlet dinonaktifkan atau add-on outlet diperpanjang. Ringkasan: allowedOutlets (1 + add-on outlet aktif), activeOutlets, extraOutletPrice (Rp49.000/outlet/bulan).
+order: 2000
+examples: ./.resources/List Merchant Outlets.resources/examples/

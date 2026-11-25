@@ -25,6 +25,7 @@ class MerchantBusinessSettingsMapperTest {
         TenantEntity tenant = new TenantEntity();
         tenant.updateBusinessSettings("Kopi Nusantara", "https://example.test/logo.png", "USD", "Business road",
                 "08111", new BigDecimal("11.00"), new BigDecimal("5.00"), "Asia/Jakarta");
+        tenant.changeTargetMargin(new BigDecimal("55.50"));
         OutletEntity outlet = OutletEntity.open(tenant, "Menteng", "Asia/Makassar", "Outlet road", "08222");
         UUID outletId = UUID.randomUUID();
         ReflectionTestUtils.setField(outlet, "id", outletId);
@@ -44,6 +45,7 @@ class MerchantBusinessSettingsMapperTest {
         assertEquals("08222", response.getOutletPhoneNumber());
         assertEquals("Asia/Makassar", response.getTimeZone());
         assertNull(response.getReceiptFooter());
+        assertEquals(new BigDecimal("55.50"), response.getTargetMarginPct());
     }
 
     @Test

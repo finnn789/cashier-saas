@@ -27,4 +27,5 @@ public class MerchantBusinessSettingsRequest {
     @Size(max = 32) private String outletPhoneNumber;
     @NotBlank @Size(max = 64) private String timeZone;
     @Size(max = 200) private String receiptFooter;
+    @DecimalMin("0.00") @DecimalMax("99.99") @Digits(integer = 2, fraction = 2) private BigDecimal targetMarginPct;
 }

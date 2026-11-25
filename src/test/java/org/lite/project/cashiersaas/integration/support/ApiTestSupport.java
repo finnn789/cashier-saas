@@ -1,6 +1,7 @@
 package org.lite.project.cashiersaas.integration.support;
 
 import com.jayway.jsonpath.JsonPath;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -9,6 +10,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import javax.sql.DataSource;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -46,8 +49,32 @@ public final class ApiTestSupport {
         return jdbc;
     }
 
-    /** Register, OWNER intent, free tier FNB, business profile: all through the public API. */
+    /**
+     * Register, OWNER intent, free tier FNB, business profile: all through the public API. The tenant also gets an
+     * open-ended PREMIUM row next to the FREETIER base, so scenarios that need cashiers, staff, refunds or the AI
+     * assistant work unchanged. Plan scenarios use {@link #onboardOwner(String, PlanCode)}.
+     */
     public MerchantFixture onboardOwner(String label) throws Exception {
+        return onboardOwner(label, PlanCode.PREMIUM);
+    }
+
+    /** As {@link #onboardOwner(String)}; {@code FREETIER} leaves the tenant on the FREETIER base row only. */
+    public MerchantFixture onboardOwner(String label, PlanCode plan) throws Exception {
+        MerchantFixture owner = onboardFreeOwner(label);
+        if (plan != PlanCode.FREETIER) {
+            grantPlan(owner.tenantId(), plan, null);
+        }
+        return owner;
+    }
+
+    /** Adds an ACTIVE paid subscription row beside the FREETIER base; {@code endsAt} null means open-ended. */
+    public void grantPlan(UUID tenantId, PlanCode plan, Instant endsAt) {
+        jdbc.update("INSERT INTO subscriptions (id, tenant_id, plan_code, status, starts_at, ends_at, created_at, "
+                + "updated_at, version) VALUES (gen_random_uuid(), ?, ?, 'ACTIVE', now() - interval '1 minute', ?, now(), "
+                + "now(), 0)", tenantId, plan.name(), endsAt == null ? null : Timestamp.from(endsAt));
+    }
+
+    private MerchantFixture onboardFreeOwner(String label) throws Exception {
         String email = label + "-" + UUID.randomUUID() + "@example.com";
         String accountToken = read(send(post("/api/v1/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

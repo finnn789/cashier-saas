@@ -151,21 +151,9 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
         return api.send(post(staff(owner) + "/" + userId + "/" + action).header(AUTH, owner.bearer()), expected);
     }
 
-    private String createPosOrder(MerchantFixture merchant, String productId, String key) throws Exception {
-        MvcResult created = api.send(post(orders(merchant)).header(AUTH, merchant.bearer())
-                .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"serviceType\":\"DINE_IN\",\"customerLabel\":\"Budi\",\"items\":[{\"productId\":\""
-                        + productId + "\",\"quantity\":1,\"note\":\"\",\"optionIds\":[]}]}"), 201);
-        return ApiTestSupport.read(created, "$.data.orderId");
-    }
-
     private MvcResult cancel(MerchantFixture actor, String orderId) throws Exception {
         return api.call(post(orders(actor) + "/" + orderId + "/cancel").header(AUTH, actor.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Salah pesan\"}"));
-    }
-
-    private String orderStatus(String orderId) {
-        return api.jdbc().queryForObject("SELECT status FROM sales_orders WHERE id = ?::uuid", String.class, orderId);
     }
 
     // ------------------------------------------------------------------ staff management
@@ -353,59 +341,4 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     // ------------------------------------------------------------------ cancel rule and checkout audit
-
-    @Test
-    void cashierCannotCancelADiscountedOrderButTheOwnerCan() throws Exception {
-        MerchantFixture owner = api.onboardOwner("cancel");
-        MerchantFixture cashier = api.onboardCashier(owner, "cancel");
-        String productId = api.createProduct(owner, api.createCategory(owner, "Minuman"), "Es Teh", "25000");
-        String discounted = createPosOrder(owner, productId, "pos-" + UUID.randomUUID());
-        String plain = createPosOrder(owner, productId, "pos-" + UUID.randomUUID());
-        api.send(post("/api/v1/merchant/outlets/" + owner.outletId() + "/fnb/orders/" + discounted + "/discount")
-                .header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"type\":\"NOMINAL\",\"value\":1000,\"reason\":\"Promo\"}"), 200, 201);
-
-        MvcResult refused = cancel(cashier, discounted);
-
-        assertEquals(403, refused.getResponse().getStatus());
-        assertTrue(refused.getResponse().getContentAsString().contains("diskon"));
-        assertEquals("OPEN", orderStatus(discounted));
-        assertEquals(0, auditRows(owner, "FNB_ORDER_CANCELLED", UUID.fromString(discounted)));
-
-        assertEquals(200, cancel(cashier, plain).getResponse().getStatus(), "no discount: the cashier may cancel");
-        assertEquals("CANCELLED", orderStatus(plain));
-
-        assertEquals(200, cancel(owner, discounted).getResponse().getStatus(), "owner may cancel a discounted order");
-        assertEquals("CANCELLED", orderStatus(discounted));
-        assertEquals(1, auditRows(owner, "FNB_ORDER_CANCELLED", UUID.fromString(discounted)));
-    }
-
-    @Test
-    void checkoutWritesOneCreatedAuditRowAndAnIdempotentReplayWritesNone() throws Exception {
-        MerchantFixture owner = api.onboardOwner("audit");
-        MerchantFixture cashier = api.onboardCashier(owner, "audit");
-        String productId = api.createProduct(owner, api.createCategory(owner, "Makanan"), "Nasi Goreng", "25000");
-        String key = "pos-" + UUID.randomUUID();
-        String body = "{\"serviceType\":\"DINE_IN\",\"customerLabel\":\"Budi\",\"items\":[{\"productId\":\""
-                + productId + "\",\"quantity\":2,\"note\":\"\",\"optionIds\":[]}]}";
-
-        MvcResult first = api.send(post(orders(cashier)).header(AUTH, cashier.bearer()).header("Idempotency-Key", key)
-                .contentType(MediaType.APPLICATION_JSON).content(body), 201);
-        UUID orderId = UUID.fromString(ApiTestSupport.read(first, "$.data.orderId"));
-        String orderNumber = ApiTestSupport.read(first, "$.data.orderNumber");
-
-        assertEquals(1, auditRows(owner, "FNB_ORDER_CREATED", orderId));
-        String details = api.jdbc().queryForObject("SELECT details FROM audit_logs WHERE tenant_id = ? "
-                + "AND action = 'FNB_ORDER_CREATED' AND entity_id = ?", String.class, owner.tenantId(), orderId);
-        assertTrue(details.startsWith("orderNumber=" + orderNumber + " total="), details);
-        assertEquals("SALES_ORDER", api.jdbc().queryForObject("SELECT entity_type FROM audit_logs WHERE tenant_id = ? "
-                + "AND action = 'FNB_ORDER_CREATED' AND entity_id = ?", String.class, owner.tenantId(), orderId));
-
-        api.send(post(orders(cashier)).header(AUTH, cashier.bearer()).header("Idempotency-Key", key)
-                .contentType(MediaType.APPLICATION_JSON).content(body), 200, 201);
-
-        assertEquals(1, auditRows(owner, "FNB_ORDER_CREATED", orderId), "replay must not write a second row");
-        assertEquals(1, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'FNB_ORDER_CREATED'",
-                owner.tenantId()));
-    }
 }

@@ -4,7 +4,7 @@
 
 Tanggal: 13 Oktober 2026, Asia/Jakarta. Rancangan implementasi aiogram long polling.
 Kode kini tersedia; status dan bukti review ada di
-[catatan review](progress/telegram-orchestrator-review.md). Database belum dimigrasikan
+catatan review (`progress/`, dihapus; lihat Git history). Database belum dimigrasikan
 dan runtime belum diverifikasi. Bagian kondisi source merekam baseline sebelum perubahan.
 
 ## 1. Kondisi source yang diperiksa

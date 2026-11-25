@@ -3,7 +3,7 @@
 import asyncio
 import unittest
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.ai.openrouter import AIError, Completion
 from app.ai.prompts import SYSTEM, system_prompt
@@ -178,6 +178,7 @@ class RequestInsightTests(unittest.IsolatedAsyncioTestCase):
         FakeClient.outcome = Completion(content="Penjualan stabil.", model="m", response_id=None)
         FakeClient.delay = 0.0
         FakeClient.calls = []
+        self.grpc = AsyncMock()
         for target in (
             patch.object(daily_summary, "OpenRouterClient", FakeClient),
             patch.object(daily_summary, "load_ai_settings", lambda: object()),
@@ -189,39 +190,48 @@ class RequestInsightTests(unittest.IsolatedAsyncioTestCase):
         FakeClient.outcome = Completion(content=content, model="m", response_id=None)
 
     async def test_returns_the_sentence_and_sends_summary_without_tools(self) -> None:
-        insight = await request_insight("RINGKASAN Rp150.000")
+        FakeClient.outcome = Completion(
+            content="Penjualan stabil.", model="m", response_id=None, input_tokens=120, output_tokens=30
+        )
+        insight = await request_insight("RINGKASAN Rp150.000", self.grpc, "t1")
 
         self.assertEqual(insight, "Penjualan stabil.")
         messages, tools = FakeClient.calls[0]
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertEqual(messages[1]["content"], "RINGKASAN Rp150.000")
         self.assertIsNone(tools)
+        # Tokens are recorded for the tenant; the insight never consumes a question.
+        self.grpc.record_ai_usage.assert_awaited_once_with(
+            tenant_id="t1", input_tokens=120, output_tokens=30
+        )
+        self.grpc.consume_ai_question.assert_not_called()
 
     async def test_only_first_non_empty_line_is_used_and_stripped(self) -> None:
         self.complete("\n  Omzet naik tipis.  \nBaris kedua diabaikan.")
-        self.assertEqual(await request_insight("x"), "Omzet naik tipis.")
+        self.assertEqual(await request_insight("x", self.grpc, "t1"), "Omzet naik tipis.")
 
     async def test_empty_or_overlong_answer_gives_none(self) -> None:
         self.complete("  \n ")
-        self.assertIsNone(await request_insight("x"))
+        self.assertIsNone(await request_insight("x", self.grpc, "t1"))
         self.complete("a" * (daily_summary.MAX_INSIGHT_CHARS + 1))
-        self.assertIsNone(await request_insight("x"))
+        self.assertIsNone(await request_insight("x", self.grpc, "t1"))
         self.complete("a" * daily_summary.MAX_INSIGHT_CHARS)
-        self.assertIsNotNone(await request_insight("x"))
+        self.assertIsNotNone(await request_insight("x", self.grpc, "t1"))
 
     async def test_llm_failure_gives_none_and_logs_only_the_error_type(self) -> None:
         for error in (AIError("AI_HTTP_402"), RuntimeError("secret-detail"), aiohttp_error()):
             with self.subTest(error=type(error).__name__):
                 FakeClient.outcome = error
                 with self.assertLogs("app.chat.daily_summary", level="INFO") as logs:
-                    self.assertIsNone(await request_insight("x"))
+                    self.assertIsNone(await request_insight("x", self.grpc, "t1"))
                 self.assertEqual(logs.records[-1].error_type, type(error).__name__)
+                self.grpc.record_ai_usage.assert_not_awaited()
                 self.assertFalse(any("secret-detail" in line for line in logs.output))
 
     async def test_timeout_gives_none(self) -> None:
         FakeClient.delay = 5
         with patch.object(daily_summary, "INSIGHT_TIMEOUT_SECONDS", 0.01):
-            self.assertIsNone(await asyncio.wait_for(request_insight("x"), 2))
+            self.assertIsNone(await asyncio.wait_for(request_insight("x", self.grpc, "t1"), 2))
 
 
 def aiohttp_error() -> Exception:

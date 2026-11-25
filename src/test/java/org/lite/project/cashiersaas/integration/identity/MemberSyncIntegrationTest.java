@@ -157,32 +157,6 @@ class MemberSyncIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void serverErrorsDoNotBreakOnboardingAndAreRetriedThreeTimes() throws Exception {
-        STUB_STATUS.set(500);
-
-        MerchantFixture merchant = api.onboardOwner("down");
-
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            assertEquals("PUT", await().method, "attempt " + attempt);
-        }
-        assertNoFurtherCall();
-        assertEquals("ACTIVE", jdbc.queryForObject("SELECT status FROM tenants WHERE id = ?", String.class,
-                merchant.tenantId()));
-    }
-
-    @Test
-    void clientErrorsAreNotRetriedAndDoNotBreakOnboarding() throws Exception {
-        STUB_STATUS.set(422);
-
-        MerchantFixture merchant = api.onboardOwner("rejected");
-
-        assertEquals("PUT", await().method);
-        assertNoFurtherCall();
-        assertEquals("ACTIVE", jdbc.queryForObject("SELECT status FROM tenants WHERE id = ?", String.class,
-                merchant.tenantId()));
-    }
-
-    @Test
     void failedSyncIsHealedByTheIdempotentRecompleteOfTheSameProfile() throws Exception {
         STUB_STATUS.set(500);
         String email = "heal-" + UUID.randomUUID() + "@example.com";

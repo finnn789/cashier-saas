@@ -86,7 +86,7 @@ class FnbPaymentLabelServiceTest {
         FnbPaymentLabelResponse response = service.create(principal, outletId, request("GoPay", null, false));
 
         InOrder inOrder = inOrder(orders, labels);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(labels).persist(any(PaymentLabelEntity.class));
         assertEquals("GoPay", response.getName());
         assertTrue(response.isActive(), "a new label is always active");
@@ -138,7 +138,7 @@ class FnbPaymentLabelServiceTest {
         assertEquals("TRANSFER", response.getName());
         assertEquals(2, response.getDisplayOrder());
         assertTrue(response.isActive());
-        verify(orders).lockTenant(tenantId);
+        verify(orders).lockOutlet(tenantId, outletId);
         verify(labels, never()).persist(any(PaymentLabelEntity.class));
         ArgumentCaptor<AuditLogEntity> log = ArgumentCaptor.forClass(AuditLogEntity.class);
         verify(audit).persist(log.capture());

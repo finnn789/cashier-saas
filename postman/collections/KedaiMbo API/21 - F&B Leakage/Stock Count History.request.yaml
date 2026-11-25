@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{outletId}}/fnb/inventory/stock-counts?page=0&size=20"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data).to.be.an("array");
+      if (r.data.length > 0) {
+        pm.expect(r.data[0]).to.have.property("stockCountId");
+        pm.expect(r.data[0]).to.have.property("flaggedCount");
+        pm.expect(r.data[0]).to.have.property("totalLoss");
+      }
+    language: text/javascript
+description: |-
+  Hanya OWNER. Riwayat stok opname outlet, terbaru di atas. Filter: page (default 0), size (1..50, default 20). Setiap item: stockCountId, countedAt, note, lineCount, flaggedCount, totalLoss. Stok opname yang dicatat sebelum V13 tidak punya header dan tidak tampil di sini. Gunakan stockCountId untuk Leakage Report Per Outlet.
+order: 1000

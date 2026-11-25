@@ -1,155 +1,555 @@
-# Product Requirements Document — Kasir Cafe + Asisten AI Owner
+# PRD & Architecture — Kasir SaaS Multi-Outlet dengan AI
 
-**Versi:** 2.1
-**Status:** Aktif
-**Tanggal:** 13 November 2026
-**Menggantikan:** PRD v0.1 (13 September 2026) beserta catatan keputusan 16 September – 6 Oktober 2026 (ringkasannya ada di §17).
-**Fokus:** aplikasi kasir (POS) berbasis web untuk cafe/coffee shop kecil dengan satu outlet, ditambah asisten AI yang membantu owner mengambil keputusan.
+Nov 20, 2026 · @Arifin
+
+**Versi:** 3.0 · **Status:** Aktif · **Menggantikan:** PRD v2.2 (14 Nov 2026, tersimpan di riwayat Git).
+
+## 0. Rekonsiliasi dengan Kode yang Sudah Ada (mengikat)
+
+Produk dibangun dengan **refactor** repo `cashier-saas` yang ada, bukan dari nol (keputusan 20 Nov 2026). Bila bagian lain dokumen ini bertentangan dengan tabel di bawah, tabel ini yang berlaku.
+
+| Topik di dokumen ini | Yang berlaku |
+| --- | --- |
+| Java 21, Spring Boot 3, Gradle, Spring Modulith (§7–8, §14) | Java 17, Spring Boot 4.1.1, Maven wrapper, layout package `controller/service/repository/dto/entity` sesuai `AGENTS.md`. Batas modul nanti dijaga ArchUnit, tanpa memindah package. |
+| Repo monorepo `kasir-ai/` (§8) | Tetap: backend di root, `Ai-services/` (Python), UI di repo terpisah `cashier-saas-ui`. |
+| Argon2id, RS256, UUIDv7 (§9, §13) | BCrypt, JWT HS256 (`CASHIER_JWT_SECRET_B64`), UUID yang ada. |
+| Uang `BIGINT` Rupiah (§4, §9) | `BigDecimal`/`numeric` (sudah konsisten di kode; tidak pernah floating point). |
+| Postgres RLS (§9) | Isolasi di layer aplikasi + integration test (sudah ada). RLS = penguatan berikutnya, bukan syarat slice awal. |
+| RabbitMQ, Redis, MinIO, outbox (§7, §10, §14) | Belum dipakai. Java ↔ Python lewat gRPC (baca) dan REST internal (ringkasan harian, sinkron member). Object storage baru ditambahkan saat slice OCR. |
+| Python membaca Postgres lewat role read-only (§7, §10) | Python **tidak** membaca database Java; semua data lewat gRPC yang di-scope tenant/outlet oleh Java. |
+| Role Owner/Manager/Kasir (§9, §13) | Saat ini `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER`. Penambahan `MANAGER` **menunggu keputusan user**. |
+| Mode offline PWA (§3 Should) | Ditunda sampai setelah pilot. |
+| Transfer stok antar outlet (FR-IN-04) | Slice ke-4/5, setelah kebocoran, margin, OCR. |
+| AI Command Agent tulis (FR-AI-03) | Diadopsi bertahap dengan approval wajib; aturan lama "AI read-only" dicabut hanya untuk alur proposal + approval. |
+| Chat AI | Telegram (sudah ada) tetap; command bar web ditambahkan. |
+| Provider LLM (§17) | OpenRouter, model default DeepSeek V4.1 Flash (`AI_MODEL`); OCR memakai model vision lewat OpenRouter. |
+| Metode biaya bahan (§17) | Moving average (sudah ada, V9). |
+| Paket langganan | Tetap berlaku, lihat Lampiran A (tidak disebut di dokumen asli). |
+
+**Urutan slice:** (1) stok opname + laporan kebocoran, (2) HPP/margin menu + peringatan, (3) pembelian + OCR nota, (4) AI Command Agent dengan approval + harga per outlet, (5) Manager/PIN, transfer stok, RLS, ArchUnit. Offline setelah pilot.
+
+**Sudah ada di kode (tidak dibangun ulang):** onboarding tenant + outlet, refresh token, multi-outlet + laporan konsolidasi, katalog + option group, bahan + resep + stok ledger (SALE/RESTOCK/WASTE/ADJUSTMENT/SALE_REVERSAL), stok opname batch, harga pokok moving average + snapshot COGS, POS + hold bill + diskon + bayar tunai/non-tunai berlabel + struk, shift + kas kecil, void/refund owner, audit log + viewer, rate limit, paket + kuota AI, bot Telegram + ringkasan harian + tool baca AI.
 
 ## 1. Ringkasan Produk
 
-Kasir web untuk cafe kecil yang **hanya mencatat** transaksi (aplikasi tidak memproses uang dan tidak terhubung ke penyedia pembayaran): kasir mencatat pesanan dan pembayaran dengan cepat, owner mengontrol uang dan stok, dan asisten AI (Telegram, lalu chat web) merangkum data menjadi jawaban dan saran dalam bahasa sehari-hari.
+Produk ini adalah kasir SaaS multi-outlet untuk resto/cafe UMKM yang menjual satu janji: **AI menemukan uang owner yang bocor di tiap outlet**. Pembeda dari Majoo, Moka, dan ESB bukan chatbot laporan, tetapi tiga fitur yang menghitung kerugian nyata dalam Rupiah.
 
-Diferensiator: owner tidak perlu membaca laporan; asisten AI mengirim ringkasan, peringatan, dan saran (stok, target, anomali kasir) berdasarkan data transaksi yang lengkap dan bisa dipercaya.
+**Tiga fitur pembeda (MVP):**
 
-## 2. Masalah yang Diselesaikan
+1. **Detektor kebocoran bahan** — membandingkan pemakaian teoritis (resep × terjual) dengan stok opname aktual per outlet, lalu menjelaskan selisihnya.
+2. **HPP live dari foto nota** — kasir memotret nota belanja pasar, OCR memperbarui harga bahan, sistem menghitung ulang HPP dan memberi peringatan margin.
+3. **AI Command Agent** — owner memberi perintah bahasa natural ("naikkan harga es teh Rp1.000 di semua outlet kecuali Padang"); AI menyusun usulan perubahan, owner menyetujui, sistem mengeksekusi dengan audit log.
 
-- Uang kas bisa bocor tanpa jejak (pembatalan, diskon, selisih laci) karena tidak ada kontrol shift.
-- Owner tidak tahu margin per menu karena harga pokok bahan tidak tercatat.
-- Stok bahan habis tanpa peringatan, atau owner salah menghitung.
-- Laporan POS biasa harus dibuka dan dibaca sendiri; owner kecil jarang sempat.
-- Aplikasi POS lengkap terlalu rumit atau mahal untuk satu outlet.
+Pelengkap: ringkasan penjualan harian otomatis setelah tutup outlet.
 
-## 3. Prinsip Produk
+**Tujuan MVP:**
 
-1. **Kasir harus bisa dipercaya dulu, baru AI.** Kontrol kas dan kelengkapan data didahulukan; AI hanya membaca data yang sudah benar.
-2. **Satu niche:** cafe/coffee shop dengan satu outlet. Bukan retail, bukan multi-vertical.
-3. **AI read-only lebih dulu.** Aksi tulis lewat AI hanya setelah fondasi stabil dan selalu dengan konfirmasi eksplisit serta audit.
-4. **Pencatatan saja, tetap sederhana.** Pembayaran hanya dicatat (tunai atau non-tunai dengan label); tidak ada integrasi pembayaran. Fitur lanjutan (inventori, resep, option group) opsional dan tidak wajib diisi sebelum bisa berjualan.
-5. **Fitur yang tidak mendukung alur §9 masuk backlog.**
+- Satu alur demo end-to-end yang berjalan: transaksi kasir → stok terpotong → opname → laporan kebocoran → perintah AI → perubahan harga tercatat.
+- Menjadi portfolio backend yang menunjukkan modular monolith, multi-tenancy, event-driven, integrasi AI yang aman, dan testing yang serius.
+- Siap dipakai 1–3 outlet uji coba (pilot) dengan data nyata.
 
-## 4. Sasaran
+## 2. Persona & Masalah
 
-- Kasir menyelesaikan transaksi sederhana di bawah 60 detik.
-- Setiap rupiah yang masuk/keluar laci tercatat per shift, dan selisih kas terlihat saat tutup shift.
-- Owner melihat omzet, margin, dan stok menipis tanpa membuka dashboard (ringkasan Telegram).
-- Data antar tenant terisolasi penuh.
+Masalah inti: owner dengan 2–10 outlet tidak bisa hadir di semua cabang. Laporan omzet ada, tetapi tidak menjawab "uang saya hilang di mana".
 
-## 5. Di Luar Cakupan
+| Persona | Konteks | Masalah utama | Yang dibutuhkan dari produk |
+| --- | --- | --- | --- |
+| Owner multi-outlet | 2–10 outlet, sering pantau dari HP | Bahan boros/hilang tidak terlihat; HPP basi saat harga bahan naik; ubah harga di banyak outlet itu repot | Angka kebocoran per outlet, peringatan margin, perintah cepat lewat AI |
+| Manager outlet | Pegang 1 outlet, buka/tutup shift, opname | Opname manual di kertas; belanja pasar tidak tercatat rapi | Form opname cepat, foto nota langsung jadi data |
+| Kasir | Tablet di meja kasir, ramai saat jam makan | Internet putus, menu banyak, salah input | Kasir cepat, bisa offline, tombol besar |
 
-- Pemesanan mandiri pelanggan lewat QR, halaman publik pelanggan, layar dapur (KDS), manajemen meja, real-time WebSocket (dihapus pada pivot 12 November 2026; polling 15 detik dipakai sebagai gantinya).
-- Multi-outlet tingkat lanjut dan laporan konsolidasi (satu tenant = satu outlet untuk rilis ini).
-- Loyalty, membership pelanggan, voucher kompleks.
-- Integrasi marketplace/delivery, akuntansi lengkap, payroll, reservasi.
-- Manajemen supplier dan purchase order (harga beli dicatat langsung saat restock, §8.6).
-- Semua integrasi pembayaran: payment gateway, QRIS sebagai fitur pembayaran (termasuk menampilkan QRIS di aplikasi), EDC. QRIS/transfer/debit hanya dicatat sebagai label pembayaran non-tunai (§8.9). Gateway mock dihapus (M5).
-- Split bill, cicilan, beberapa metode bayar dalam satu transaksi, refund parsial.
-- Operasi offline penuh, integrasi WhatsApp.
-- Aksi tulis oleh AI (ditunda ke setelah M7).
+**Problem statement:** UMKM F&B kehilangan margin karena (a) pemakaian bahan melebihi resep tanpa ketahuan, (b) harga jual tidak mengikuti harga bahan yang fluktuatif, dan (c) owner tidak punya waktu membaca dashboard.
 
-## 6. Pengguna dan Peran
+## 3. Scope MVP & Non-goals
 
-Peran sistem tetap `SUPERADMIN`, `OWNERMERCHANT`, `CASHIER`.
+MVP berfokus pada satu alur uang: jual → stok → HPP → kebocoran → tindakan. Fitur lain menunggu sampai ada pilot.
 
-- **Owner (`OWNERMERCHANT`):** mengatur bisnis, menu, resep, stok, staf; memberi diskon; void/refund; melihat laporan, audit, dan shift; menerima ringkasan AI.
-- **Kasir (`CASHIER`):** membuka/menutup shift, membuat dan menahan pesanan, menerima pembayaran, mencatat restock/waste, membatalkan pesanan terbuka tanpa diskon.
+| Prioritas | Fitur | Alasan |
+| --- | --- | --- |
+| Must | Multi-tenant, multi-outlet, RBAC (Owner, Manager, Kasir) | Fondasi SaaS |
+| Must | Kasir: order, diskon sederhana, bayar tunai/QRIS manual, struk | Sumber data penjualan |
+| Must | Shift buka/tutup + setoran kas | Dasar tutup hari & ringkasan |
+| Must | Menu + resep (BOM) + bahan + satuan | Syarat hitung HPP & pemakaian teoritis |
+| Must | Stock ledger, pembelian, opname, transfer antar outlet | Syarat hitung kebocoran |
+| Must | HPP & margin per menu, peringatan margin | Fitur pembeda #2 |
+| Must | OCR nota belanja → draft pembelian | Fitur pembeda #2 |
+| Must | Laporan kebocoran per outlet + penjelasan AI | Fitur pembeda #1 |
+| Must | AI Command Agent dengan approval + audit log | Fitur pembeda #3 |
+| Should | Ringkasan harian AI (in-app, lalu WhatsApp) | Nilai harian untuk owner |
+| Should | Mode offline kasir (PWA) | Realita internet UMKM |
+| Could | Saran transfer stok antar outlet | Butuh data historis |
+| Could | Prediksi belanja harian | Butuh data ≥ 4 minggu |
 
-## 7. Model Pesanan
+**Non-goals MVP:** integrasi GoFood/GrabFood, payment gateway QRIS dinamis, akuntansi penuh, HRIS/payroll, loyalty, self-order QR, analisis nutrisi, aplikasi native.
 
-- Status pesanan: `OPEN` (ditahan/belum dibayar), `COMPLETED` (lunas), `CANCELLED`.
-- Status pembayaran: `UNPAID`, `PAID`, `REFUNDED`.
-- Tagihan yang ditahan (hold bill) adalah pesanan `OPEN`/`UNPAID` di server; itemnya dapat diganti selama belum ada diskon.
-- Void/refund penuh mengubah `PAID` menjadi `REFUNDED`; status pesanan tetap `COMPLETED` sebagai jejak, dan laporan tidak menghitungnya.
+## 4. Functional Requirements
 
-## 8. Ruang Lingkup Fungsional
+Setiap requirement punya acceptance criteria yang bisa diuji otomatis. ID dipakai di nama test dan commit.
 
-Kolom **Status** mengikuti kode di branch aktif; detail bukti ada di `.ai/MEMORY.md` dan `.ai/TASKS.md`.
+| ID | Modul | Requirement | Acceptance criteria |
+| --- | --- | --- | --- |
+| FR-ID-01 | identity | Owner daftar → tenant + outlet pertama dibuat | Satu transaksi DB; email unik global; owner langsung login |
+| FR-ID-02 | identity | Undang user dengan role per outlet | Kasir outlet A tidak bisa melihat data outlet B (403) |
+| FR-ID-03 | identity | Login JWT + refresh token | Access token 15 menit, refresh 7 hari, refresh bisa dicabut |
+| FR-CT-01 | catalog | CRUD menu, kategori, harga per outlet | Harga bisa beda per outlet; default ikut harga tenant |
+| FR-CT-02 | catalog | Resep (BOM) per menu: bahan + qty + satuan | Konversi satuan (kg↔g, L↔ml) benar; menu tanpa resep diberi tanda |
+| FR-SL-01 | sales | Buat order, tambah item, diskon nominal/persen | Total dihitung di server; uang disimpan sebagai BIGINT Rupiah |
+| FR-SL-02 | sales | Bayar tunai/QRIS (manual), cetak struk | Order PAID memicu event `SaleCompleted` tepat sekali |
+| FR-SL-03 | sales | Void/refund dengan alasan + PIN manager | Tercatat di audit log; stok dikembalikan |
+| FR-SL-04 | sales | Buka/tutup shift, setoran kas | Selisih kas = setoran − (modal + tunai masuk) ditampilkan |
+| FR-IN-01 | inventory | Stok terpotong otomatis dari resep saat terjual | Ledger berisi baris SALE per bahan; idempoten per order |
+| FR-IN-02 | inventory | Pembelian bahan (manual atau dari OCR) | Menambah stok + mencatat harga beli per satuan |
+| FR-IN-03 | inventory | Stok opname per outlet | Menyimpan stok fisik; memicu `StockOpnameSubmitted` |
+| FR-IN-04 | inventory | Transfer stok antar outlet | Dua baris ledger (OUT/IN) dalam satu transaksi |
+| FR-IN-05 | inventory | Catat waste (basi, tumpah) | Waste tercatat tidak dihitung sebagai kebocoran |
+| FR-CS-01 | costing | HPP per menu dari resep × biaya bahan | Dihitung ulang saat harga bahan berubah, < 5 detik |
+| FR-CS-02 | costing | Peringatan margin di bawah target | Target default 60% (bisa diatur); daftar menu terdampak |
+| FR-AI-01 | ai | Upload foto nota → draft pembelian | Manager mengoreksi sebelum disimpan; bahan dicocokkan otomatis |
+| FR-AI-02 | ai | Laporan kebocoran per outlet per periode | Varians per bahan dalam % dan Rupiah + penjelasan teks |
+| FR-AI-03 | ai | Command agent: perintah natural → usulan aksi | Tidak ada perubahan data tanpa klik Setujui; semua tercatat |
+| FR-AI-04 | ai | Ringkasan harian setelah tutup hari | Terkirim ≤ 2 menit setelah `DayClosed` |
+| FR-RP-01 | reporting | Dashboard omzet, transaksi, menu terlaris per outlet | Filter tanggal & outlet; perbandingan antar outlet |
 
-### 8.1 Autentikasi, Tenant, dan Onboarding — sudah ada
-- Registrasi, login, pilih merchant/outlet, JWT Bearer + refresh cookie, onboarding Freetier (tenant, langganan, outlet pertama).
-- Ganti password sendiri. *(M4, TASK-076)*
+## 5. Spesifikasi Fitur AI
 
-### 8.2 Manajemen Staf
-- Undang kasir via kode sekali pakai (24 jam) — sudah ada.
-- Owner melihat daftar kasir outlet, menonaktifkan/mengaktifkan kembali kasir (akses dan sesi langsung berhenti, bot Telegram ikut menolak), dan mereset password kasir menjadi password sementara sekali tampil. Reset ditolak bila akun kasir terhubung ke bisnis lain. *(M4, TASK-076)*
+Prinsip: angka dihitung secara deterministik di backend; LLM hanya menjelaskan, mengekstrak, dan menyusun usulan. LLM tidak pernah menjadi sumber angka uang.
 
-### 8.3 Pengaturan Bisnis — sudah ada, perlu dilengkapi
-- Nama usaha, logo, alamat, telepon, mata uang (terkunci setelah ada pesanan), pajak, biaya layanan, zona waktu outlet.
-- Tambahan: footer struk dan daftar label pembayaran non-tunai yang diatur owner (mis. "QRIS", "Transfer BCA", "Debit"). *(M5)*
+### 5.1 Detektor Kebocoran Bahan
 
-### 8.4 Menu dan Option Group — sudah ada
-- Kategori dinamis, produk, option group yang dapat dipakai ulang di level outlet (min/max/required), archive (bukan hapus), perubahan harga diaudit.
+Dijalankan setiap kali `StockOpnameSubmitted`, untuk periode sejak opname sebelumnya.
 
-### 8.5 Inventori dan Resep — sudah ada, perlu dilengkapi
-- Bahan baku (satu satuan per bahan), resep per produk dan per opsi, stok dipotong otomatis saat lunas, stok boleh minus dengan peringatan (NEGATIVE/OUT/LOW).
-- Kasir boleh RESTOCK dan WASTE; ADJUSTMENT, bahan, dan resep hanya owner.
-- Perbaikan: bahan yang dinonaktifkan tidak lagi dipotong lewat resep. *(M6)*
+```latex
+\text{Teoritis}_b = \sum_{m} \text{qty\_terjual}_m \times \text{resep}_{m,b}
+```
 
-### 8.6 Harga Pokok dan Stok Opname *(M6)*
-- RESTOCK mencatat harga beli per satuan (opsional); sistem menyimpan harga pokok rata-rata bergerak per bahan.
-- Pergerakan SALE menyimpan snapshot harga pokok, sehingga HPP per transaksi dan per menu dapat dihitung.
-- Stok opname: owner memasukkan jumlah fisik; sistem mencatat selisihnya sebagai ADJUSTMENT dengan alasan "Stok opname".
+```latex
+\text{Aktual}_b = \text{stok\_awal}_b + \text{beli}_b + \text{transfer\_in}_b - \text{transfer\_out}_b - \text{waste}_b - \text{stok\_opname}_b
+```
 
-### 8.7 POS Kasir — sudah ada, perlu dilengkapi
-- Buat pesanan dine-in/takeaway, pilih produk dan opsi, jumlah, catatan per item; total dihitung server; idempotency key wajib.
-- Tahan pesanan (OPEN) dan ganti itemnya; batalkan dengan alasan.
-- Nama pelanggan menjadi opsional dan ada catatan level pesanan. *(M5)*
-- Mempercepat kasir (UI): tombol uang cepat ("Uang pas", 20rb, 50rb, 100rb), produk favorit/terlaris di atas, pencarian lewat keyboard, struk opsional ("Cetak struk"). *(M5, UI)*
-- Daftar pesanan dapat difilter tanggal dan nomor pesanan, serta menampilkan umur tagihan yang ditahan. *(M5)*
+```latex
+\text{Varians}_b = \frac{\text{Aktual}_b - \text{Teoritis}_b}{\text{Teoritis}_b} \qquad \text{Rugi}_b = (\text{Aktual}_b - \text{Teoritis}_b) \times \text{biaya\_per\_unit}_b
+```
 
-### 8.8 Shift dan Kas *(M4)*
-- Setiap pengguna yang menerima pembayaran harus memiliki shift terbuka di outlet tersebut; satu shift terbuka per pengguna per outlet.
-- Buka shift: modal awal (≥ 0); nilainya diisi otomatis dari uang terhitung pada penutupan shift terakhir di outlet itu dan dapat diubah. *(prefill: M5)*
-- Pengeluaran kas kecil: selama shift terbuka, kasir mencatat uang yang diambil dari laci (nominal > 0 dan keterangan wajib, mis. "Beli es batu"); pengeluaran diaudit dan dapat dilihat owner. *(M5)*
-- Tutup shift: kasir memasukkan uang fisik di laci; sistem menghitung kas seharusnya = modal + tunai diterima (dibayar − kembalian) − refund tunai − pengeluaran kas kecil pada shift itu, lalu menyimpan selisih. *(pengeluaran: M5)*
-- Ringkasan tutup shift berfungsi sebagai laporan harian: jumlah transaksi, omzet, tunai, non-tunai per label, pengeluaran, refund, pembatalan, diskon, dan selisih kas.
-- Tagihan OPEN boleh tetap ada saat tutup shift; jumlahnya ditampilkan sebagai peringatan.
-- Owner melihat daftar dan detail shift (siapa, kapan, selisih).
+- Bahan ditandai jika varians > ambang (default 5%, bisa diatur per bahan).
+- Breakdown per shift dan per kasir untuk bahan yang ditandai (dari order item per shift).
+- LLM menerima tabel hasil hitungan, lalu menulis 3–5 kalimat penjelasan + dugaan penyebab (porsi berlebih, resep salah, waste tidak dicatat, kehilangan).
+- Output: skor kebocoran outlet dalam Rupiah, peringkat antar outlet.
 
-### 8.9 Pembayaran — sudah ada, perlu dilengkapi
-- Hanya dua metode yang dicatat: **Tunai** (kembalian dihitung) dan **Non-tunai** (nominal harus sama dengan total).
-- Non-tunai wajib memilih satu label dari daftar owner (§8.3) agar owner dapat mencocokkannya dengan mutasi rekening; label disimpan sebagai snapshot teks pada pembayaran. *(M5)*
-- Gateway mock dan alur attempt/resolve dihapus dari kode; data lama tetap di database. *(M5; sebelumnya dimatikan lewat flag di TASK-076)*
-- Satu pembayaran per pesanan; pembayaran tercatat dengan metode, nominal, kembalian, waktu, penerima, dan shift. *(shift: M4)*
+### 5.2 HPP Live dari Foto Nota
 
-### 8.10 Pembatalan, Void, dan Refund
-- Pembatalan pesanan OPEN: owner, atau kasir bila pesanan tidak memiliki diskon; alasan wajib; diaudit. *(aturan kasir: M4, TASK-076)*
-- Void/refund penuh pesanan lunas: hanya owner, alasan wajib, mengembalikan stok (pergerakan SALE_REVERSAL), refund tunai dicatat pada shift terbuka owner, diaudit. *(M4)*
+1. Manager memotret nota di aplikasi → gambar ke object storage → event `ReceiptUploaded`.
+2. Python: vision LLM mengekstrak `{supplier, tanggal, items:[{nama, qty, satuan, harga}]}` dengan JSON schema ketat; fallback PaddleOCR + parser jika LLM gagal.
+3. Pencocokan nama ke bahan master: fuzzy match (rapidfuzz) + embedding, dengan skor keyakinan. Item di bawah 0,8 wajib dikonfirmasi manual.
+4. Manager mengoreksi draft → Simpan → `PurchaseRecorded` → biaya bahan diperbarui (moving average) → `IngredientCostChanged`.
+5. Costing menghitung ulang HPP menu terdampak; jika margin turun di bawah target, buat insight "Harga cabai naik 25%, margin Ayam Geprek turun ke 52%" + saran harga baru.
 
-### 8.11 Struk *(M5)*
-- Nomor struk berurutan per outlet per hari menurut zona waktu outlet, format `INV-YYYYMMDD-NNNN`.
-- Struk memuat nama usaha, logo, alamat/telepon outlet, item dan opsi, subtotal, diskon, pajak, biaya layanan, total, dibayar, kembalian, kasir, waktu lokal, dan footer.
-- Struk dapat dicetak ulang dari browser; tanda "REFUND" bila sudah di-refund. Mencetak struk tidak wajib.
+```latex
+\text{HPP}_m = \sum_{b} \text{resep}_{m,b} \times \text{biaya\_per\_unit}_b \qquad \text{Margin}_m = \frac{\text{harga}_m - \text{HPP}_m}{\text{harga}_m}
+```
 
-### 8.12 Laporan — sudah ada, perlu dilengkapi
-- Sudah ada: ringkasan omzet (gross, diskon, net, pajak, layanan, tunai bersih), produk terlaris, rekap per metode bayar, daftar transaksi, ekspor CSV. Hanya transaksi `PAID` yang tidak dibatalkan yang dihitung.
-- Tambahan *(M5)*: rekap non-tunai per label.
-- Tambahan *(M6)*: penjualan per jam, per kasir, per shift; HPP dan laba kotor per menu dan total; jumlah refund.
+### 5.3 AI Command Agent
 
-### 8.13 Audit
-- Tercatat: perubahan harga, resep, pembuatan pesanan *(TASK-076)*, ganti item, diskon, pembatalan, pembayaran, pengaturan, aksi staf (nonaktif/aktif/reset password) *(TASK-076)*, buka/tutup shift dan void/refund *(M4)*, pengeluaran kas kecil *(M5)*.
-- Owner melihat audit log dengan filter aksi, pelaku, dan tanggal — sudah ada.
+- Owner mengetik perintah di command bar (Ctrl+K) atau panel chat.
+- Python menjalankan LLM dengan tool calling. Tool read (mis. `get_sales_summary`) dijalankan langsung lewat API internal Java dengan token user.
+- Tool write (mis. `update_menu_price`) tidak mengeksekusi apa pun. Tool tersebut membuat `ActionProposal` di Java berisi diff (sebelum → sesudah, jumlah baris terdampak).
+- UI menampilkan diff; owner klik Setujui atau Tolak. Java mengeksekusi dengan cek RBAC, idempotency key, dan audit log.
+- Batasan MVP: tidak ada tool hapus; maksimal 200 baris per aksi; proposal kedaluwarsa dalam 15 menit.
 
-### 8.14 Asisten AI Owner *(M7)*
-- Sudah ada: bot Telegram dengan identitas dari kontak terverifikasi; alat baca katalog dan status pesanan lewat gRPC, dibatasi pada tenant dan outlet milik member *(pembatasan outlet: TASK-076)*.
-- Ringkasan harian otomatis ke owner setelah shift terakhir ditutup atau pada jam yang diatur: omzet, transaksi, tunai vs non-tunai per label, pengeluaran kas kecil, produk terlaris, stok menipis/minus, selisih kas, pembatalan/diskon/refund.
-- Saran restock dari rata-rata pemakaian ditambah reorder level.
-- Peringatan anomali: kasir dengan pembatalan, diskon, atau selisih kas di atas kebiasaan.
-- Tanya-jawab data penjualan ("omzet minggu ini vs minggu lalu", "menu paling untung").
-- AI hanya membaca. Data diambil dari backend Java (sumber kebenaran), tidak dari salinan.
+| Tool | Jenis | Contoh perintah |
+| --- | --- | --- |
+| `get_sales_summary` | read | "Omzet minggu ini per outlet?" |
+| `get_leakage_report` | read | "Outlet mana paling boros?" |
+| `get_menu_margin` | read | "Menu apa yang marginnya di bawah 50%?" |
+| `update_menu_price` | write | "Naikkan es teh Rp1.000 kecuali Padang" |
+| `create_menu_item` | write | "Tambah menu Kopi Aren 18 ribu" |
+| `adjust_stock` | write | "Catat waste 2 kg ayam di outlet Ulak Karang" |
+| `create_stock_transfer` | write | "Pindah 3 kg ayam dari A ke C" |
 
-## 9. Alur Utama
+### 5.4 Ringkasan Harian
 
-1. Owner mendaftar → onboarding → mengatur menu, resep, bahan, dan staf.
-2. Kasir login → buka shift (modal awal terisi otomatis).
-3. Kasir membuat pesanan (opsional ditahan dan diubah) → owner dapat memberi diskon.
-4. Kasir mencatat pembayaran (tunai, atau non-tunai dengan label) → pesanan `COMPLETED`, stok terpotong, struk dapat dicetak.
-5. Selama shift: kasir mencatat pengeluaran kas kecil bila mengambil uang dari laci.
-6. Bila perlu: kasir membatalkan pesanan terbuka; owner melakukan void/refund pesanan lunas.
-7. Kasir tutup shift → hitung laci → selisih tercatat → ringkasan harian.
-8. Owner menerima ringkasan AI dan melihat laporan.
+Setelah manager menutup hari (`DayClosed`), Python mengambil agregat (omzet, transaksi, rata-rata per transaksi, menu terlaris, jam sepi, selisih kas, perbandingan dengan rata-rata 4 minggu yang sama). LLM menulis ringkasan maksimal 120 kata + satu saran. Hasil disimpan sebagai insight; pengiriman WhatsApp masuk fase berikutnya.
 
-## 10. Aturan Bisnis
+## 6. Non-Functional Requirements
+
+Target di bawah diukur di lingkungan staging dengan data seed 10 tenant × 5 outlet × 90 hari transaksi.
+
+| Kategori | Target | Cara verifikasi |
+| --- | --- | --- |
+| Latensi checkout | p95 < 300 ms di API `POST /orders/{id}/pay` | k6 load test 50 kasir paralel |
+| Latensi dashboard | p95 < 800 ms untuk rentang 30 hari | k6 + index review |
+| AI async | Ringkasan harian ≤ 2 menit; OCR nota ≤ 30 detik | Metric `ai_job_duration_seconds` |
+| AI command | Respons pertama (stream) ≤ 3 detik | Trace Java→Python |
+| Offline kasir | Transaksi tetap jalan saat internet putus; sinkron otomatis tanpa duplikat | E2E Playwright dengan network offline |
+| Isolasi tenant | 0 kebocoran data antar tenant | Test otomatis tiap endpoint + Postgres RLS |
+| Ketersediaan | 99,5% bulanan (MVP, single region) | Uptime monitor |
+| Akurasi uang | Tidak ada floating point untuk uang; pembulatan di satu tempat | Unit test + ArchUnit rule |
+| Keamanan | OWASP ASVS L1; secret di env/secret manager | ZAP baseline scan di CI |
+| Data pribadi | Mengikuti UU PDP: data pelanggan minimal, bisa dihapus per tenant | Endpoint export/delete tenant |
+| Biaya AI | ≤ Rp15.000 per outlet per bulan pada pemakaian normal | Metric token per tenant + budget limit |
+
+## 7. Arsitektur Sistem End-to-End
+
+Sistem terdiri dari dua deployable: **monolith Spring Boot** sebagai satu-satunya pemilik data dan aturan bisnis, serta **AI service Python** yang stateless. Frontend React berkomunikasi hanya dengan monolith.
+
+&#91;embedded content: arsitektur end-to-end · 2 deployable, 4 penyimpanan\]
+
+Panah ke kanan = Java meneruskan chat agent ke ai-api; panah ke kiri = AI service memanggil API internal Java untuk menyimpan hasil OCR, insight, dan usulan aksi. AI service juga membaca Postgres lewat role read-only ber-RLS dan mengunduh foto nota dari object storage.
+
+**Alasan modular monolith, bukan microservices:**
+
+- Satu developer, satu database, satu transaksi untuk alur jual → potong stok; tidak perlu saga.
+- Boundary tetap tegas (Spring Modulith + ArchUnit), sehingga modul bisa diekstrak menjadi service sendiri jika suatu saat diperlukan (kandidat pertama: `reporting`).
+- Biaya infrastruktur cocok untuk harga langganan UMKM.
+
+**Alur kunci (transaksi → kebocoran):**
+
+1. Kasir bayar → `sales` menyimpan order PAID dan menerbitkan `SaleCompleted` (outbox, satu transaksi).
+2. `inventory` mendengarkan, memotong stok sesuai resep ke `stock_ledger`.
+3. Manager submit opname → `StockOpnameSubmitted`.
+4. `ai` gateway memanggil `InventoryApi.computeLeakage()` (SQL deterministik), menyimpan hasil, menerbitkan `LeakageComputed` ke RabbitMQ.
+5. ai-worker menulis penjelasan via LLM → `POST /internal/insights` → owner melihatnya di Beranda.
+
+## 8. Struktur Modul & Boundary
+
+Backend Java adalah satu deployable dengan 10 modul Spring Modulith. Modul hanya boleh berkomunikasi lewat API publik (interface di package root modul) atau domain event; package `internal` tidak boleh diakses modul lain. Aturan ini diverifikasi otomatis oleh `ApplicationModules.verify()` di CI.
+
+| Modul | Tanggung jawab | Menerbitkan event | Mendengarkan event |
+| --- | --- | --- | --- |
+| `shared` | Money, TenantContext, error, ID (UUIDv7) | — | — |
+| `identity` | Tenant, user, role, outlet scope, auth | `TenantRegistered` | — |
+| `outlet` | Outlet, jam operasional, tutup hari | `DayClosed` | `TenantRegistered` |
+| `catalog` | Menu, kategori, harga per outlet, resep | `MenuPriceChanged`, `RecipeChanged` | — |
+| `sales` | Order, pembayaran, void, shift | `SaleCompleted`, `SaleVoided`, `ShiftClosed` | — |
+| `inventory` | Bahan, satuan, stock ledger, pembelian, opname, transfer | `PurchaseRecorded`, `StockOpnameSubmitted` | `SaleCompleted`, `SaleVoided` |
+| `costing` | Biaya bahan, HPP, margin, peringatan | `IngredientCostChanged`, `MarginAlertRaised` | `PurchaseRecorded`, `RecipeChanged` |
+| `reporting` | Read model dashboard (proyeksi) | — | `SaleCompleted`, `ShiftClosed` |
+| `ai` | Gateway ke Python, insight, ActionProposal, eksekusi aksi | `ActionExecuted` | `StockOpnameSubmitted`, `DayClosed`, `MarginAlertRaised` |
+| `audit` | Audit log append-only | — | Semua event + aksi sensitif |
+
+**Aturan dependensi:** `ai` memanggil API publik modul lain untuk eksekusi aksi (mis. `CatalogApi.updatePrice`). Modul domain tidak pernah bergantung pada `ai`. `reporting` hanya membaca dari event, tidak memanggil modul lain.
+
+**Layout package (per modul, contoh `inventory`):**
+
+```text
+com.kasirai.inventory
+├── InventoryApi.java            // API publik untuk modul lain
+├── events/                      // event publik: PurchaseRecorded, ...
+├── web/                         // REST controller + DTO
+└── internal/
+    ├── domain/                  // entity, value object, aturan bisnis
+    ├── application/             // use case / service
+    ├── persistence/             // Spring Data JPA repository
+    └── listener/                // @ApplicationModuleListener
+```
+
+**Repo (monorepo):**
+
+```text
+kasir-ai/
+├── backend/          # Java 21, Spring Boot 3, Gradle
+├── ai-service/       # Python 3.12, FastAPI, uv
+├── frontend/         # pnpm workspace
+│   ├── apps/pos/         # PWA kasir (tablet)
+│   ├── apps/backoffice/  # dashboard owner/manager
+│   └── packages/ui, api-client
+├── contracts/        # openapi.yaml, event JSON schema
+├── infra/            # docker-compose, Caddy, Grafana
+└── docs/adr/         # Architecture Decision Records
+```
+
+## 9. Data Model & Multi-Tenancy
+
+Strategi: **satu database, shared schema, kolom `tenant_id` di setiap tabel bisnis, dijaga dua lapis**: (1) Hibernate filter otomatis dari `TenantContext`, (2) Postgres Row Level Security sebagai jaring pengaman. Schema-per-tenant tidak dipilih karena migrasi ratusan schema mahal untuk UMKM.
+
+**Mekanisme RLS:** setiap request membuka transaksi lalu menjalankan `SET LOCAL app.tenant_id = '<uuid>'` (dari JWT). Policy: `USING (tenant_id = current_setting('app.tenant_id')::uuid)`. Role DB aplikasi bukan owner tabel, jadi RLS selalu berlaku. Service Python memakai role read-only terpisah dengan policy yang sama.
+
+**Tabel inti** (semua punya `id UUIDv7`, `tenant_id`, `created_at`; uang = `BIGINT` Rupiah; qty = `NUMERIC(14,3)` dalam satuan dasar):
+
+| Modul | Tabel | Kolom kunci |
+| --- | --- | --- |
+| identity | `tenants`, `users`, `user_outlet_roles`, `refresh_tokens` | role ∈ OWNER/MANAGER/CASHIER, outlet\_id nullable = semua outlet |
+| outlet | `outlets`, `business_days` | business\_days: outlet\_id, date, status OPEN/CLOSED |
+| catalog | `menu_categories`, `menu_items`, `outlet_menu_prices`, `recipe_lines` | recipe\_lines: menu\_item\_id, ingredient\_id, qty\_base |
+| sales | `shifts`, `orders`, `order_items`, `payments` | orders: outlet\_id, shift\_id, status, total, client\_uuid (idempoten offline) |
+| inventory | `ingredients`, `units`, `stock_ledger`, `purchases`, `purchase_lines`, `stock_opnames`, `stock_opname_lines`, `stock_transfers` | stock\_ledger: outlet\_id, ingredient\_id, qty\_delta, type, ref\_type, ref\_id |
+| costing | `ingredient_costs`, `menu_cost_snapshots` | ingredient\_costs: avg\_cost\_per\_base\_unit, effective\_at |
+| ai | `receipt_scans`, `ai_insights`, `action_proposals`, `ai_usage` | action\_proposals: tool, args JSONB, diff JSONB, status, expires\_at |
+| audit | `audit_logs` | actor\_id, action, entity, before JSONB, after JSONB |
+| infra | `event_publication` | Tabel outbox Spring Modulith |
+
+**Keputusan penting:**
+
+- `stock_ledger` append-only: stok saat ini = `SUM(qty_delta)`, di-cache di tabel `stock_balances` yang diperbarui di transaksi yang sama.
+- Index utama: `(tenant_id, outlet_id, created_at)` untuk orders dan ledger; partisi bulanan untuk `stock_ledger` dan `orders` setelah > 10 juta baris.
+- Order dari kasir offline membawa `client_uuid`; unique constraint `(tenant_id, client_uuid)` mencegah duplikat saat sinkron.
+- Migrasi dengan Flyway; satu folder migrasi per modul (`db/migration/inventory/...`).
+
+## 10. AI Service (Python)
+
+AI service adalah deployable kedua yang stateless: tidak punya database sendiri, tidak menulis ke database utama, dan hanya mengubah data lewat API Java. Dipisah dari monolith karena ekosistem AI/ML ada di Python, bukan karena alasan domain.
+
+**Stack:** Python 3.12, FastAPI, Pydantic v2, uv, SQLAlchemy Core (read-only), pandas, rapidfuzz, aio-pika (RabbitMQ), httpx, OpenTelemetry. LLM lewat satu interface `LLMProvider` (Claude API atau OpenAI) agar mudah diganti.
+
+**Struktur:**
+
+```text
+ai-service/app/
+├── api/            # endpoint sync: /agent/chat (SSE), /health
+├── workers/        # consumer RabbitMQ: receipt, leakage, daily_summary
+├── agent/          # tool registry, prompt, guardrail, loop tool calling
+├── pipelines/      # ocr_receipt.py, leakage_explain.py, daily_summary.py
+├── data/           # query read-only dengan SET LOCAL app.tenant_id
+├── clients/        # java_api.py (internal API), storage.py, llm/
+└── evals/          # golden set + skrip evaluasi
+```
+
+**Pipeline:**
+
+| Pipeline | Pemicu | Langkah | Output |
+| --- | --- | --- | --- |
+| OCR nota | `ReceiptUploaded` (queue) | Unduh gambar → vision LLM + JSON schema → fallback PaddleOCR → fuzzy match bahan | `POST /internal/receipt-scans/{id}/result` |
+| Penjelasan kebocoran | `LeakageComputed` (queue) | Terima tabel varians dari Java → LLM menulis penjelasan | `POST /internal/insights` |
+| Ringkasan harian | `DayClosed` (queue) | Query agregat read-only → bandingkan 4 minggu → LLM menulis | `POST /internal/insights` |
+| Command agent | HTTP SSE dari FE via Java | Loop tool calling maks 6 langkah; tool write → buat proposal | Stream teks + `proposal_id` |
+
+**Catatan desain:** perhitungan varians kebocoran dilakukan di Java (modul `inventory` + `costing`) dalam SQL, karena itu angka uang yang harus konsisten dan teruji. Python hanya menjelaskan.
+
+**Guardrail agent:**
+
+- System prompt berisi daftar outlet dan menu milik tenant (bukan data tenant lain).
+- Argumen tool divalidasi Pydantic sebelum dikirim; Java memvalidasi ulang + cek RBAC.
+- Prompt injection dari data (mis. nama menu berisi instruksi) diperlakukan sebagai data; tool write tetap butuh approval manusia.
+- Budget token per tenant per hari; jika habis, fitur AI menampilkan pesan, POS tetap jalan.
+
+## 11. Kontrak API & Domain Event
+
+API didesain contract-first di `contracts/openapi.yaml`; client TypeScript di-generate dengan `openapi-typescript`. Tenant tidak pernah ada di URL; selalu dari JWT. Semua endpoint tulis menerima header `Idempotency-Key`.
+
+**API publik (`/api/v1`, dipakai frontend):**
+
+| Method & path | Fungsi | Role |
+| --- | --- | --- |
+| `POST /auth/register` · `/auth/login` · `/auth/refresh` | Registrasi tenant, login, refresh | publik |
+| `GET/POST /outlets` · `POST /outlets/{id}/close-day` | Kelola outlet, tutup hari | Owner / Manager |
+| `GET/POST/PATCH /menu-items` · `PUT /menu-items/{id}/recipe` | Menu dan resep | Owner |
+| `POST /orders` · `POST /orders/{id}/items` · `POST /orders/{id}/pay` | Transaksi kasir | Kasir+ |
+| `POST /orders/sync` | Kirim batch order offline (maks 100) | Kasir+ |
+| `POST /shifts/open` · `POST /shifts/{id}/close` | Shift | Kasir+ |
+| `GET /ingredients` · `POST /purchases` · `POST /stock-opnames` · `POST /stock-transfers` | Inventori | Manager+ |
+| `POST /receipt-scans` (multipart) · `GET /receipt-scans/{id}` | Upload nota, ambil draft hasil OCR | Manager+ |
+| `GET /costing/menu-margins` | HPP & margin per menu | Owner |
+| `GET /reports/leakage?outletId&from&to` | Laporan kebocoran | Owner / Manager |
+| `GET /insights` | Ringkasan harian & peringatan | Owner / Manager |
+| `POST /ai/chat` (SSE) | Command agent (Java proxy ke Python) | Owner / Manager |
+| `POST /ai/proposals/{id}/approve` · `/reject` | Approval aksi AI | Owner / Manager |
+
+**API internal (`/internal/v1`, hanya untuk ai-service):** dilindungi service token + mTLS di jaringan privat. Read tool memanggil API publik dengan token user yang diteruskan (on-behalf-of), sehingga RBAC tetap berlaku. Endpoint khusus internal: `POST /internal/receipt-scans/{id}/result`, `POST /internal/insights`, `POST /internal/proposals`.
+
+**Domain event** (dalam proses via Spring Modulith; yang bertanda → juga diterbitkan ke RabbitMQ exchange `kasir.events`):
+
+| Event | Penerbit | Payload inti | Konsumen |
+| --- | --- | --- | --- |
+| `SaleCompleted` | sales | orderId, outletId, items\[menuId, qty\], total | inventory, reporting, audit |
+| `SaleVoided` | sales | orderId, reason, actorId | inventory, audit |
+| `ShiftClosed` | sales | shiftId, expectedCash, actualCash | reporting, audit |
+| `PurchaseRecorded` | inventory | purchaseId, lines\[ingredientId, qty, unitCost\] | costing |
+| `StockOpnameSubmitted` | inventory | opnameId, outletId, periodStart, periodEnd | ai (memicu hitung kebocoran) |
+| `IngredientCostChanged` | costing | ingredientId, oldCost, newCost | costing (HPP), ai |
+| `MarginAlertRaised` | costing | menuIds\[\], marginPct | ai |
+| `LeakageComputed` → | ai | outletId, period, rows\[ingredient, variancePct, lossRp\] | ai-service |
+| `ReceiptUploaded` → | ai | scanId, objectKey | ai-service |
+| `DayClosed` → | outlet | outletId, date | ai-service |
+| `ActionExecuted` | ai | proposalId, tool, affectedIds | audit |
+
+Setiap event membawa envelope `{eventId, type, version, tenantId, occurredAt, payload}`. Reliabilitas: Event Publication Registry (outbox) Spring Modulith menjamin at-least-once; konsumen idempoten berdasarkan `eventId`.
+
+## 12. Frontend & Desain UI
+
+Ada dua aplikasi dengan tujuan desain berbeda: **POS** harus cepat disentuh saat ramai, sedangkan **Backoffice** harus langsung menunjukkan "berapa rupiah yang bocor dan apa tindakannya". Keduanya berbagi satu design system.
+
+### 12.1 Stack Frontend
+
+| Kebutuhan | Pilihan |
+| --- | --- |
+| Build & bahasa | Vite + React 18 + TypeScript strict |
+| Routing | TanStack Router (type-safe) |
+| Server state | TanStack Query + client hasil generate OpenAPI |
+| Client state | Zustand (keranjang, sesi kasir) |
+| Form & validasi | react-hook-form + zod |
+| UI | Tailwind CSS + shadcn/ui (Radix), ikon Lucide |
+| Chart | Recharts |
+| Offline POS | PWA (vite-plugin-pwa) + IndexedDB via Dexie, antrean sinkron |
+| Test | Vitest + Testing Library, Playwright untuk E2E |
+
+### 12.2 Desain POS (tablet landscape, 10–11 inci)
+
+- **Layout tiga kolom:** kategori (kiri, sempit) · grid menu dengan foto/nama/harga (tengah) · keranjang + total + tombol Bayar besar (kanan).
+- Target sentuh minimal 48 px; satu ketuk = tambah item; tahan = pilih varian/catatan.
+- Pencarian menu dengan keyboard on-screen; menu yang stok bahannya habis tampil redup.
+- Indikator koneksi di header: hijau online, kuning "offline, 12 transaksi menunggu sinkron".
+- Layar bayar: nominal cepat (pas, 50rb, 100rb), kembalian besar dan jelas.
+- Tutup shift: form setoran kas dengan selisih yang langsung terlihat.
+
+### 12.3 Desain Backoffice (desktop + responsif untuk HP owner)
+
+- **Sidebar** kiri + **outlet switcher** di atas ("Semua outlet" atau satu outlet).
+- **Beranda = kartu kebocoran**, bukan grafik omzet: "Minggu ini bahan bocor Rp1,2 jt — Outlet Ulak Karang 68%", lalu daftar 3 tindakan teratas.
+- Halaman **Kebocoran**: tabel bahan per outlet dengan varians %, rugi Rp, dan teks penjelasan AI di panel samping.
+- Halaman **Margin Menu**: tabel menu dengan HPP, harga, margin; baris di bawah target berwarna amber, ada tombol "Terapkan harga saran".
+- Halaman **Scan Nota**: gambar nota di kiri, draft item di kanan; item dengan keyakinan rendah ditandai untuk dicek.
+- **AI Command Bar** (Ctrl+K atau tombol mengambang di HP): chat dengan streaming; setiap usulan aksi tampil sebagai kartu diff (sebelum → sesudah, jumlah outlet terdampak) dengan tombol Setujui/Tolak.
+
+### 12.4 Design Token
+
+- Font Inter; angka memakai `tabular-nums` agar kolom Rupiah rata.
+- Warna semantik: hijau = sehat, amber = perlu dicek, merah = kebocoran/rugi; satu warna aksen brand untuk aksi utama. Warna tidak pernah menjadi satu-satunya penanda (selalu ada ikon atau teks).
+- Format uang `Rp1.250.000`, singkatan di kartu (`Rp1,2 jt`); tanggal `20 Nov 2026`.
+- Mode terang default; mode gelap untuk kasir malam (opsional).
+
+**Layar prioritas untuk dibuat mockup:** POS checkout, Beranda owner, Kebocoran, Margin Menu, Scan Nota, AI Command Bar + kartu diff.
+
+## 13. Security, RBAC, Audit & Observability
+
+**Autentikasi:** Spring Security, password hash Argon2id, JWT access token (15 menit, RS256) + refresh token rotasi (7 hari, disimpan hash di DB, httpOnly cookie untuk backoffice). PIN 6 digit untuk otorisasi manager di POS (void, refund, diskon besar).
+
+**RBAC:** izin dicek di layer aplikasi dengan `@PreAuthorize` + evaluator outlet scope.
+
+| Aksi | Owner | Manager | Kasir |
+| --- | --- | --- | --- |
+| Transaksi & shift | Ya | Ya | Ya (outlet sendiri) |
+| Void / refund | Ya | Ya | Dengan PIN manager |
+| Pembelian, opname, scan nota | Ya | Ya (outlet sendiri) | Tidak |
+| Menu, harga, resep | Ya | Tidak | Tidak |
+| Laporan kebocoran & margin | Semua outlet | Outlet sendiri | Tidak |
+| AI Command Agent | Semua tool | Tool read + inventori outlet sendiri | Tidak |
+| Kelola user & tenant | Ya | Tidak | Tidak |
+
+**Audit log:** append-only (tanpa UPDATE/DELETE di level grant DB) untuk void, refund, ubah harga, ubah resep, penyesuaian stok, login gagal, dan setiap `ActionProposal` (siapa yang meminta, prompt, diff, siapa yang menyetujui).
+
+**Proteksi lain:** rate limit per user/tenant (Bucket4j + Redis), validasi upload (tipe gambar, maks 5 MB, strip EXIF), CORS ketat, header keamanan via Caddy, secret lewat environment, dependency scan (Dependabot + Trivy untuk image).
+
+**Observability:**
+
+- Log JSON terstruktur dengan `traceId`, `tenantId`, `outletId` (tanpa data pribadi).
+- OpenTelemetry trace end-to-end: FE → Java → RabbitMQ → Python → LLM.
+- Metric Micrometer/Prometheus: latensi checkout, event gagal di outbox, durasi job AI, token LLM per tenant, akurasi OCR (koreksi manual / total item).
+- Dashboard Grafana + alert: outbox tertunda > 5 menit, error rate > 2%, budget token > 80%.
+- Sentry untuk error frontend.
+
+## 14. Infrastruktur, Deployment & CI/CD
+
+MVP berjalan di satu VPS (4 vCPU, 8 GB RAM) dengan Docker Compose; arsitektur tetap siap dipecah ke beberapa host tanpa ubah kode.
+
+| Komponen | Container / layanan | Catatan |
+| --- | --- | --- |
+| Reverse proxy | Caddy | HTTPS otomatis; sajikan build statis FE |
+| Backend | `backend` (Spring Boot, JRE 21) | 1–2 replika; heap 1,5 GB |
+| AI service | `ai-api` (FastAPI) + `ai-worker` (consumer) | Image sama, command berbeda |
+| Database | PostgreSQL 16 | Backup harian `pg_dump` + WAL ke object storage |
+| Cache & rate limit | Redis 7 |  |
+| Message broker | RabbitMQ 3.13 | Dead-letter queue untuk job AI gagal |
+| Object storage | MinIO (lokal) / Cloudflare R2 (prod) | Foto nota; URL presigned |
+| Monitoring | Prometheus, Grafana, Loki, Tempo | Bisa diganti Grafana Cloud free tier |
+
+**Lingkungan:** `local` (docker compose + seed data), `staging` (deploy otomatis dari `main`), `prod` (deploy dari tag `v*` dengan approval manual).
+
+**Pipeline GitHub Actions:**
+
+1. Lint & format: Spotless (Java), Ruff + mypy (Python), ESLint + tsc (FE).
+2. Test: JUnit + Testcontainers, pytest, Vitest.
+3. Verifikasi arsitektur: `ApplicationModules.verify()` + ArchUnit rules.
+4. Cek kontrak: OpenAPI diff (breaking change = gagal) + regenerasi client FE.
+5. Build image → push ke GHCR → scan Trivy.
+6. Deploy staging via SSH + `docker compose pull && up -d`; smoke test Playwright.
+7. Migrasi DB Flyway berjalan saat startup backend (staging otomatis, prod dengan approval).
+
+## 15. Strategi Testing
+
+Fokus test ada pada tiga hal yang paling mahal jika salah: angka uang, isolasi tenant, dan aksi AI.
+
+| Level | Alat | Cakupan wajib |
+| --- | --- | --- |
+| Unit | JUnit 5 + AssertJ, pytest, Vitest | Rumus HPP, varians, konversi satuan, pembulatan Rupiah (property-based dengan jqwik) |
+| Module test | `@ApplicationModuleTest` (Spring Modulith) | Tiap modul diuji terisolasi; event yang diterbitkan diverifikasi dengan `Scenario` |
+| Integration | Testcontainers (Postgres, RabbitMQ, Redis) | Alur jual → ledger → opname → kebocoran dengan data seed |
+| Tenant isolation | Test parametrik per endpoint | User tenant A memanggil resource tenant B → 404; query RLS tanpa `app.tenant_id` → 0 baris |
+| Contract | OpenAPI diff + schemathesis | Respons API sesuai kontrak; event cocok dengan JSON schema |
+| AI eval | Golden set di `ai-service/evals` | 40 perintah agent (tool & argumen benar ≥ 90%), 30 foto nota (akurasi item ≥ 85%) |
+| E2E | Playwright | Checkout online & offline, scan nota, approve aksi AI |
+| Load | k6 | Target NFR checkout dan dashboard |
+
+AI eval dijalankan di CI hanya saat folder `agent/`, `pipelines/`, atau prompt berubah, untuk menghemat biaya token.
+
+## 16. Roadmap & Milestone
+
+MVP selesai dalam 8 minggu kerja untuk satu developer, dengan fitur AI di minggu 6–7 setelah data penjualan dan stok sudah benar. Setiap fase baru dimulai setelah gate fase sebelumnya lulus.
+
+&#91;embedded content: roadmap MVP · 5 fase, 8 minggu\]
+
+Gate M2 berarti hasil hitung kebocoran sistem sama dengan hitungan manual di spreadsheet untuk data seed. Jika waktu mepet, ringkasan harian dan mode offline (Should) dipindah ke setelah M4, bukan memotong gate.
+
+## 17. Metrik Sukses, Risiko & Open Questions
+
+**Metrik sukses MVP:**
+
+| Metrik | Target | Kapan diukur |
+| --- | --- | --- |
+| Alur demo end-to-end | Berjalan tanpa intervensi manual, < 5 menit | Akhir M4 |
+| Kebocoran terdeteksi di pilot | ≥ 1 temuan yang dikonfirmasi owner per outlet | 4 minggu pilot |
+| Akurasi OCR nota | ≥ 85% item benar tanpa koreksi | Golden set + pilot |
+| Agent memilih tool benar | ≥ 90% di golden set | CI |
+| Owner membuka insight | ≥ 4 dari 7 hari | Pilot |
+
+**Risiko & mitigasi:**
+
+| Risiko | Dampak | Mitigasi |
+| --- | --- | --- |
+| Resep tidak diisi akurat oleh UMKM | Kebocoran palsu, owner tidak percaya | Wizard resep + template menu umum; tandai "resep belum diverifikasi" |
+| Opname jarang dilakukan | Laporan kebocoran kosong | Opname parsial (5 bahan termahal) mingguan |
+| Nota tulisan tangan sulit dibaca | Data harga salah | Wajib konfirmasi manual untuk skor < 0,8 |
+| LLM salah memahami perintah | Perubahan data salah | Approval wajib + diff + batas 200 baris + audit |
+| Biaya LLM membengkak | Margin SaaS turun | Budget per tenant, cache, model kecil untuk tugas sederhana |
+| Scope terlalu besar untuk satu orang | MVP tidak selesai | Kunci scope Must; Should/Could setelah demo |
+
+**Open questions:**
+
+- [ ] Provider LLM utama: Claude API atau OpenAI? (pengaruh ke biaya & kualitas vision OCR)
+- [ ] Metode biaya bahan: moving average (diusulkan) atau harga beli terakhir?
+- [ ] Pilot pertama: outlet siapa, di kota mana?
+- [ ] WhatsApp: WA Business Cloud API resmi atau penyedia lokal?
+- [ ] Nama produk dan domain.
+
+## Lampiran A. Paket Langganan dan Aturan Bisnis yang Tetap Berlaku (dari PRD v2.2)
+
+### A.1 Paket Langganan dan Kuota AI
+Pembatasan dilakukan lewat fitur, bukan jumlah transaksi. Transaksi dan data tidak dibatasi di semua paket.
+
+| | Gratis | Pro ("Paling populer") | Premium |
+|---|---|---|---|
+| Harga bulanan | Rp0 | Rp59.000 | Rp119.000 |
+| Harga tahunan ("gratis 2 bulan") | — | Rp590.000 | Rp1.190.000 |
+| Outlet | 1 | 1 + add-on | 1 + add-on |
+| Pengguna | Owner saja (owner sebagai kasir) | Owner + kasir tanpa batas | Owner + kasir tanpa batas |
+| POS, menu, resep, stok, struk, shift & kas kecil | Ya | Ya | Ya |
+| Undang kasir, kelola staf, void/refund, audit kasir | Tidak | Ya | Ya |
+| Laporan | Ringkasan & produk terlaris, riwayat 30 hari | Lengkap (per jam/kasir/shift, HPP & laba, CSV), riwayat penuh | Lengkap |
+| Asisten AI Telegram | Tidak | Tidak | Ya: ringkasan harian (tidak memotong kuota) + 300 pertanyaan/bulan |
+| Top-up AI | — | — | +200 pertanyaan Rp29.000, berlaku sampai akhir periode |
+| Outlet tambahan | — | +Rp49.000/outlet/bulan (aktivasi manual operator, TASK-083) | sama |
+
+- Premium mencakup seluruh isi Pro.
+- Kuota AI dihitung per pertanyaan, bukan kredit/token. Owner diberi tahu pada 80% dan 100% kuota.
+- Batas harian anti-penyalahgunaan: 40 pertanyaan per tenant per hari.
+- Secara internal, pemakaian token per tenant dicatat dari field `usage` respons LLM. Satu pertanyaan maksimal 4 panggilan LLM.
+- Model default: DeepSeek V4.1 Flash via OpenRouter (env `AI_MODEL`). Anggaran biaya Rp100 per pertanyaan. Batas atas dari kode: prompt 21.000 byte dan output 1.024 token per panggilan, sekitar Rp165 per pertanyaan.
+- Trial Premium 14 hari otomatis setelah 50 transaksi pertama di paket Gratis, satu kali per tenant.
+- Pemicu upgrade di UI: tombol "Undang kasir" di Gratis menampilkan tawaran Pro (bukan error); dashboard Gratis menampilkan kartu sekilas temuan AI yang terkunci.
+- Paket turun atau habis: data tetap utuh, tidak pernah dihapus.
+  - Kasir dinonaktifkan sampai paket kembali Pro.
+  - Bot AI menolak dengan pesan perpanjang.
+- Pembayaran langganan saat pilot: transfer manual dan aktivasi oleh SUPERADMIN. Integrasi tagihan otomatis menyusul.
+
+### A.2 Aturan Bisnis
 
 - Harga, nama item, dan opsi disalin sebagai snapshot; total dihitung server; uang memakai `BigDecimal`.
 - Tarif pajak dan biaya layanan disnapshot pada saat pesanan dibuat.
@@ -161,66 +561,3 @@ Kolom **Status** mengikuti kode di branch aktif; detail bukti ada di `.ai/MEMORY
 - Tenant ditentukan dari JWT yang tervalidasi, tidak pernah dari payload; tidak ada bukti keberadaan data tenant lain.
 - Aksi uang dan aksi sensitif mencatat pelaku, waktu, dan alasan.
 - Stok boleh minus; sistem memberi peringatan, tidak memblokir penjualan.
-
-## 11. Entitas Data Inti
-
-Tenant, Outlet, StaffUser, TenantMembership, MembershipOutletAccess, Subscription, BusinessSettings, Category, Product, OptionGroup, Option, RecipeLine, InventoryItem, InventoryBalance, InventoryMovement, SalesOrder, OrderItem, OrderItemOption, Discount, Payment, Shift *(M4)*, Refund *(M4)*, CashExpense *(M5)*, NonCashLabel *(M5)*, ReceiptSequence *(M5)*, AuditLog. Tabel gateway attempt tetap ada di database tetapi tidak dipakai setelah M5. Entitas QR/meja/dapur tetap ada di database (migrasi V1..V5 tidak diubah) tetapi tidak dipakai.
-
-## 12. Kebutuhan Nonfungsional
-
-- **Keamanan:** BCrypt, HTTPS di produksi, otorisasi di server pada setiap aksi, rate limit REST dan gRPC, kunci layanan internal untuk gRPC dan sinkronisasi member, tidak ada token/rahasia/nomor telepon di log.
-- **Keandalan:** checkout, pembayaran, dan pergerakan stok idempotent; konflik konkurensi dijawab 409, bukan 500.
-- **Kinerja:** halaman POS tampil < 3 detik; daftar pesanan diperbarui lewat polling 15 detik dan saat jendela kembali fokus.
-- **UX:** POS untuk desktop dan tablet; status tidak hanya dibedakan warna; pesan error berbahasa Indonesia.
-
-## 13. Acceptance Criteria Tingkat Produk
-
-- **AC-01 Isolasi tenant:** pengguna tenant A tidak dapat membaca/mengubah data tenant B dan tidak mendapat bukti keberadaannya (REST dan gRPC/AI).
-- **AC-02 Harga konsisten:** total tersimpan dihitung ulang di server dari harga aktif, opsi, pajak, layanan, dan diskon sah.
-- **AC-03 Pembayaran:** pembayaran valid mengubah pesanan menjadi `COMPLETED`/`PAID`, memotong stok sekali, tercatat pada shift penerima, dan masuk laporan.
-- **AC-04 Pembatalan:** hanya pengguna berwenang (§8.10), alasan wajib, audit tercatat.
-- **AC-05 Ketersediaan produk:** produk habis/diarsipkan tidak dapat dipesan, termasuk bila berubah sesaat sebelum checkout.
-- **AC-06 Kas shift:** saat tutup shift, kas seharusnya = modal + tunai bersih − refund tunai − pengeluaran kas kecil, dan selisih tersimpan.
-- **AC-07 Void/refund:** pesanan lunas yang di-refund keluar dari laporan penjualan, stoknya kembali, dan audit tercatat.
-- **AC-08 Akses staf:** kasir yang dinonaktifkan langsung ditolak di REST, refresh token, dan bot/gRPC.
-- **AC-09 AI read-only:** asisten AI tidak dapat mengubah data dan hanya melihat outlet milik member yang bertanya.
-- **AC-10 Non-tunai berlabel:** pembayaran non-tunai tanpa label aktif ditolak; rekap non-tunai per label sama dengan jumlah pembayaran non-tunai pada periode itu.
-
-## 14. Metrik Produk
-
-- Waktu median transaksi kasir; jumlah transaksi per hari per tenant.
-- Rata-rata selisih kas per shift; rasio pembatalan, diskon, dan refund.
-- Persentase owner yang membuka ringkasan AI harian.
-- Tunai vs non-tunai per label; rata-rata pengeluaran kas kecil per shift.
-
-## 15. Tahapan Implementasi
-
-| Milestone | Isi | Status (13 Nov 2026) |
-|---|---|---|
-| M1 Fondasi | Auth, tenant, onboarding, undangan kasir, keamanan, rate limit | Selesai |
-| M2 Katalog dan inventori | Menu, option group reusable, bahan, resep, stok | Selesai |
-| M3 POS dan pembayaran | Pesanan, hold bill, diskon, bayar, struk dasar, laporan dasar, audit viewer, pivot status | Selesai (branch `refactor/pivot-cashier-ai`, belum di-merge ke main) |
-| M4 Kontrol kasir | TASK-076 (staf, password, flag mock, aturan cancel, audit checkout, gRPC scoping); shift dan kas; void/refund (TASK-077) | Terimplementasi dan lolos `mvnw verify`, belum di-commit |
-| M5 Pencatatan sederhana dan struk | Hapus mock gateway; label non-tunai dari owner; pengeluaran kas kecil di shift; modal awal otomatis; nomor struk berurutan + struk lengkap (nama usaha, logo, footer, tanda REFUND); nama pelanggan opsional + catatan pesanan; filter daftar pesanan; UI kasir cepat | Backend terimplementasi dan lolos `mvnw verify` (TASK-078), belum di-commit; UI via `prompts/m5-ui-cashier.md` |
-| M6 Data owner | Harga pokok, stok opname, bahan nonaktif tidak dipotong, laporan per jam/kasir/shift, HPP/laba kotor | Backend selesai dan terverifikasi (TASK-079) |
-| M7 Asisten AI | Ringkasan harian, saran restock, anomali, tanya-jawab penjualan (read-only) | Backend selesai dan teruji (TASK-080) |
-| M8 Pilot | 3 cafe pilot, 100+ transaksi nyata, umpan balik | Belum |
-
-## 16. Keputusan yang Masih Terbuka
-
-- Model harga langganan dan batas Freetier vs berbayar (enforcement paket belum ada).
-- Jam kirim ringkasan AI harian (default: setelah shift terakhir ditutup, cadangan pukul 23.00 waktu outlet).
-- Printer thermal yang diprioritaskan untuk pilot (sementara cetak dari browser).
-- Batas diskon kasir (saat ini kasir tidak boleh memberi diskon).
-- Kapan multi-outlet dibuka (perlu mengganti lock per tenant menjadi per outlet).
-
-## 17. Riwayat Keputusan (ringkas)
-
-- 13 Sep 2026: PRD v0.1 F&B dengan QR meja, dapur, dan kasir.
-- 16–28 Sep 2026: arah Laundry ditetapkan lalu ditunda; F&B kembali menjadi produk pertama; Laundry dinonaktifkan tanpa menghapus data.
-- 23 Sep 2026: Freetier = pencatatan kasir gratis.
-- 30 Sep – 6 Okt 2026: Pay First, owner saja memberi diskon, gateway mock untuk tahap awal.
-- 10 Nov 2026: inventori bahan dan resep dimasukkan ke cakupan; stok boleh minus.
-- 12 Nov 2026: pivot menjadi kasir cafe + asisten AI owner; QR, dapur, meja, WebSocket dihapus; status OPEN/COMPLETED/CANCELLED; hold bill di server.
-- 13 Nov 2026: PRD v2 (dokumen ini); keputusan kontrol kasir grup A (`.ai/DECISIONS.md` "Flow controls A").
-- 13 Nov 2026 (v2.1): aplikasi hanya mencatat; QRIS bukan fitur pembayaran; pembayaran = tunai atau non-tunai berlabel; mock gateway dihapus; pengeluaran kas kecil dan modal awal otomatis masuk M5.

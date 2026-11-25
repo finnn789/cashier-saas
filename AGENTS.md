@@ -1,20 +1,6 @@
 # Cashier SaaS repository guidance
 
-## Ruflo integration
-
-- Ruflo MCP is configured for this trusted project in `.codex/config.toml`; setup and verification notes are in `docs/ruflo-setup.md`.
-- For complex or multi-file work, discover the Ruflo tools available in the current session and use `memory_search`, `hooks_route`, `swarm_init`, and `agent_spawn` when applicable. If ToolSearch is unavailable, use the client's exposed MCP tools; report unavailable capabilities honestly.
-- Ruflo memory is supplementary. The PRD, explicit user decisions, and orchestrator-owned `.ai` documents remain canonical.
-- Agent registration or swarm initialization is coordination evidence, not proof that an executor ran or wrote code. Delegate application implementation only to an actual available worker execution tool, following the reserved-write workflow below.
-- Ruflo hooks, daemon workers, and automatic test execution are disabled for this Codex setup. Do not enable them or run tests through Ruflo implicitly.
-
-The main session is the Project Orchestrator and Engineering Lead. The latest user instruction
-of 5 October 2026 assigns code writing to workers, not the orchestrator. This supersedes the
-earlier direct-implementation preference. The orchestrator plans tasks, reviews architecture,
-checks evidence, and writes canonical state and coordination documents. Application code,
-SQL migrations and automated test code are worker implementation scopes. If no worker tool is
-available, report the limitation and keep implementation pending; do not automatically write
-the code yourself. Direct code writing requires a new explicit task-specific user exception.
+The main session is the orchestrator: it plans tasks, reviews reports and diffs, and writes the canonical docs (`.ai/*`, `tasks/`). Application code, SQL migrations and test code are written by workers within reserved paths. If no worker tool is available, report it and keep implementation pending unless the user gives a task-specific exception.
 
 ## Start here and canonical ownership
 
@@ -22,15 +8,15 @@ the code yourself. Direct code writing requires a new explicit task-specific use
 - Only the orchestrator writes `.ai/MEMORY.md`, `.ai/TASKS.md`, `.ai/DECISIONS.md`, `.ai/ARCHITECTURE.md`, and `.ai/context/*`. All other `.ai` entry-point files are also orchestrator-owned.
 - Before delegation, inspect dependencies and the dirty working tree, record the memory version, reserve write paths, and create `tasks/TASK-XXX.md`. Workers write only their reserved files and unique report.
 - After submission, inspect the report and actual diff against its baseline, verify evidence/test status, compare memory versions, and check concurrent conflicts. Reject unauthorized changes without discarding user work.
-- Update canonical state only after review. A worker statement is not proof. Follow `.ai/context/workflow.md` and the task/report templates.
+- Update canonical state only after review. A worker statement is not proof. Use `tasks/_TEMPLATE.md` for task packets.
 - Keep MEMORY compact; history and detailed evidence belong in reports, ADRs, and Git history.
 - Mandatory progress persistence: after each meaningful code-writing checkpoint and before handoff, workers update their assigned report with changed files, acceptance progress, evidence, test status and remaining work. They never write canonical memory. The orchestrator verifies those claims and updates `.ai/MEMORY.md` and `.ai/TASKS.md` after each task, including partial or blocked results. A task handoff is incomplete until its reviewed progress is persisted.
 
 ## Product sources of truth
 
 - Read `PRD-MVP.md` before planning a feature. It defines MVP scope and product acceptance criteria.
-- Read `.ai/DECISIONS.md` for active decisions and `.ai/MEMORY.md` for evidence-qualified state. `PROJECT_MEMORY.md` is preserved historical reference. If a summary conflicts with the PRD, follow the latest PRD and explicit user decisions.
-- Keep the active Pay First flow working end to end: menu -> optional table/QR -> QR or POS order -> payment -> kitchen -> completion -> report.
+- Read `.ai/DECISIONS.md` for active decisions and `.ai/MEMORY.md` for evidence-qualified state. If a summary conflicts with the PRD, follow the latest PRD and explicit user decisions.
+- Product flow and scope are defined by `PRD-MVP.md` v3 (section 0 is binding). QR ordering, kitchen display, tables and WebSocket were removed in the pivot.
 - Do not add post-MVP features unless the user explicitly changes the scope.
 
 ## Technical baseline
@@ -68,11 +54,9 @@ the code yourself. Direct code writing requires a new explicit task-specific use
 - Calculate totals on the server and store product names and prices as order snapshots.
 - Represent money with `BigDecimal` or integer minor units, never floating point.
 - Require an idempotency key for checkout and validate product availability again during checkout.
-- Use random public QR tokens that do not expose sequential internal IDs.
 - Validate order status transitions. Cancellation requires authorization, a reason, and an audit record.
 - Never delete paid orders. Record actor, timestamp, and relevant reason for price, discount, cancellation, and payment actions.
 - Store time consistently and render it using the outlet time zone.
-- Publish real-time order changes only after the database transaction commits, with polling as the fallback.
 - Build sales reports from paid, non-cancelled transactions only.
 
 ## Delivery workflow
@@ -85,6 +69,18 @@ the code yourself. Direct code writing requires a new explicit task-specific use
 - Do not automatically run tests after implementation. When the end-to-end feature is ready, hand it back as `READY FOR TESTING` with the recommended unit/API scenarios. Execute tests yourself only after the user explicitly requests testing.
 - A feature implementation is ready for testing when its acceptance path is implemented, authorization and tenant boundaries are reviewed, and the result is summarized with remaining risks. Test completion additionally requires the user-requested relevant tests to pass.
 
-## Preferred reusable workflow
+## Unit test writing rule (user, 2026-11-14)
 
-Use the repository skill `$cashier-mvp-builder` for requests to implement, continue, test, or review the Cashier SaaS MVP, and `vertical-slice-code-pattern` for application changes. Their engineering rules remain applicable; historical single-session/no-agent implementation directions are superseded by the latest user instruction. The orchestrator prepares/reviews architecture and delegates code writing within reserved scopes. Test execution still requires the user's explicit request after implementation.
+- Tests must not add decoupling layers: no new test base classes, helpers, builders, factories, fake adapters or wrapper interfaces. Production code is never changed only to make it testable (no extra interfaces, constructor parameters or visibility changes).
+- If a behaviour is already covered by an existing unit or integration test, do not add another one. Extend the existing test class instead of creating a new file, use the existing fixtures, write one test per behaviour, and parameterize variants.
+- No trivial tests (getters, constants, annotations, mocks asserting mocks) and do not reintroduce duplicate/trivial categories.
+
+## Task lifecycle (user, 2026-11-24)
+
+- A task has three artifacts: the packet `tasks/TASK-N.md` (the contract; written by the orchestrator BEFORE delegation), worker reports `reports/TASK-N-<id>.md` (written by each worker AFTER its work; Python workers use `Ai-services/reports/`), and one ledger line in `.ai/TASKS.md`.
+- Only the orchestrator closes a task. DONE means: diff reviewed against the baseline, compiled (Java `mvnw.cmd compile`; UI `tsc -b` + `oxlint`), user-requested tests passed, and for repo-tracked work committed with the user's approval. The UI repo is not git, so its tasks are DONE after review, compile and the user's go-ahead.
+- On DONE the orchestrator deletes `tasks/TASK-N.md` and every `reports/TASK-N-*.md`, then leaves exactly one line under "Done" in `.ai/TASKS.md` (what shipped, commit hash or "UI repo, not git", open debt). Contracts, debt or decisions worth keeping move into that line, `.ai/DECISIONS.md` or `.ai/ARCHITECTURE.md` BEFORE the deletion.
+- Never delete the packet or reports of a task that is not DONE. Untracked files cannot be recovered from git, so confirm DONE first.
+- Workers never create, edit or delete anything in `tasks/` or `reports/` except their own report file named in the packet, and never delete files outside their reserved paths. Deleting housekeeping files is done by the orchestrator or by `tidy-worker` with an explicit file list.
+- A packet is self-contained: it copies the verified facts it needs and does not point to other tasks' packets or reports, which may already be deleted. Number = next free number. Required sections: user instruction, verified facts, design decisions, reserved paths per worker, acceptance.
+- Compile checks are run by the orchestrator only; tests (Maven, pytest, vitest, Postman) run only when the user asks.

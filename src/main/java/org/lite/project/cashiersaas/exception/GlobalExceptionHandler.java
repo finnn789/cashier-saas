@@ -7,6 +7,9 @@ import org.lite.project.cashiersaas.exception.runtime.EmailAlreadyRegisteredExce
 import org.lite.project.cashiersaas.exception.runtime.InvalidCredentialsException;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
+import org.lite.project.cashiersaas.exception.runtime.OutletOverAllowanceException;
+import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
+import org.lite.project.cashiersaas.dto.response.OutletOverAllowanceResponse;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.exception.runtime.AuthenticationRequiredException;
 import org.lite.project.cashiersaas.exception.runtime.AccessForbiddenException;
@@ -135,6 +138,20 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ApiResponse<Object> handleOperationConflict(OperationConflictException exception) {
         return ApiResponse.error(HttpStatus.CONFLICT.value(), exception.getMessage());
+    }
+
+    @ExceptionHandler(PlanUpgradeRequiredException.class)
+    @ResponseStatus(HttpStatus.PAYMENT_REQUIRED)
+    public ApiResponse<Object> handlePlanUpgradeRequired(PlanUpgradeRequiredException exception) {
+        return ApiResponse.error(HttpStatus.PAYMENT_REQUIRED.value(), exception.getMessage());
+    }
+
+    @ExceptionHandler(OutletOverAllowanceException.class)
+    @ResponseStatus(HttpStatus.PAYMENT_REQUIRED)
+    public ApiResponse<OutletOverAllowanceResponse> handleOutletOverAllowance(OutletOverAllowanceException exception) {
+        OutletOverAllowanceResponse data = new OutletOverAllowanceResponse();
+        data.setUsableOutletIds(exception.getUsableOutletIds());
+        return ApiResponse.error(HttpStatus.PAYMENT_REQUIRED.value(), exception.getMessage(), data);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

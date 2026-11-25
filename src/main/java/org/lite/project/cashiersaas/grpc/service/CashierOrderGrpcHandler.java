@@ -48,6 +48,7 @@ public class CashierOrderGrpcHandler extends CashierServiceGrpc.CashierServiceIm
 
             UUID tenantUuid = tenantAccessPolicy.requireAllowedTenant(request.getTenantId());
             List<UUID> outletIds = tenantAccessPolicy.requireMemberOutlets(tenantUuid, request.getUserId());
+            tenantAccessPolicy.requirePremium(tenantUuid);
 
             String orderNumber = request.getOrderNumber();
             if (orderNumber == null || orderNumber.isBlank()) {

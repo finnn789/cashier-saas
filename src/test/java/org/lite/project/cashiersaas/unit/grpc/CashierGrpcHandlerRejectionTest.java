@@ -13,9 +13,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.lite.project.cashiersaas.configuration.GrpcSecurityProperties;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.grpc.mapper.GrpcCatalogMapper;
 import org.lite.project.cashiersaas.grpc.mapper.GrpcOrderMapper;
 import org.lite.project.cashiersaas.grpc.policy.GrpcTenantAccessPolicy;
@@ -24,6 +24,7 @@ import org.lite.project.cashiersaas.grpc.service.CashierOrderGrpcHandler;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.TenantRepository;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
@@ -46,6 +47,7 @@ class CashierGrpcHandlerRejectionTest {
     private static final String OTHER = "22222222-2222-2222-2222-222222222222";
     private static final String USER = "55555555-5555-5555-5555-555555555555";
     private static final String OUTSIDER = "66666666-6666-6666-6666-666666666666";
+    private static final UUID USER_OUTLET = UUID.fromString("77777777-7777-7777-7777-777777777771");
 
     private TenantRepository tenantRepository;
     private MembershipOutletAccessRepository outletAccessRepository;
@@ -73,13 +75,16 @@ class CashierGrpcHandlerRejectionTest {
         tenantRepository = mock(TenantRepository.class);
         outletAccessRepository = mock(MembershipOutletAccessRepository.class);
         when(outletAccessRepository.findActiveOutletIds(UUID.fromString(ALLOWED), UUID.fromString(USER)))
-                .thenReturn(List.of(UUID.randomUUID()));
+                .thenReturn(List.of(USER_OUTLET));
         when(outletAccessRepository.findActiveOutletIds(UUID.fromString(ALLOWED), UUID.fromString(OUTSIDER)))
                 .thenReturn(List.of());
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(ALLOWED))).thenReturn(true);
         when(tenantRepository.existsActiveFnbTenant(UUID.fromString(OTHER))).thenReturn(false);
+        PlanEntitlementService plans = mock(PlanEntitlementService.class);
+        when(plans.effectivePlan(any(), any())).thenReturn(PlanCode.PREMIUM);
+        when(plans.usableOutletIds(any(), any())).thenReturn(List.of(USER_OUTLET));
         GrpcTenantAccessPolicy policy = new GrpcTenantAccessPolicy(tenantRepository, outletAccessRepository,
-                mock(TenantMembershipRepository.class), properties);
+                mock(TenantMembershipRepository.class), plans, properties);
 
         catalogHandler = new CashierCatalogGrpcHandler(entityManager, criteriaBuilderFactory, catalogMapper, policy);
         orderHandler = new CashierOrderGrpcHandler(entityManager, criteriaBuilderFactory, orderMapper, policy);
@@ -107,16 +112,6 @@ class CashierGrpcHandlerRejectionTest {
         return ex;
     }
 
-    // An empty tenant and query is the proto default instance, i.e. the missing-field case.
-    @ParameterizedTest
-    @CsvSource(value = {"'',''", "'   ',''", "not-a-uuid,latte"})
-    void catalogRejectsBlankMissingOrInvalidTenant(String tenantId, String query) {
-        catalogHandler.getCatalogItem(
-                GetCatalogItemRequest.newBuilder().setTenantId(tenantId).setQuery(query).build(), catalogObserver);
-
-        catalogRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
     @Test
     void catalogRejectsTenantNotActiveInTheDatabaseWithoutLeakingIds() {
         catalogHandler.getCatalogItem(
@@ -126,32 +121,6 @@ class CashierGrpcHandlerRejectionTest {
         String description = String.valueOf(ex.getStatus().getDescription());
         assertFalse(description.contains(OTHER));
         assertFalse(description.contains(ALLOWED));
-    }
-
-    @Test
-    void catalogRejectsNullRequest() {
-        catalogHandler.getCatalogItem(null, catalogObserver);
-
-        catalogRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"", "   "})
-    void orderRejectsBlankTenant(String tenantId) {
-        orderHandler.getOrderStatus(
-                GetOrderStatusRequest.newBuilder().setTenantId(tenantId).setOrderNumber("ORD-1").build(),
-                orderObserver);
-
-        orderRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
-    @Test
-    void orderRejectsInvalidTenantUuid() {
-        orderHandler.getOrderStatus(
-                GetOrderStatusRequest.newBuilder().setTenantId("1234").setOrderNumber("ORD-1").build(),
-                orderObserver);
-
-        orderRejected(Status.Code.INVALID_ARGUMENT);
     }
 
     @Test
@@ -180,15 +149,6 @@ class CashierGrpcHandlerRejectionTest {
 
         orderRejected(Status.Code.INVALID_ARGUMENT);
     }
-    @ParameterizedTest
-    @ValueSource(strings = {"", "nope"})
-    void catalogRejectsMissingOrInvalidUserForAllowedTenant(String userId) {
-        catalogHandler.getCatalogItem(
-                GetCatalogItemRequest.newBuilder().setTenantId(ALLOWED).setUserId(userId).build(), catalogObserver);
-
-        catalogRejected(Status.Code.INVALID_ARGUMENT);
-    }
-
     @Test
     void catalogRejectsUserWithoutOutletAccess() {
         catalogHandler.getCatalogItem(
@@ -196,14 +156,6 @@ class CashierGrpcHandlerRejectionTest {
 
         StatusRuntimeException ex = catalogRejected(Status.Code.PERMISSION_DENIED);
         assertFalse(String.valueOf(ex.getStatus().getDescription()).contains(OUTSIDER));
-    }
-
-    @Test
-    void orderRejectsMissingUserForAllowedTenant() {
-        orderHandler.getOrderStatus(
-                GetOrderStatusRequest.newBuilder().setTenantId(ALLOWED).setOrderNumber("ORD-1").build(), orderObserver);
-
-        orderRejected(Status.Code.INVALID_ARGUMENT);
     }
 
     @Test

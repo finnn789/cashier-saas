@@ -8,6 +8,7 @@ import org.lite.project.cashiersaas.dto.response.FnbOrderPageResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStaffOrderResponse;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.OrderStatus;
@@ -86,11 +87,14 @@ public class FnbStaffOrderService {
         List<UUID> itemIds = items.stream().map(OrderItemEntity::getId).toList();
         Map<UUID, List<OrderItemOptionEntity>> optionsByItem = orders.itemOptions(tenantId, outletId, itemIds).stream()
                 .collect(Collectors.groupingBy(option -> option.getOrderItem().getId()));
+        Map<UUID, String> creators = orders.creatorNames(tenantId, outletId, orderIds);
+        Map<UUID, PaymentEntity> payments = orders.paymentsByOrder(tenantId, outletId, orderIds);
         return ordersForPage.stream().map(order -> {
             List<OrderItemEntity> orderItems = itemsByOrder.getOrDefault(order.getId(), List.of());
             List<OrderItemOptionEntity> orderOptions = orderItems.stream()
                     .flatMap(item -> optionsByItem.getOrDefault(item.getId(), List.of()).stream()).toList();
-            return FnbStaffOrderMapper.order(order, orderItems, orderOptions);
+            return FnbStaffOrderMapper.order(order, orderItems, orderOptions, creators.get(order.getId()),
+                    payments.get(order.getId()));
         }).toList();
     }
 }

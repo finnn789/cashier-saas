@@ -20,17 +20,23 @@ import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbCatalogRepository;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
+import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.RecipeLineEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -187,7 +193,7 @@ public class FnbCatalogService {
     public FnbRecipeResponse replaceProductRecipe(TenantPrincipal principal, UUID outletId, UUID productId, FnbRecipeRequest request) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         ProductEntity product = product(principal.getTenantId(), outletId, productId);
-        return FnbCatalogMapper.recipe(replaceRecipe(principal, outletId, productId, request,
+        return recipe(principal.getTenantId(), outletId, replaceRecipe(principal, outletId, productId, request,
                 () -> inventory.deleteProductRecipe(principal.getTenantId(), outletId, productId),
                 (item, quantity) -> RecipeLineEntity.forProduct(context.getTenant(), context.getOutlet(), product, item, quantity)));
     }
@@ -195,13 +201,13 @@ public class FnbCatalogService {
     public FnbRecipeResponse productRecipe(TenantPrincipal principal, UUID outletId, UUID productId) {
         guard.requireOwner(principal, outletId);
         product(principal.getTenantId(), outletId, productId);
-        return FnbCatalogMapper.recipe(inventory.productRecipes(principal.getTenantId(), outletId, List.of(productId)));
+        return recipe(principal.getTenantId(), outletId, inventory.productRecipes(principal.getTenantId(), outletId, List.of(productId)));
     }
     @Transactional
     public FnbRecipeResponse replaceOptionRecipe(TenantPrincipal principal, UUID outletId, UUID groupId, UUID id, FnbRecipeRequest request) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         ProductOptionEntity option = option(principal.getTenantId(), outletId, groupId, id);
-        return FnbCatalogMapper.recipe(replaceRecipe(principal, outletId, id, request,
+        return recipe(principal.getTenantId(), outletId, replaceRecipe(principal, outletId, id, request,
                 () -> inventory.deleteOptionRecipe(principal.getTenantId(), outletId, id),
                 (item, quantity) -> RecipeLineEntity.forOption(context.getTenant(), context.getOutlet(), option, item, quantity)));
     }
@@ -209,7 +215,19 @@ public class FnbCatalogService {
     public FnbRecipeResponse optionRecipe(TenantPrincipal principal, UUID outletId, UUID groupId, UUID id) {
         guard.requireOwner(principal, outletId);
         option(principal.getTenantId(), outletId, groupId, id);
-        return FnbCatalogMapper.recipe(inventory.optionRecipes(principal.getTenantId(), outletId, List.of(id)));
+        return recipe(principal.getTenantId(), outletId, inventory.optionRecipes(principal.getTenantId(), outletId, List.of(id)));
+    }
+    // Recipe endpoints are owner-only, so line costs are always shown; one balance query covers every line.
+    private FnbRecipeResponse recipe(UUID tenantId, UUID outletId, List<RecipeLineEntity> lines) {
+        Map<UUID, InventoryBalanceEntity> balances = inventory.balances(tenantId, outletId,
+                        lines.stream().map(line -> line.getInventoryItem().getId()).toList()).stream()
+                .collect(Collectors.toMap(balance -> balance.getInventoryItem().getId(), Function.identity()));
+        Map<UUID, BigDecimal> costByItem = new HashMap<>();
+        for (RecipeLineEntity line : lines) {
+            BigDecimal cost = FnbStockService.itemCost(1, List.of(line), balances);
+            if (cost != null) costByItem.put(line.getInventoryItem().getId(), cost.setScale(2, RoundingMode.HALF_UP));
+        }
+        return FnbCatalogMapper.recipe(lines, costByItem);
     }
     private List<RecipeLineEntity> replaceRecipe(TenantPrincipal principal, UUID outletId, UUID ownerId, FnbRecipeRequest request,
                                                  Runnable clear, BiFunction<InventoryItemEntity, BigDecimal, RecipeLineEntity> factory) {

@@ -139,7 +139,7 @@ class FnbShiftServiceTest {
         FnbShiftResponse response = service.open(principal, outletId, openRequest("50"));
 
         InOrder inOrder = inOrder(orders, shifts);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(shifts).persist(any(CashShiftEntity.class));
         assertEquals(CashShiftEntity.Status.OPEN, response.getStatus());
         assertEquals(new BigDecimal("50.00"), response.getOpeningCash());
@@ -225,7 +225,7 @@ class FnbShiftServiceTest {
                 expenseRequest("12500", "  Beli es batu  "));
 
         InOrder inOrder = inOrder(orders, expenses);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(expenses).persist(any(CashExpenseEntity.class));
         assertEquals(new BigDecimal("12500.00"), response.getAmount());
         assertEquals("Beli es batu", response.getDescription());
@@ -282,7 +282,7 @@ class FnbShiftServiceTest {
     void recordExpenseRejectsAMalformedIdempotencyKeyBeforeAnyWork() {
         assertThrows(InvalidOperationException.class, () -> service.recordExpense(principal, outletId, "short",
                 expenseRequest("100", "Parkir")));
-        verify(orders, never()).lockTenant(any());
+        verify(orders, never()).lockOutlet(any(), any());
     }
 
     @Test
@@ -332,7 +332,7 @@ class FnbShiftServiceTest {
         FnbShiftResponse response = service.closeCurrent(principal, outletId, closeRequest("300.00", "kurang 20"));
 
         InOrder inOrder = inOrder(orders, shifts);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(shifts).lock(shift);
         assertEquals(CashShiftEntity.Status.CLOSED, response.getStatus());
         assertEquals(new BigDecimal("320.00"), response.getExpectedCash());
@@ -368,7 +368,7 @@ class FnbShiftServiceTest {
         assertSame(owner, shift.getClosedBy());
         assertEquals(new BigDecimal("200.00"), response.getExpectedCash());
         assertEquals(new BigDecimal("0.00"), response.getCashDifference());
-        verify(orders).lockTenant(tenantId);
+        verify(orders).lockOutlet(tenantId, outletId);
         verify(dailySummary).onShiftClosed(any(MerchantAccessContext.class), same(shift));
     }
 

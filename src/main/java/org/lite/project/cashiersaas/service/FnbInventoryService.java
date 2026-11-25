@@ -15,6 +15,8 @@ import org.lite.project.cashiersaas.dto.response.FnbStockMovementResponse;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryMovementEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.StockCountEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.StockCountLineEntity;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
@@ -30,6 +32,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -40,6 +43,7 @@ public class FnbInventoryService {
     private final MerchantAccessGuard guard;
     private final FnbInventoryRepository inventory;
     private final DigestService tokens;
+    private final FnbMenuMarginService margins;
 
     @Transactional
     public FnbInventoryItemResponse createItem(TenantPrincipal principal, UUID outletId, FnbInventoryItemRequest request) {
@@ -113,16 +117,22 @@ public class FnbInventoryService {
         if (existing != null) {
             if (!existing.getRequestFingerprint().equals(fingerprint))
                 throw new OperationConflictException("Kunci idempotensi telah digunakan.");
-            return FnbInventoryMapper.movement(existing, showCost(context));
+            return FnbInventoryMapper.movement(existing, showCost(context), actorName(tenantId, existing));
         }
         InventoryBalanceEntity balance = lockedBalance(tenantId, outletId, item);
-        BigDecimal movementCost = unitCost != null ? unitCost : balance.getAverageUnitCost();
+        BigDecimal averageBefore = balance.getAverageUnitCost();
+        BigDecimal movementCost = unitCost != null ? unitCost : averageBefore;
         if (unitCost != null) balance.receive(delta, unitCost); else balance.apply(delta);
         InventoryMovementEntity movement = InventoryMovementEntity.record(tenantId, outletId, item, null, type, delta,
                 reason, request.getIdempotencyKey(), fingerprint, context.getMembership().getId(), null, movementCost);
         inventory.persist(movement);
         inventory.flush();
-        return FnbInventoryMapper.movement(movement, showCost(context));
+        FnbStockMovementResponse response = FnbInventoryMapper.movement(movement, showCost(context), actorName(tenantId, movement));
+        // Cost data is owner-only; only a restock priced above can move the average.
+        if (unitCost != null && showCost(context)
+                && (averageBefore == null || averageBefore.compareTo(balance.getAverageUnitCost()) != 0))
+            response.setMarginWarnings(margins.restockWarnings(tenantId, outletId, itemId, context.getTenant().getTargetMarginPct()));
+        return response;
     }
 
     @Transactional
@@ -138,6 +148,17 @@ public class FnbInventoryService {
                 + line.getCountedQuantity().stripTrailingZeros().toPlainString()).collect(Collectors.joining(";"))
                 + "|" + note);
         String reason = note.isEmpty() ? "Stok opname" : "Stok opname: " + note;
+        StockCountEntity recorded = inventory.stockCountByKey(tenantId, request.getIdempotencyKey()).orElse(null);
+        if (recorded != null) {
+            if (!recorded.getOutletId().equals(outletId) || !recorded.getRequestFingerprint().equals(fingerprint))
+                throw new OperationConflictException("Kunci idempotensi telah digunakan.");
+            FnbStockCountResponse replayed = new FnbStockCountResponse();
+            replayed.setStockCountId(recorded.getId());
+            // The query orders by name (leakage report); a replay must match the first response, ordered by item id.
+            replayed.setLines(inventory.stockCountLines(tenantId, recorded.getId()).stream().map(FnbInventoryMapper::stockCountLine)
+                    .sorted(Comparator.comparing(FnbStockCountLineResponse::getInventoryItemId)).toList());
+            return replayed;
+        }
         List<InventoryItemEntity> items = lines.stream()
                 .map(line -> item(tenantId, outletId, line.getInventoryItemId())).toList();
         Map<UUID, InventoryMovementEntity> existing = new HashMap<>();
@@ -148,7 +169,17 @@ public class FnbInventoryService {
                 throw new OperationConflictException("Kunci idempotensi telah digunakan.");
             existing.put(line.getInventoryItemId(), movement);
         }
-        boolean replay = !existing.isEmpty();
+        boolean replay = !existing.isEmpty(); // a count recorded before stock count headers existed
+        Map<UUID, InventoryBalanceEntity> balances = new HashMap<>();
+        StockCountEntity header = null;
+        if (!replay) {
+            // Every balance is locked before counted_at is taken, so a concurrent sale is either already in the
+            // previous quantity (recorded before counted_at) or recorded after it.
+            for (InventoryItemEntity item : items) balances.put(item.getId(), lockedBalance(tenantId, outletId, item));
+            header = StockCountEntity.record(tenantId, outletId, note.isEmpty() ? null : note, request.getIdempotencyKey(),
+                    fingerprint, context.getMembership().getId());
+            inventory.persist(header);
+        }
         List<FnbStockCountLineResponse> result = new ArrayList<>();
         for (int i = 0; i < lines.size(); i++) {
             FnbStockCountLineRequest line = lines.get(i);
@@ -158,7 +189,7 @@ public class FnbInventoryService {
             BigDecimal delta = movement == null ? BigDecimal.ZERO : movement.getQuantityDelta();
             BigDecimal previous = counted.subtract(delta);
             if (!replay) {
-                InventoryBalanceEntity balance = lockedBalance(tenantId, outletId, item);
+                InventoryBalanceEntity balance = balances.get(item.getId());
                 previous = balance.getQuantityOnHand();
                 delta = counted.subtract(previous);
                 if (delta.signum() != 0) {
@@ -168,6 +199,8 @@ public class FnbInventoryService {
                     balance.apply(delta);
                     inventory.persist(movement);
                 }
+                inventory.persist(StockCountLineEntity.record(tenantId, header, item, previous, counted, delta,
+                        balance.getAverageUnitCost(), movement == null ? null : movement.getId()));
             }
             FnbStockCountLineResponse response = new FnbStockCountLineResponse();
             response.setInventoryItemId(item.getId());
@@ -181,6 +214,7 @@ public class FnbInventoryService {
         }
         inventory.flush();
         FnbStockCountResponse response = new FnbStockCountResponse();
+        response.setStockCountId(header == null ? null : header.getId());
         response.setLines(result);
         return response;
     }
@@ -191,8 +225,16 @@ public class FnbInventoryService {
             throw new InvalidOperationException("Parameter halaman tidak valid.");
         boolean showCost = showCost(guard.requireOutlet(principal, outletId));
         item(principal.getTenantId(), outletId, itemId);
-        return inventory.movements(principal.getTenantId(), outletId, itemId, page, size).stream()
-                .map(movement -> FnbInventoryMapper.movement(movement, showCost)).toList();
+        List<InventoryMovementEntity> movements = inventory.movements(principal.getTenantId(), outletId, itemId, page, size);
+        Map<UUID, String> names = inventory.memberNames(principal.getTenantId(), movements.stream()
+                .map(InventoryMovementEntity::getActorMembershipId).filter(Objects::nonNull).distinct().toList());
+        return movements.stream().map(movement -> FnbInventoryMapper.movement(movement, showCost,
+                names.get(movement.getActorMembershipId()))).toList();
+    }
+
+    private String actorName(UUID tenantId, InventoryMovementEntity movement) {
+        if (movement.getActorMembershipId() == null) return null;
+        return inventory.memberNames(tenantId, List.of(movement.getActorMembershipId())).get(movement.getActorMembershipId());
     }
 
     private InventoryItemEntity item(UUID tenant, UUID outlet, UUID id) {

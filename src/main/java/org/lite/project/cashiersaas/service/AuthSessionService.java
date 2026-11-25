@@ -12,6 +12,8 @@ import org.lite.project.cashiersaas.entity.shared.identity.AuthSessionEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.ErrorMessage;
 import org.lite.project.cashiersaas.exception.runtime.SessionInvalidException;
@@ -31,6 +33,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -66,18 +69,23 @@ public class AuthSessionService {
 
     @Transactional
     public IssuedTokens selectMerchant(AccountPrincipal principal, TenantMembershipEntity membership,
-                                       OutletEntity outlet, SubscriptionEntity subscription) {
+                                       OutletEntity outlet, List<SubscriptionEntity> activeRows) {
         AuthSessionEntity session = sessionRepository.findById(principal.getSessionId(), principal.getUserId())
                 .orElseThrow(SessionInvalidException::new);
         sessionRepository.lockAndRefresh(session);
-        if (!session.isUsableAt(Instant.now()) || !membership.getUser().getId().equals(principal.getUserId())) {
+        Instant now = Instant.now();
+        if (!session.isUsableAt(now) || !membership.getUser().getId().equals(principal.getUserId())) {
             throw new SessionInvalidException();
         }
         if (!membership.getTenant().isFnbEnabled()) {
             throw new SessionInvalidException();
         }
         session.selectMerchant(membership, outlet);
-        Instant expiresAt = merchantAccessExpiry(session, subscription);
+        Instant expiresAt = entitledAccessExpiry(membership.getRole(), membership.getTenant(), activeRows,
+                session.getExpiresAt(), now);
+        if (expiresAt == null) {
+            throw new OperationConflictException(ErrorMessage.SUBSCRIPTION_INACTIVE.getMessage());
+        }
         String access = jwtTokenService.generateAccessToken(MerchantTokenContext.builder()
                 .userId(principal.getUserId())
                 .tenantId(membership.getTenant().getId())
@@ -147,16 +155,13 @@ public class AuthSessionService {
                 .filter(value -> value.getId().equals(session.getMembership().getId()))
                 .filter(value -> value.getRole() == session.getRole())
                 .orElse(null);
-        SubscriptionEntity subscription = subscriptionRepository.findActiveForTenant(tenantId).orElse(null);
-        if (membership == null || subscription == null || !subscription.isActiveAt(now)
+        Instant expiry = membership == null ? null : entitledAccessExpiry(session.getRole(), session.getTenant(),
+                subscriptionRepository.findActiveAt(tenantId, now), session.getExpiresAt(), now);
+        if (expiry == null
                 || outletRepository.findActive(tenantId, outletId).isEmpty()
                 || accessRepository.findAccess(tenantId, membership.getId(), outletId).isEmpty()) {
             session.revoke(now);
             throw new SessionInvalidException();
-        }
-        Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
-        if (subscription.getEndsAt() != null) {
-            expiry = min(expiry, subscription.getEndsAt());
         }
         String access = jwtTokenService.generateAccessToken(MerchantTokenContext.builder()
                 .userId(user.getId())
@@ -171,14 +176,31 @@ public class AuthSessionService {
         return new IssuedTokens(access, expiry, null, "OPERATE", tenantId, outletId, membership.getRole());
     }
 
-    private Instant merchantAccessExpiry(AuthSessionEntity session, SubscriptionEntity subscription) {
-        Instant now = Instant.now();
-        if (subscription == null || !subscription.isActiveAt(now)
-                || !subscription.getTenant().getId().equals(session.getTenant().getId())) {
-            throw new OperationConflictException(ErrorMessage.SUBSCRIPTION_INACTIVE.getMessage());
+    /**
+     * Access-token expiry for a merchant session, or null when the tenant does not entitle the role. Owners are
+     * entitled by any active row; a cashier needs a paid row or a running Premium trial. The token must not outlive
+     * the entitlement: it is capped (trial end counts) only when no entitling row is open-ended.
+     */
+    private Instant entitledAccessExpiry(Role role, TenantEntity tenant, List<SubscriptionEntity> activeRows,
+                                         Instant sessionExpiry, Instant now) {
+        boolean cashier = role == Role.CASHIER;
+        List<SubscriptionEntity> entitling = activeRows.stream()
+                .filter(row -> !cashier || row.getPlan() != PlanCode.FREETIER).toList();
+        boolean trial = cashier && tenant.isPremiumTrialActiveAt(now);
+        if (entitling.isEmpty() && !trial) {
+            return null;
         }
-        Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
-        return subscription.getEndsAt() == null ? expiry : min(expiry, subscription.getEndsAt());
+        Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), sessionExpiry);
+        if (entitling.stream().noneMatch(row -> row.getEndsAt() == null)) {
+            Instant entitlementEnd = entitling.stream().map(SubscriptionEntity::getEndsAt)
+                    .max(Comparator.naturalOrder()).orElse(null);
+            if (trial) {
+                Instant trialEnd = tenant.getPremiumTrialStartedAt().plus(TenantEntity.PREMIUM_TRIAL_DURATION);
+                entitlementEnd = entitlementEnd == null || trialEnd.isAfter(entitlementEnd) ? trialEnd : entitlementEnd;
+            }
+            expiry = min(expiry, entitlementEnd);
+        }
+        return expiry;
     }
 
     private Instant min(Instant first, Instant second) {

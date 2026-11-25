@@ -33,5 +33,8 @@ public class FnbStaffOrderResponse {
     private BigDecimal serviceChargeAmount;
     private BigDecimal discountAmount;
     private BigDecimal total;
+    private String cashierName;
+    private String methodLabel;
+    private String receiptNumber;
     private List<FnbStaffOrderItemResponse> items;
 }

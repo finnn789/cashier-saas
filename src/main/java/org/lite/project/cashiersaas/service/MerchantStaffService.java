@@ -8,6 +8,7 @@ import org.lite.project.cashiersaas.dto.response.identity.MerchantStaffPasswordR
 import org.lite.project.cashiersaas.dto.response.identity.MerchantStaffResponse;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AuditLogRepository;
@@ -38,10 +39,12 @@ public class MerchantStaffService {
     private final AuditLogRepository audit;
     private final MemberSyncPublisher memberSyncPublisher;
     private final PasswordEncoder passwordEncoder;
+    private final PlanEntitlementService planEntitlementService;
 
     @Transactional(readOnly = true)
     public List<MerchantStaffResponse> list(TenantPrincipal principal, UUID outletId) {
         merchantAccessGuard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         return membershipRepository.listCashiersForOutlet(principal.getTenantId(), outletId).stream()
                 .map(IdentityMapper::toStaff).toList();
     }
@@ -49,6 +52,7 @@ public class MerchantStaffService {
     @Transactional
     public MerchantStaffResponse deactivate(TenantPrincipal principal, UUID outletId, UUID userId) {
         MerchantAccessContext context = merchantAccessGuard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         TenantMembershipEntity target = requireTarget(principal, outletId, userId);
         if (target.deactivate()) {
             sessionRepository.revokeForMembership(target.getId(), Instant.now());
@@ -62,6 +66,7 @@ public class MerchantStaffService {
     @Transactional
     public MerchantStaffResponse reactivate(TenantPrincipal principal, UUID outletId, UUID userId) {
         MerchantAccessContext context = merchantAccessGuard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         TenantMembershipEntity target = requireTarget(principal, outletId, userId);
         if (target.reactivate()) {
             recordAudit(context, AuditLogEntity.Action.STAFF_REACTIVATED, userId);
@@ -74,6 +79,7 @@ public class MerchantStaffService {
     @Transactional
     public MerchantStaffPasswordResetResponse resetPassword(TenantPrincipal principal, UUID outletId, UUID userId) {
         MerchantAccessContext context = merchantAccessGuard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         TenantMembershipEntity target = requireTarget(principal, outletId, userId);
         if (membershipRepository.hasActiveMembershipOutsideTenant(userId, principal.getTenantId())) {
             throw new OperationConflictException(

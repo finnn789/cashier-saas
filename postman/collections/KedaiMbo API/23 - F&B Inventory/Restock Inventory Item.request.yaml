@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/cashier/outlets/{{outletId}}/fnb/inventory/items/{{inventoryItemId}}/movements"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "type": "RESTOCK",
+      "quantity": 10,
+      "unitCost": 12.3425,
+      "reason": "Belanja awal",
+      "idempotencyKey": "{{$guid}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Restock recorded with actorName", () => {
+       pm.response.to.have.status(201);
+       pm.expect(pm.response.json().data.actorName).to.eql(pm.variables.get("fullName"));
+      });
+    language: text/javascript
+order: 3000

@@ -6,6 +6,7 @@ import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.MerchantAuditMapper;
 import org.lite.project.cashiersaas.dto.request.MerchantAuditFilter;
 import org.lite.project.cashiersaas.dto.response.MerchantAuditPageResponse;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.repository.MerchantAuditRepository;
 import org.springframework.stereotype.Service;
@@ -28,10 +29,12 @@ public class MerchantAuditService {
     private static final int MAX_FILTER_TEXT_LENGTH = 80;
     private final MerchantAccessGuard guard;
     private final MerchantAuditRepository audits;
+    private final PlanEntitlementService planEntitlementService;
 
     @Transactional(readOnly = true)
     public MerchantAuditPageResponse list(TenantPrincipal principal, UUID outletId, MerchantAuditFilter filter) {
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         Query query = query(context, filter);
         List<MerchantAuditRepository.AuditRow> rows = audits.page(principal.getTenantId(), outletId, query.start,
                 query.end, filter.getAction(), filter.getActorId(), filter.getEntityType(), query.page, query.size);

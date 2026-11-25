@@ -47,4 +47,18 @@ public class OutletEntity extends MutableBaseEntity {
         }
         return changed;
     }
+
+    /** Returns false when the outlet was already inactive. */
+    public boolean deactivate() {
+        boolean changed = active;
+        active = false;
+        return changed;
+    }
+
+    /** Returns false when the outlet was already active. */
+    public boolean reactivate() {
+        boolean changed = !active;
+        active = true;
+        return changed;
+    }
 }

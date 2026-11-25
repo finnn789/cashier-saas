@@ -33,7 +33,7 @@ public class FnbDiscountService {
     @Transactional
     public FnbDiscountResponse grant(TenantPrincipal principal, UUID outletId, UUID orderId,
                                      FnbDiscountRequest request) {
-        orders.lockTenant(principal.getTenantId());
+        orders.lockOutlet(principal.getTenantId(), outletId);
         MerchantAccessContext context = guard.requireOwner(principal, outletId);
         SalesOrderEntity order = orders.byId(principal.getTenantId(), outletId, orderId)
                 .orElseThrow(ResourceNotFoundException::new);

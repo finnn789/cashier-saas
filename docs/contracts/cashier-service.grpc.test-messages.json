@@ -1,5 +1,5 @@
 {
-  "description": "Ready-to-send request messages for manual gRPC testing of cashier.v1.CashierService (grpcurl or Postman). Replace the <PLACEHOLDERS>. Schema: cashier-service.grpc.schema.json. Never commit a real service key.",
+  "description": "Ready-to-send request messages for manual gRPC testing of cashier.v1.CashierService (grpcurl or Postman). Replace the <PLACEHOLDERS>. Every RPC except RecordAiUsage needs a PREMIUM tenant (see the PlanGate group); the other examples assume <TENANT_ID> is PREMIUM. Schema: cashier-service.grpc.schema.json. Never commit a real service key.",
   "server": "localhost:9090",
   "tls": false,
   "metadata": { "x-internal-service-key": "<CASHIER_GRPC_SERVICE_KEY>" },
@@ -12,7 +12,11 @@
     "<OTHER_OUTLET_ORDER_NUMBER>": "an existing order number of <TENANT_ID> in an outlet <USER_ID> has no access to",
     "<OTHER_TENANT_ORDER_NUMBER>": "an existing order number that belongs to <OTHER_TENANT_ID>",
     "<OWNER_USER_ID>": "UUID of an ACTIVE staff user with an ACTIVE OWNERMERCHANT membership in <TENANT_ID> and access to at least one active outlet; used as user_id for the owner-only RPCs",
-    "<CASHIER_USER_ID>": "UUID of an ACTIVE CASHIER member of <TENANT_ID> (valid for GetCatalogItem and GetOrderStatus, rejected by the owner-only RPCs)"
+    "<CASHIER_USER_ID>": "UUID of an ACTIVE CASHIER member of <TENANT_ID> (valid for GetCatalogItem and GetOrderStatus, rejected by the owner-only RPCs)",
+    "<NON_PREMIUM_TENANT_ID>": "UUID of a tenant whose effective plan is FREETIER or PRO (no active PREMIUM row, no running trial)",
+    "<NON_PREMIUM_OWNER_USER_ID>": "UUID of an ACTIVE OWNERMERCHANT of <NON_PREMIUM_TENANT_ID>",
+    "<TRIAL_TENANT_ID>": "UUID of a FREETIER tenant that completed its 50th paid order less than 14 days ago",
+    "<TRIAL_OWNER_USER_ID>": "UUID of an ACTIVE OWNERMERCHANT of <TRIAL_TENANT_ID>"
   },
   "GetCatalogItem": [
     {
@@ -404,6 +408,73 @@
         "date": "2026-13-45"
       },
       "expect": "INVALID_ARGUMENT: date must be an ISO date (yyyy-MM-dd)"
+    }
+  ],
+  "PlanGate": [
+    {
+      "name": "tenant on FREETIER or PRO calls any AI RPC (example: GetSalesSummary)",
+      "method": "GetSalesSummary",
+      "message": { "tenant_id": "<NON_PREMIUM_TENANT_ID>", "user_id": "<NON_PREMIUM_OWNER_USER_ID>", "start_date": "2026-11-14", "end_date": "2026-11-14" },
+      "expect": "FAILED_PRECONDITION: PLAN_PREMIUM_REQUIRED (same for GetCatalogItem, GetOrderStatus, GetRestockSuggestions, GetAnomalies). Tenant and role checks run first: a cashier or unknown user still gets PERMISSION_DENIED"
+    },
+    {
+      "name": "tenant in its 14-day Premium trial",
+      "method": "GetSalesSummary",
+      "message": { "tenant_id": "<TRIAL_TENANT_ID>", "user_id": "<TRIAL_OWNER_USER_ID>", "start_date": "2026-11-14", "end_date": "2026-11-14" },
+      "expect": "OK (a running trial counts as PREMIUM; after day 14 it is FAILED_PRECONDITION again unless a paid PREMIUM row is active)"
+    }
+  ],
+  "ConsumeAiQuestion": [
+    {
+      "name": "owner of a PREMIUM tenant, first question of the month",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<OWNER_USER_ID>" },
+      "expect": "OK: allowed=true, used=1, limit=300 (+ bonus), warn omitted"
+    },
+    {
+      "name": "80 percent reached",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<OWNER_USER_ID>" },
+      "note": "Repeat until used reaches 240 of 300 (spread over days: the daily cap is 40)",
+      "expect": "OK: allowed=true, warn=true from used=240 on"
+    },
+    {
+      "name": "monthly quota used up",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<OWNER_USER_ID>" },
+      "note": "After questions_used = 300 + bonus_questions",
+      "expect": "OK: allowed omitted (false), reason=MONTHLY_QUOTA_EXHAUSTED, used=limit, no counter change. A +200 top-up (see docs/ops/plan-activation.md) allows questions again"
+    },
+    {
+      "name": "daily cap",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<OWNER_USER_ID>" },
+      "note": "41st call on the same tenant-local day while the monthly quota is not exhausted",
+      "expect": "OK: allowed omitted (false), reason=DAILY_CAP_REACHED; allowed again after local midnight"
+    },
+    {
+      "name": "tenant below PREMIUM",
+      "message": { "tenant_id": "<NON_PREMIUM_TENANT_ID>", "user_id": "<NON_PREMIUM_OWNER_USER_ID>" },
+      "expect": "OK (not an error): allowed omitted (false), reason=PLAN_PREMIUM_REQUIRED, used=0, limit=0, nothing counted"
+    },
+    {
+      "name": "cashier is rejected (owner only)",
+      "message": { "tenant_id": "<TENANT_ID>", "user_id": "<CASHIER_USER_ID>" },
+      "expect": "PERMISSION_DENIED: Tenant is not permitted for this service (identical to an unknown tenant)"
+    }
+  ],
+  "RecordAiUsage": [
+    {
+      "name": "record tokens of one question",
+      "message": { "tenant_id": "<TENANT_ID>", "input_tokens": 5200, "output_tokens": 640 },
+      "expect": "OK, empty response; ai_usage_periods.input_tokens/output_tokens of the current month grow by the values"
+    },
+    {
+      "name": "negative values are clamped",
+      "message": { "tenant_id": "<TENANT_ID>", "input_tokens": -5, "output_tokens": 0 },
+      "expect": "OK, empty response, nothing added"
+    },
+    {
+      "name": "tenant not on the allowlist",
+      "message": { "tenant_id": "<OTHER_TENANT_ID>", "input_tokens": 10, "output_tokens": 10 },
+      "note": "Use a tenant id the service does not serve",
+      "expect": "OK, empty response (failures are swallowed and only logged), nothing recorded"
     }
   ],
   "authAndLimits": [

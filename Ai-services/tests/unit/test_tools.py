@@ -7,12 +7,24 @@ from unittest.mock import AsyncMock, Mock
 from app.ai.graph.tools_adapter import json_schema_to_pydantic_model
 from app.integrations.grpc.client import CashierGrpcClient
 from app.tools import CatalogSearchTool, OrderStatusTool, ToolRegistry
-from app.tools.insights import CashierAnomaliesTool, RestockSuggestionsTool, SalesSummaryTool
+from app.tools.insights import (
+    CashierAnomaliesTool,
+    LeakageReportTool,
+    MenuMarginsTool,
+    RestockSuggestionsTool,
+    SalesSummaryTool,
+)
 
 
 class ToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_schema_hides_tenant_and_user(self) -> None:
-        insight_tools = (SalesSummaryTool(), RestockSuggestionsTool(), CashierAnomaliesTool())
+        insight_tools = (
+            SalesSummaryTool(),
+            RestockSuggestionsTool(),
+            CashierAnomaliesTool(),
+            LeakageReportTool(),
+            MenuMarginsTool(),
+        )
         for tool in (CatalogSearchTool(), OrderStatusTool(), *insight_tools):
             schema = tool.to_openrouter_schema()
             self.assertEqual(schema["type"], "function")
@@ -21,7 +33,13 @@ class ToolsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("user_id", properties)
         self.assertEqual(
             [tool.name for tool in insight_tools],
-            ["sales_summary", "restock_suggestions", "cashier_anomalies"],
+            [
+                "sales_summary",
+                "restock_suggestions",
+                "cashier_anomalies",
+                "leakage_report",
+                "menu_margins",
+            ],
         )
         self.assertEqual(SalesSummaryTool().parameters["required"], ["start_date", "end_date"])
         self.assertEqual(CashierAnomaliesTool().parameters["required"], ["date"])

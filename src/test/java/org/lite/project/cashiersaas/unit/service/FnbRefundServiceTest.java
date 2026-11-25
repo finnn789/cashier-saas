@@ -33,6 +33,7 @@ import org.lite.project.cashiersaas.service.FnbRefundService;
 import org.lite.project.cashiersaas.service.FnbShiftService;
 import org.lite.project.cashiersaas.service.FnbStockService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
+import org.lite.project.cashiersaas.service.PlanEntitlementService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -70,6 +71,7 @@ class FnbRefundServiceTest {
     @Mock private FnbShiftService shifts;
     @Mock private FnbStockService stock;
     @Mock private AuditLogRepository audit;
+    @Mock private PlanEntitlementService planEntitlement;
     @Spy private DigestService digests = new DigestService();
     @InjectMocks private FnbRefundService service;
 
@@ -135,7 +137,7 @@ class FnbRefundServiceTest {
         FnbRefundResponse response = service.refund(principal, outletId, orderId, KEY, request("  Salah pesanan  "));
 
         InOrder lockFirst = inOrder(orders, guard);
-        lockFirst.verify(orders).lockTenant(tenantId);
+        lockFirst.verify(orders).lockOutlet(tenantId, outletId);
         lockFirst.verify(guard).requireOwner(principal, outletId);
         lockFirst.verify(orders).byId(tenantId, outletId, orderId);
         assertEquals(PaymentStatus.REFUNDED, order.getPaymentStatus());
@@ -169,7 +171,7 @@ class FnbRefundServiceTest {
                 () -> service.refund(principal, outletId, orderId, KEY, request("alasan")));
 
         InOrder inOrder = inOrder(orders, guard);
-        inOrder.verify(orders).lockTenant(tenantId);
+        inOrder.verify(orders).lockOutlet(tenantId, outletId);
         inOrder.verify(guard).requireOwner(principal, outletId);
         verify(orders, never()).byId(any(UUID.class), any(UUID.class), any(UUID.class));
         verifyNoInteractions(payments, refunds, shifts, stock, audit);

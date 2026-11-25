@@ -11,6 +11,7 @@ import org.lite.project.cashiersaas.entity.shared.identity.MembershipOutletAcces
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.enums.OnboardingIntent;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.enums.Role;
 
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
@@ -19,7 +20,6 @@ import org.lite.project.cashiersaas.exception.runtime.AuthenticationRequiredExce
 import org.lite.project.cashiersaas.repository.CashierInvitationRepository;
 import org.lite.project.cashiersaas.repository.MembershipOutletAccessRepository;
 import org.lite.project.cashiersaas.repository.StaffUserRepository;
-import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.repository.TenantMembershipRepository;
 import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
 import org.lite.project.cashiersaas.shared.StatusConstants;
@@ -47,13 +47,14 @@ public class CashierInvitationService {
     private final StaffUserRepository userRepository;
     private final TenantMembershipRepository membershipRepository;
     private final MembershipOutletAccessRepository outletAccessRepository;
-    private final SubscriptionRepository subscriptionRepository;
+    private final PlanEntitlementService planEntitlementService;
     private final MerchantAccessGuard merchantAccessGuard;
     private final MemberSyncPublisher memberSyncPublisher;
 
     @Transactional
     public CashierInvitationResponse issue(TenantPrincipal principal, UUID outletId, String email) {
         merchantAccessGuard.requireOwner(principal, outletId);
+        planEntitlementService.require(principal.getTenantId(), PlanCode.PRO);
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String code = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
@@ -90,8 +91,8 @@ public class CashierInvitationService {
                 || !invitation.getTenant().isActive() || !invitation.getOutlet().isActive()
                 || !invitation.getInvitedByMembership().isActive()
                 || invitation.getInvitedByMembership().getRole() != Role.OWNERMERCHANT
-                || !subscriptionRepository.findActiveForTenant(invitation.getTenant().getId())
-                    .map(value -> value.isActiveAt(Instant.now())).orElse(false)) {
+                // Issued during PRO but claimed after a downgrade: refused like any unusable invitation (no 402).
+                || planEntitlementService.effectivePlan(invitation.getTenant().getId(), Instant.now()).compareTo(PlanCode.PRO) < 0) {
             throw new ResourceNotFoundException("Undangan tidak ditemukan atau tidak dapat digunakan.");
         }
         TenantMembershipEntity membership = membershipRepository.findActive(user.getId(), invitation.getTenant().getId())

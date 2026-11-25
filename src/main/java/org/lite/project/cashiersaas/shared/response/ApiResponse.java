@@ -44,6 +44,10 @@ public class ApiResponse<T> {
         return new ApiResponse<>(false, code, message, null, null, LocalDateTime.now());
     }
 
+    public static <T> ApiResponse<T> error(int code, String message, T data) {
+        return new ApiResponse<>(false, code, message, data, null, LocalDateTime.now());
+    }
+
     public static <T> ApiResponse<T> validationError(int code, String message,
                                                        List<FieldErrorDetail> validationErrors) {
         return new ApiResponse<>(false, code, message, null, validationErrors, LocalDateTime.now());

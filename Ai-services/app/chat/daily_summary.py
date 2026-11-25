@@ -134,8 +134,12 @@ def build_summary(
     return "\n".join(lines)
 
 
-async def request_insight(summary_text: str) -> str | None:
-    """One short insight sentence from the LLM, or None on any failure or after 8 seconds."""
+async def request_insight(summary_text: str, client: Any, tenant_id: str) -> str | None:
+    """One short insight sentence from the LLM, or None on any failure or after 8 seconds.
+
+    Its tokens are reported through `client.record_ai_usage` (never raises); it never
+    consumes a question.
+    """
     try:
         async with asyncio.timeout(INSIGHT_TIMEOUT_SECONDS):
             async with aiohttp.ClientSession() as session:
@@ -151,6 +155,12 @@ async def request_insight(summary_text: str) -> str | None:
             extra={"event": "daily_summary_insight_skipped", "error_type": type(error).__name__},
         )
         return None
+    if completion.input_tokens or completion.output_tokens:
+        await client.record_ai_usage(
+            tenant_id=tenant_id,
+            input_tokens=completion.input_tokens,
+            output_tokens=completion.output_tokens,
+        )
     lines = [line.strip() for line in completion.content.splitlines() if line.strip()]
     insight = lines[0] if lines else ""
     return insight if 0 < len(insight) <= MAX_INSIGHT_CHARS else None

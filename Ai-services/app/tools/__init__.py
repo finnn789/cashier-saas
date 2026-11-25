@@ -2,7 +2,13 @@
 
 from app.tools.base import BaseTool
 from app.tools.catalog import CatalogSearchTool
-from app.tools.insights import CashierAnomaliesTool, RestockSuggestionsTool, SalesSummaryTool
+from app.tools.insights import (
+    CashierAnomaliesTool,
+    LeakageReportTool,
+    MenuMarginsTool,
+    RestockSuggestionsTool,
+    SalesSummaryTool,
+)
 from app.tools.order import OrderStatusTool
 from app.tools.registry import ToolRegistry
 
@@ -15,6 +21,8 @@ def get_default_tool_registry() -> ToolRegistry:
     registry.register(SalesSummaryTool())
     registry.register(RestockSuggestionsTool())
     registry.register(CashierAnomaliesTool())
+    registry.register(LeakageReportTool())
+    registry.register(MenuMarginsTool())
     return registry
 
 
@@ -22,6 +30,8 @@ __all__ = [
     "BaseTool",
     "CashierAnomaliesTool",
     "CatalogSearchTool",
+    "LeakageReportTool",
+    "MenuMarginsTool",
     "OrderStatusTool",
     "RestockSuggestionsTool",
     "SalesSummaryTool",

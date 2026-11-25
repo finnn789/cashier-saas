@@ -11,3 +11,4 @@ body:
       "email": "{{cashierEmail}}"
     }
 order: 1000
+examples: ./.resources/Issue Cashier Invitation.resources/examples/

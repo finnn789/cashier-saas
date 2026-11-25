@@ -1,0 +1,27 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Kedai Contoh Cabang 2",
+      "timeZone": "Asia/Makassar",
+      "address": "Jl. Cabang 2 No. 5",
+      "phoneNumber": "+6221123457"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      if (pm.response.code >= 200 && pm.response.code < 300) {
+       const r = pm.response.json();
+       if (r.success && r.data && r.data.id) pm.collectionVariables.set("targetOutletId", r.data.id);
+      }
+    language: text/javascript
+description: |-
+  Hanya OWNER. name wajib (maks 120), timeZone wajib (zona IANA valid), address dan phoneNumber opsional. Outlet baru mendapat label pembayaran bawaan dan akses untuk semua OWNERMERCHANT aktif; katalog, stok, dan kasir mulai kosong. FREETIER hanya 1 outlet aktif; Pro/Premium = 1 + add-on outlet. Melebihi jatah = 402. targetOutletId otomatis terisi dari respons.
+order: 3000
+examples: ./.resources/Create Outlet.resources/examples/

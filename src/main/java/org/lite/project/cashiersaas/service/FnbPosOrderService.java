@@ -47,7 +47,7 @@ public class FnbPosOrderService {
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         String idempotencyKey = validatedKey(key);
         String fingerprint = fingerprint(request);
-        orders.lockTenant(context.getTenant().getId());
+        orders.lockOutlet(context.getTenant().getId(), outletId);
         context = guard.requireOutlet(principal, outletId);
         if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
             throw new ResourceNotFoundException();
@@ -78,7 +78,7 @@ public class FnbPosOrderService {
                                               FnbPosOrderRequest request) {
         MerchantAccessContext context = guard.requireOutlet(principal, outletId);
         UUID tenantId = context.getTenant().getId();
-        orders.lockTenant(tenantId);
+        orders.lockOutlet(tenantId, outletId);
         context = guard.requireOutlet(principal, outletId);
         if (!context.getTenant().isActive() || !context.getTenant().isFnbEnabled() || !context.getOutlet().isActive())
             throw new ResourceNotFoundException();
@@ -136,10 +136,14 @@ public class FnbPosOrderService {
     }
 
     private FnbStaffOrderResponse response(SalesOrderEntity order) {
-        List<OrderItemEntity> items = orders.items(order.getTenant().getId(), order.getOutlet().getId(), List.of(order.getId()));
+        UUID tenantId = order.getTenant().getId();
+        UUID outletId = order.getOutlet().getId();
+        List<OrderItemEntity> items = orders.items(tenantId, outletId, List.of(order.getId()));
         List<UUID> itemIds = items.stream().map(OrderItemEntity::getId).toList();
-        List<OrderItemOptionEntity> options = orders.itemOptions(order.getTenant().getId(), order.getOutlet().getId(), itemIds);
-        return FnbStaffOrderMapper.order(order, items, options);
+        List<OrderItemOptionEntity> options = orders.itemOptions(tenantId, outletId, itemIds);
+        return FnbStaffOrderMapper.order(order, items, options,
+                orders.creatorNames(tenantId, outletId, List.of(order.getId())).get(order.getId()),
+                orders.paymentsByOrder(tenantId, outletId, List.of(order.getId())).get(order.getId()));
     }
 
     private static String blankToNull(String value) {

@@ -64,7 +64,12 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.repository.completed_history = AsyncMock(side_effect=self.completed_history)
         self.ai = Mock(spec=OpenRouterClient)
         self.ai.reply = AsyncMock(side_effect=self.reply)
-        self.service = ChatService(self.database, self.channels, self.ai)
+        self.grpc = Mock()
+        self.grpc.consume_ai_question = AsyncMock(return_value={
+            "allowed": True, "reason": "", "used": 1, "limit": 300, "warn": False,
+        })
+        self.grpc.record_ai_usage = AsyncMock()
+        self.service = ChatService(self.database, self.channels, self.ai, grpc_client=self.grpc)
         self.events: list[tuple[str, int]] = []
         self.prompt: list[dict[str, str]] | None = None
         self.input: dict[str, Any] = {
@@ -132,7 +137,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.boundary.active)
         self.assertEqual(self.boundary.events[-1], ("commit", 1))
         self.prompt = prompt
-        return Completion("answer", "model", "provider-id")
+        return Completion("answer", "model", "provider-id", input_tokens=11, output_tokens=5)
 
     async def test_user_commits_before_ai_and_assistant_commits_before_return(self) -> None:
         self.assertEqual(await self.service.handle(**self.input), "answer")
@@ -160,6 +165,13 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.repository.insert_message.assert_awaited_with(
             self.connection, self.conversation_id, self.user_id,
             "private-chat", "ASSISTANT", "answer"
+        )
+        # One question is consumed before the LLM; its tokens are reported afterwards.
+        self.grpc.consume_ai_question.assert_awaited_once_with(
+            tenant_id=str(self.tenant_id), user_id=""
+        )
+        self.grpc.record_ai_usage.assert_awaited_once_with(
+            tenant_id=str(self.tenant_id), input_tokens=11, output_tokens=5
         )
 
     async def test_duplicate_text_skips_session_provider_and_response(self) -> None:

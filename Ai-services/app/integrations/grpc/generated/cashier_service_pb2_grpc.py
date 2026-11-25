@@ -3,10 +3,7 @@
 import grpc
 import warnings
 
-try:
-    from . import cashier_service_pb2 as cashier__service__pb2
-except ImportError:
-    import cashier_service_pb2 as cashier__service__pb2
+import cashier_service_pb2 as cashier__service__pb2
 
 GRPC_GENERATED_VERSION = '1.71.2'
 GRPC_VERSION = grpc.__version__
@@ -62,6 +59,26 @@ class CashierServiceStub(object):
                 request_serializer=cashier__service__pb2.GetAnomaliesRequest.SerializeToString,
                 response_deserializer=cashier__service__pb2.GetAnomaliesResponse.FromString,
                 _registered_method=True)
+        self.ConsumeAiQuestion = channel.unary_unary(
+                '/cashier.v1.CashierService/ConsumeAiQuestion',
+                request_serializer=cashier__service__pb2.ConsumeAiQuestionRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.ConsumeAiQuestionResponse.FromString,
+                _registered_method=True)
+        self.RecordAiUsage = channel.unary_unary(
+                '/cashier.v1.CashierService/RecordAiUsage',
+                request_serializer=cashier__service__pb2.RecordAiUsageRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.RecordAiUsageResponse.FromString,
+                _registered_method=True)
+        self.GetLeakageReport = channel.unary_unary(
+                '/cashier.v1.CashierService/GetLeakageReport',
+                request_serializer=cashier__service__pb2.GetLeakageReportRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.GetLeakageReportResponse.FromString,
+                _registered_method=True)
+        self.GetMenuMargins = channel.unary_unary(
+                '/cashier.v1.CashierService/GetMenuMargins',
+                request_serializer=cashier__service__pb2.GetMenuMarginsRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.GetMenuMarginsResponse.FromString,
+                _registered_method=True)
 
 
 class CashierServiceServicer(object):
@@ -97,6 +114,30 @@ class CashierServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ConsumeAiQuestion(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RecordAiUsage(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetLeakageReport(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetMenuMargins(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_CashierServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -124,6 +165,26 @@ def add_CashierServiceServicer_to_server(servicer, server):
                     servicer.GetAnomalies,
                     request_deserializer=cashier__service__pb2.GetAnomaliesRequest.FromString,
                     response_serializer=cashier__service__pb2.GetAnomaliesResponse.SerializeToString,
+            ),
+            'ConsumeAiQuestion': grpc.unary_unary_rpc_method_handler(
+                    servicer.ConsumeAiQuestion,
+                    request_deserializer=cashier__service__pb2.ConsumeAiQuestionRequest.FromString,
+                    response_serializer=cashier__service__pb2.ConsumeAiQuestionResponse.SerializeToString,
+            ),
+            'RecordAiUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordAiUsage,
+                    request_deserializer=cashier__service__pb2.RecordAiUsageRequest.FromString,
+                    response_serializer=cashier__service__pb2.RecordAiUsageResponse.SerializeToString,
+            ),
+            'GetLeakageReport': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetLeakageReport,
+                    request_deserializer=cashier__service__pb2.GetLeakageReportRequest.FromString,
+                    response_serializer=cashier__service__pb2.GetLeakageReportResponse.SerializeToString,
+            ),
+            'GetMenuMargins': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetMenuMargins,
+                    request_deserializer=cashier__service__pb2.GetMenuMarginsRequest.FromString,
+                    response_serializer=cashier__service__pb2.GetMenuMarginsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -261,6 +322,114 @@ class CashierService(object):
             '/cashier.v1.CashierService/GetAnomalies',
             cashier__service__pb2.GetAnomaliesRequest.SerializeToString,
             cashier__service__pb2.GetAnomaliesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ConsumeAiQuestion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/ConsumeAiQuestion',
+            cashier__service__pb2.ConsumeAiQuestionRequest.SerializeToString,
+            cashier__service__pb2.ConsumeAiQuestionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecordAiUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/RecordAiUsage',
+            cashier__service__pb2.RecordAiUsageRequest.SerializeToString,
+            cashier__service__pb2.RecordAiUsageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetLeakageReport(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/GetLeakageReport',
+            cashier__service__pb2.GetLeakageReportRequest.SerializeToString,
+            cashier__service__pb2.GetLeakageReportResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetMenuMargins(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/GetMenuMargins',
+            cashier__service__pb2.GetMenuMarginsRequest.SerializeToString,
+            cashier__service__pb2.GetMenuMarginsResponse.FromString,
             options,
             channel_credentials,
             insecure,

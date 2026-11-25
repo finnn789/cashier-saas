@@ -7,7 +7,8 @@ import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
 import org.lite.project.cashiersaas.shared.StatusConstants;
 import org.springframework.stereotype.Repository;
 
-import java.util.Optional;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -16,11 +17,17 @@ public class SubscriptionRepository {
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
-    public Optional<SubscriptionEntity> findActiveForTenant(UUID tenantId) {
+    /** Every subscription row of the tenant that is active at {@code now}: the FREETIER base plus any paid row. */
+    public List<SubscriptionEntity> findActiveAt(UUID tenantId, Instant now) {
         return criteriaBuilderFactory.create(entityManager, SubscriptionEntity.class, "subscription")
                 .where("subscription.tenant.id").eq(tenantId)
                 .where("subscription.status").eq(StatusConstants.ACTIVE)
-                .setMaxResults(1).getResultList().stream().findFirst();
+                .where("subscription.startsAt").le(now)
+                .whereOr()
+                    .where("subscription.endsAt").isNull()
+                    .where("subscription.endsAt").gt(now)
+                .endOr()
+                .getResultList();
     }
 
     public void persist(SubscriptionEntity subscription) {

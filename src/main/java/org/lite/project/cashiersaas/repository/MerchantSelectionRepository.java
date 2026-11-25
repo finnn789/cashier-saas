@@ -5,8 +5,6 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.Tuple;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.lite.project.cashiersaas.entity.shared.billing.QSubscriptionEntity;
-import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.MembershipOutletAccessEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.QMembershipOutletAccessEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.QTenantMembershipEntity;
@@ -14,7 +12,6 @@ import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntit
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.QOutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.QTenantEntity;
-import org.lite.project.cashiersaas.shared.StatusConstants;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -27,7 +24,6 @@ public class MerchantSelectionRepository {
     private static final QTenantEntity TENANT = new QTenantEntity("tenant");
     private static final QOutletEntity OUTLET = new QOutletEntity("outlet");
     private static final QMembershipOutletAccessEntity ACCESS = new QMembershipOutletAccessEntity("access");
-    private static final QSubscriptionEntity SUBSCRIPTION = new QSubscriptionEntity("subscription");
 
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
@@ -44,13 +40,8 @@ public class MerchantSelectionRepository {
                     .on(ACCESS.tenant.id.toString()).eqExpression(TENANT.id.toString())
                     .on(ACCESS.outlet.id.toString()).eqExpression(OUTLET.id.toString())
                 .end()
-                .leftJoinOn(SubscriptionEntity.class, SUBSCRIPTION.getMetadata().getName())
-                    .on(SUBSCRIPTION.tenant.id.toString()).eqExpression(TENANT.id.toString())
-                    .on(SUBSCRIPTION.status.toString()).eq(StatusConstants.ACTIVE)
-                .end()
                 .select(MEMBERSHIP.toString())
                 .select(OUTLET.toString())
-                .select(SUBSCRIPTION.toString())
                 .fetch(MEMBERSHIP.user.toString(), TENANT.businessType.toString())
                 .where(MEMBERSHIP.user.id.toString()).eq(userId)
                 .where(TENANT.id.toString()).eq(tenantId)
@@ -59,8 +50,7 @@ public class MerchantSelectionRepository {
                 .setMaxResults(1)
                 .getResultList().stream()
                 .map(row -> new Selection(row.get(0, TenantMembershipEntity.class),
-                        row.get(1, OutletEntity.class),
-                        row.get(2, SubscriptionEntity.class)))
+                        row.get(1, OutletEntity.class)))
                 .findFirst();
     }
 
@@ -69,6 +59,5 @@ public class MerchantSelectionRepository {
     public static class Selection {
         private final TenantMembershipEntity membership;
         private final OutletEntity outlet;
-        private final SubscriptionEntity subscription;
     }
 }

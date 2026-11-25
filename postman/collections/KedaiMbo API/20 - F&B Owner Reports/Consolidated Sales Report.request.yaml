@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/reports/sales?startDate=2026-11-01&endDate=2026-11-14"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Status code is 200 OK", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.expect(r.success).to.be.true;
+      pm.expect(r.data).to.have.property("totals");
+      pm.expect(r.data.outlets).to.be.an("array");
+    language: text/javascript
+description: |-
+  Hanya OWNER. Laporan gabungan semua outlet aktif yang masih dalam jatah paket dan bisa diakses owner (outlet melebihi jatah tidak ikut). Filter startDate dan endDate (YYYY-MM-DD, maks 366 hari); tanggal tiap outlet dibaca menurut zona waktu outlet itu. Paket Free dibatasi 30 hari. totals = jumlah summary semua outlet; outlets[] = outletId, outletName, timeZone, summary per outlet. Hanya transaksi lunas dan tidak dibatalkan. Laporan rinci per outlet tetap lewat Owner Sales Report.
+order: 2000
+examples: ./.resources/Consolidated Sales Report.resources/examples/

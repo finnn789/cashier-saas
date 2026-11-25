@@ -1,0 +1,9 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/merchant/outlets/{{targetOutletId}}/deactivate"
+method: POST
+headers:
+  Accept: application/json
+description: |-
+  Hanya OWNER. Menonaktifkan outlet; data tetap utuh. Ditolak 409 bila ini outlet aktif terakhir atau masih ada shift terbuka. Selalu boleh walau outlet melebihi jatah paket (cara memilih outlet mana yang tetap dipakai). Dicatat di audit log.
+order: 5000
+examples: ./.resources/Deactivate Outlet.resources/examples/

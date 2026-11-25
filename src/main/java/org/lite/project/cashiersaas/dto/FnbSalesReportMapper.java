@@ -63,6 +63,38 @@ public final class FnbSalesReportMapper {
         value.setRefundAmount(refunds.amount);
         return value;
     }
+    /** Sums per-outlet summaries; average and gross profit are recomputed with the same formulas as {@link #summary}. */
+    public static FnbSalesSummaryResponse sum(List<FnbSalesSummaryResponse> parts) {
+        FnbSalesSummaryResponse value = new FnbSalesSummaryResponse();
+        value.setSubtotal(BigDecimal.ZERO);
+        value.setNetSales(BigDecimal.ZERO);
+        value.setTotal(BigDecimal.ZERO);
+        value.setAmountCollected(BigDecimal.ZERO);
+        value.setDiscountAmount(BigDecimal.ZERO);
+        value.setTaxAmount(BigDecimal.ZERO);
+        value.setServiceChargeAmount(BigDecimal.ZERO);
+        value.setCostOfGoodsSold(BigDecimal.ZERO);
+        value.setRefundAmount(BigDecimal.ZERO);
+        for (FnbSalesSummaryResponse part : parts) {
+            value.setSubtotal(value.getSubtotal().add(part.getSubtotal()));
+            value.setNetSales(value.getNetSales().add(part.getNetSales()));
+            value.setTotal(value.getTotal().add(part.getTotal()));
+            value.setAmountCollected(value.getAmountCollected().add(part.getAmountCollected()));
+            value.setTransactionCount(value.getTransactionCount() + part.getTransactionCount());
+            value.setDiscountAmount(value.getDiscountAmount().add(part.getDiscountAmount()));
+            value.setTaxAmount(value.getTaxAmount().add(part.getTaxAmount()));
+            value.setServiceChargeAmount(value.getServiceChargeAmount().add(part.getServiceChargeAmount()));
+            value.setCancellationCount(value.getCancellationCount() + part.getCancellationCount());
+            value.setCostOfGoodsSold(value.getCostOfGoodsSold().add(part.getCostOfGoodsSold()));
+            value.setItemsWithoutCost(value.getItemsWithoutCost() + part.getItemsWithoutCost());
+            value.setRefundCount(value.getRefundCount() + part.getRefundCount());
+            value.setRefundAmount(value.getRefundAmount().add(part.getRefundAmount()));
+        }
+        value.setAverageTransaction(value.getTransactionCount() == 0 ? BigDecimal.ZERO
+                : value.getTotal().divide(BigDecimal.valueOf(value.getTransactionCount()), 2, RoundingMode.HALF_UP));
+        value.setGrossProfit(value.getNetSales().subtract(value.getCostOfGoodsSold()));
+        return value;
+    }
     public static List<FnbSalesProductResponse> products(List<ProductRow> rows) {
         return rows.stream().map(row -> {
             FnbSalesProductResponse value = new FnbSalesProductResponse();

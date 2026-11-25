@@ -6,6 +6,7 @@ import org.lite.project.cashiersaas.entity.shared.inventory.InventoryMovementEnt
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -19,5 +20,7 @@ public class FnbStockMovementResponse {
     private UUID orderId;
     private Instant occurredAt;
     private UUID actorMembershipId;
+    private String actorName;
     private BigDecimal unitCost;
+    private List<String> marginWarnings = List.of();
 }

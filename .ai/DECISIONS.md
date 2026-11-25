@@ -2,6 +2,43 @@
 
 The PRD and explicit user instructions remain authoritative; this file records decisions captured during AI Services work.
 
+## PRD v3 and refactor-not-rebuild — 2026-11-20
+
+- Explicit user instruction: old PRD v2.2 removed; `PRD-MVP.md` is now PRD v3 ("Kasir SaaS Multi-Outlet dengan AI"). Its §0 reconciliation table is binding where the new document conflicts with the code: stack, layout, auth, money type and Java<->Python integration stay as in `AGENTS.md`; RLS, ArchUnit, transfers, Manager/PIN later; offline after pilot; plans and business rules kept in Lampiran A.
+- User chose refactor of the existing repo, not a rebuild. Slice order: (1) opname + leakage, (2) margin alerts, (3) purchase + OCR, (4) AI command agent with approval + per-outlet price, (5) Manager/PIN, transfer, RLS, ArchUnit.
+- AI write actions are allowed only through proposal + explicit approval (slice 4); otherwise AI stays read-only.
+- OPEN USER DECISION: add role `MANAGER` (recommended) or keep 3 roles. Not needed before slice 5.
+- New housekeeping agent `.claude/agents/tidy-worker.md` (haiku) for non-code file moves/link fixes.
+
+## Multi-outlet — 2026-11-14 (TASK-083)
+
+- Explicit user instruction: multi-outlet comes into scope now (was post-pilot). Supersedes "Multi-outlet is a later per-outlet add-on" below and PRD §5/§16 wording.
+- Orchestrator decisions M1-M7 (TASK-083 packet, removed in tidy; see Git history): FREETIER = 1 outlet; PRO/PREMIUM = 1 + `extra_outlets` of active paid rows (operator-activated add-on, Rp49.000/outlet/month, expires with the paid row, trial gives none); over-allowance outlets (ranked by created_at, id) are unusable (402) but never deleted, first outlet always usable; outlet lock replaces the tenant lock for operational writes (tenant lock only for business settings); AI quota stays on `tenants.time_zone` (billing zone), which follows business settings only while one outlet is active; consolidated owner report sums usable outlets, each in its own zone.
+
+## Subscription plans and AI quota — 2026-11-14
+
+- Explicit user decision: Free = 1 outlet, owner only (owner runs the POS, no cashier invitations, no multi-outlet). Pro = staff/cashier invitations and cashier controls plus the full analytics dashboard. Premium = Pro + owner AI assistant. Multi-outlet is a later per-outlet add-on, not a Pro launch feature (the per-tenant lock must change first).
+- User accepted the orchestrator recommendation, with prices lowered to cover infrastructure and token cost:
+  - Pro Rp59.000/month or Rp590.000/year.
+  - Premium Rp119.000/month or Rp1.190.000/year.
+  - AI top-up: +200 questions for Rp29.000.
+  - Extra outlet: Rp49.000/month (after multi-outlet exists).
+- The AI is metered per question, not by credits or tokens.
+  - Premium includes 300 questions/month; daily summaries do not count.
+  - Users are warned at 80% and 100%.
+  - Hard cap: 40 questions per tenant per day.
+  - At most 4 LLM calls per question (today the LangGraph default recursion limit applies; must be capped).
+  - Per-tenant token usage is logged from the LLM `usage` field.
+- Default model: DeepSeek V4.1 Flash via OpenRouter (`AI_MODEL`). Cost budget Rp100/question; worst case about Rp165 under the current prompt (21000 bytes) and output (1024 tokens) limits.
+- Other PRD §16 items closed:
+  - AI summary time: after the last shift closes, fallback 23:00 outlet time, Premium only.
+  - Printing: browser printing with 58 mm and 80 mm layouts.
+  - Cashier discount limit stays 0.
+- Downgrade keeps all data: cashiers are deactivated and the bot refuses.
+- Pilot billing is manual transfer plus SUPERADMIN activation.
+- Free gets an automatic one-time 14-day Premium trial after its first 50 transactions.
+- Enforcement is not implemented yet (needs a task packet). Details are in `PRD-MVP.md` §8.15.
+
 ## F&B ingredient inventory and recipes — 2026-11-10
 
 - Scope change by explicit user instruction: `PRD-MVP.md` §5 listed "Inventori bahan baku dan resep" as post-MVP; it is now in scope (TASK-061). PRD text itself is not edited; this entry supersedes §5 for this item.
@@ -9,7 +46,7 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - CASHIER may RESTOCK and WASTE; ADJUSTMENT, ingredient CRUD and recipes are OWNERMERCHANT only.
 - One unit per ingredient, no unit conversion. Add-on stock is a recipe line on the option; reusable option groups across products is Phase 2 (after TASK-061).
 - Product category stays dynamic data (no FOOD/DRINK enum). Stock is deducted only when an order becomes paid (both settle paths); paid orders cannot be cancelled, so no stock reversal exists.
-- Workers must reuse existing code and avoid new files/duplicate functions (see tasks/TASK-061.md "Reuse rules").
+- Workers must reuse existing code and avoid new files/duplicate functions (see TASK-061 "Reuse rules" in Git history).
 
 ## AI Services schema — 2026-10-13
 

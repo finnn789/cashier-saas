@@ -45,6 +45,7 @@ public class CashierCatalogGrpcHandler extends CashierServiceGrpc.CashierService
 
             UUID tenantId = tenantAccessPolicy.requireAllowedTenant(request.getTenantId());
             List<UUID> outletIds = tenantAccessPolicy.requireMemberOutlets(tenantId, request.getUserId());
+            tenantAccessPolicy.requirePremium(tenantId);
             int limit = tenantAccessPolicy.clampLimit(request.getLimit());
 
             CriteriaBuilder<ProductEntity> queryBuilder = criteriaBuilderFactory.create(entityManager, ProductEntity.class, "p")

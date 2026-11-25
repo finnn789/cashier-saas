@@ -6,10 +6,13 @@ import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.OrderItemOptionEntity;
+import org.lite.project.cashiersaas.entity.fnb.PaymentEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemEntity;
 import org.lite.project.cashiersaas.entity.fnb.QOrderItemOptionEntity;
 import org.lite.project.cashiersaas.entity.fnb.QSalesOrderEntity;
 import org.lite.project.cashiersaas.entity.fnb.SalesOrderEntity;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
+import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.OrderSource;
 import org.lite.project.cashiersaas.enums.OrderStatus;
@@ -33,12 +36,25 @@ public class FnbOrderRepository {
     private final EntityManager entityManager;
     private final CriteriaBuilderFactory criteriaBuilderFactory;
 
-    // A tenant row lock serializes checkout with the same idempotency key.
+    // Tenant-level lock, kept only for tenant-wide settings (currency, tax, billing time zone).
     public void lockTenant(UUID tenantId) {
         TenantEntity tenant = criteriaBuilderFactory.create(entityManager, TenantEntity.class, "tenant")
                 .where("tenant.id").eq(tenantId).setMaxResults(1).getResultList().stream()
                 .findFirst().orElseThrow(ResourceNotFoundException::new);
         entityManager.refresh(tenant, LockModeType.PESSIMISTIC_WRITE);
+    }
+
+    // An outlet row lock serializes order/payment/shift work (and same-key checkout) within one outlet only.
+    public void lockOutlet(UUID tenantId, UUID outletId) {
+        OutletEntity outlet = criteriaBuilderFactory.create(entityManager, OutletEntity.class, "outlet")
+                .where("outlet.tenant.id").eq(tenantId).where("outlet.id").eq(outletId)
+                .setMaxResults(1).getResultList().stream().findFirst().orElseThrow(ResourceNotFoundException::new);
+        entityManager.refresh(outlet, LockModeType.PESSIMISTIC_WRITE);
+    }
+
+    public long countActiveOutlets(UUID tenantId) {
+        return entityManager.createQuery("select count(o) from OutletEntity o where o.tenant.id = :tenantId and o.active = true",
+                Long.class).setParameter("tenantId", tenantId).getSingleResult();
     }
 
     public Optional<SalesOrderEntity> byIdempotency(UUID tenant, String key) {
@@ -89,6 +105,32 @@ public class FnbOrderRepository {
                 .setParameter("paid", PaymentStatus.PAID).setParameter("cancelled", OrderStatus.CANCELLED).getResultList())
             counts.put((UUID) row[0], (Long) row[1]);
         return counts;
+    }
+
+    /** Order id to the full name of the staff who created it (FNB_ORDER_CREATED audit actor); orders without one are absent. */
+    public Map<UUID, String> creatorNames(UUID tenantId, UUID outletId, List<UUID> orderIds) {
+        Map<UUID, String> names = new HashMap<>();
+        if (orderIds.isEmpty()) return names;
+        for (Object[] row : entityManager.createQuery("select l.entityId, l.actor.fullName from AuditLogEntity l "
+                        + "where l.tenant.id = :tenantId and l.outlet.id = :outletId and l.action = :action "
+                        + "and l.entityId in :orderIds and l.actor is not null", Object[].class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("action", AuditLogEntity.Action.FNB_ORDER_CREATED.name())
+                .setParameter("orderIds", orderIds).getResultList())
+            names.put((UUID) row[0], (String) row[1]);
+        return names;
+    }
+
+    /** Order id to its payment (at most one per order), receiver fetched; unpaid orders are absent. */
+    public Map<UUID, PaymentEntity> paymentsByOrder(UUID tenantId, UUID outletId, List<UUID> orderIds) {
+        Map<UUID, PaymentEntity> payments = new HashMap<>();
+        if (orderIds.isEmpty()) return payments;
+        for (PaymentEntity payment : entityManager.createQuery("select p from PaymentEntity p join fetch p.receivedBy "
+                        + "where p.tenant.id = :tenantId and p.outlet.id = :outletId and p.salesOrder.id in :orderIds", PaymentEntity.class)
+                .setParameter("tenantId", tenantId).setParameter("outletId", outletId)
+                .setParameter("orderIds", orderIds).getResultList())
+            payments.put(payment.getSalesOrder().getId(), payment);
+        return payments;
     }
 
     public List<OrderItemEntity> items(UUID tenantId, UUID outletId, List<UUID> orderIds) {
