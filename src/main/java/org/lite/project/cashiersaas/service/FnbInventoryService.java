@@ -154,7 +154,9 @@ public class FnbInventoryService {
                 throw new OperationConflictException("Kunci idempotensi telah digunakan.");
             FnbStockCountResponse replayed = new FnbStockCountResponse();
             replayed.setStockCountId(recorded.getId());
-            replayed.setLines(inventory.stockCountLines(tenantId, recorded.getId()).stream().map(FnbInventoryMapper::stockCountLine).toList());
+            // The query orders by name (leakage report); a replay must match the first response, ordered by item id.
+            replayed.setLines(inventory.stockCountLines(tenantId, recorded.getId()).stream().map(FnbInventoryMapper::stockCountLine)
+                    .sorted(Comparator.comparing(FnbStockCountLineResponse::getInventoryItemId)).toList());
             return replayed;
         }
         List<InventoryItemEntity> items = lines.stream()
