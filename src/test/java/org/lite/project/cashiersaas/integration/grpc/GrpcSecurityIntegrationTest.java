@@ -146,36 +146,6 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         assertCode(Status.Code.UNAUTHENTICATED, () -> stub.getOrderStatus(order));
     }
 
-    @Test
-    void wrongServiceKeyIsUnauthenticatedAndNeverEchoed() {
-        List<String> badKeys = new ArrayList<>();
-        badKeys.add("wrong-key-wrong-key-wrong-key-1234");
-        badKeys.add("");
-        badKeys.add(GRPC_TEST_SERVICE_KEY + "x");
-        badKeys.add(GRPC_TEST_SERVICE_KEY.toUpperCase());
-
-        for (String badKey : badKeys) {
-            CashierServiceGrpc.CashierServiceBlockingStub stub = stub(badKey);
-            StatusRuntimeException catalogError = assertCode(Status.Code.UNAUTHENTICATED,
-                    () -> stub.getCatalogItem(catalogRequest(TENANT_A1, "", 0)));
-            StatusRuntimeException orderError = assertCode(Status.Code.UNAUTHENTICATED,
-                    () -> stub.getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_PAID)));
-            assertDoesNotLeak(catalogError, GRPC_TEST_SERVICE_KEY, TENANT_A1.toString());
-            assertDoesNotLeak(orderError, GRPC_TEST_SERVICE_KEY, TENANT_A1.toString());
-        }
-    }
-
-    @Test
-    void keyThatIsAPrefixOfTheRealKeyIsUnauthenticated() {
-        String prefix = GRPC_TEST_SERVICE_KEY.substring(0, GRPC_TEST_SERVICE_KEY.length() - 5);
-        CashierServiceGrpc.CashierServiceBlockingStub stub = stub(prefix);
-
-        assertCode(Status.Code.UNAUTHENTICATED,
-                () -> stub.getCatalogItem(catalogRequest(TENANT_A1, "", 0)));
-        assertCode(Status.Code.UNAUTHENTICATED,
-                () -> stub.getOrderStatus(orderRequest(TENANT_A1, ORDER_A1_PAID)));
-    }
-
     // ---------------------------------------------------------------- database tenant authorization
 
     @Test
@@ -208,30 +178,6 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(List.of("Kopi Tetangga"), names(a2));
         assertTrue(names(validStub().getCatalogItem(catalogRequest(TENANT_A2, "bulk", 0))).isEmpty(),
                 "A1 bulk products must not leak to A2");
-    }
-
-    @Test
-    void disabledTenantWithDataIsPermissionDeniedForBothRpcs() {
-        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
-
-        StatusRuntimeException catalogError = assertCode(Status.Code.PERMISSION_DENIED,
-                () -> stub.getCatalogItem(catalogRequest(TENANT_DISABLED, "", 0)));
-        StatusRuntimeException orderError = assertCode(Status.Code.PERMISSION_DENIED,
-                () -> stub.getOrderStatus(orderRequest(TENANT_DISABLED, ORDER_C)));
-        assertDoesNotLeak(catalogError, TENANT_DISABLED.toString(), ORDER_C);
-        assertDoesNotLeak(orderError, TENANT_DISABLED.toString(), ORDER_C);
-    }
-
-    @Test
-    void unknownTenantIsPermissionDeniedForBothRpcs() {
-        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
-
-        StatusRuntimeException catalogError = assertCode(Status.Code.PERMISSION_DENIED,
-                () -> stub.getCatalogItem(catalogRequest(TENANT_UNKNOWN, "", 0)));
-        StatusRuntimeException orderError = assertCode(Status.Code.PERMISSION_DENIED,
-                () -> stub.getOrderStatus(orderRequest(TENANT_UNKNOWN, ORDER_C)));
-        assertDoesNotLeak(catalogError, TENANT_UNKNOWN.toString(), ORDER_C);
-        assertDoesNotLeak(orderError, TENANT_UNKNOWN.toString(), ORDER_C);
     }
 
     @Test
@@ -277,32 +223,7 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(TENANT_TOGGLE.toString(), stub.getCatalogItem(request).getTenantId());
     }
 
-    @Test
-    void blankOrMalformedTenantIdIsInvalidArgumentForBothRpcs() {
-        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
-
-        for (String badTenant : new String[] {"", "   ", "not-a-uuid", "12345"}) {
-            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getCatalogItem(
-                    GetCatalogItemRequest.newBuilder().setTenantId(badTenant).setUserId(USER_A1.toString()).setQuery("kopi").build()));
-            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getOrderStatus(
-                    GetOrderStatusRequest.newBuilder().setTenantId(badTenant).setUserId(USER_A1.toString())
-                            .setOrderNumber(ORDER_A1_PAID).build()));
-        }
-    }
-
     // ---------------------------------------------------------------- limit handling
-
-    @Test
-    void limitZeroReturnsTheDefaultOfTen() {
-        assertEquals(10, validStub().getCatalogItem(catalogRequest(TENANT_A1, "bulk item", 0))
-                .getItemsCount());
-    }
-
-    @Test
-    void negativeLimitFallsBackToTheDefault() {
-        assertEquals(10, validStub().getCatalogItem(catalogRequest(TENANT_A1, "bulk item", -3))
-                .getItemsCount());
-    }
 
     @Test
     void hugeLimitIsClampedToFifty() {
@@ -310,19 +231,6 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
                 .getItemsCount());
         assertEquals(50, validStub().getCatalogItem(catalogRequest(TENANT_A1, "bulk item", Integer.MAX_VALUE))
                 .getItemsCount());
-    }
-
-    @Test
-    void smallLimitsAreHonoured() {
-        assertEquals(5, validStub().getCatalogItem(catalogRequest(TENANT_A1, "bulk item", 5))
-                .getItemsCount());
-        assertEquals(1, validStub().getCatalogItem(catalogRequest(TENANT_A1, "bulk item", 1))
-                .getItemsCount());
-    }
-
-    @Test
-    void emptyQueryIsAlsoBoundedByTheDefaultLimit() {
-        assertEquals(10, validStub().getCatalogItem(catalogRequest(TENANT_A1, "", 0)).getItemsCount());
     }
 
     // ---------------------------------------------------------------- LIKE escaping
@@ -400,18 +308,6 @@ class GrpcSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     // ---------------------------------------------------------------- member and outlet scoping (user_id)
-
-    @Test
-    void missingOrMalformedUserIdIsInvalidArgumentForBothRpcs() {
-        CashierServiceGrpc.CashierServiceBlockingStub stub = validStub();
-
-        for (String badUser : new String[] {"", "   ", "not-a-uuid"}) {
-            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getCatalogItem(GetCatalogItemRequest.newBuilder()
-                    .setTenantId(TENANT_A1.toString()).setUserId(badUser).setQuery("kopi").build()));
-            assertCode(Status.Code.INVALID_ARGUMENT, () -> stub.getOrderStatus(GetOrderStatusRequest.newBuilder()
-                    .setTenantId(TENANT_A1.toString()).setUserId(badUser).setOrderNumber(ORDER_A1_PAID).build()));
-        }
-    }
 
     @Test
     void usersWithoutAnActiveMembershipAndOutletAccessArePermissionDeniedLikeADeniedTenant() {

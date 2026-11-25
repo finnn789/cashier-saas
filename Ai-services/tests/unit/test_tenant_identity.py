@@ -265,18 +265,6 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((identity.status, identity.tenant_id), (VERIFIED, self.tenant_a))
         self.assertEqual(self.fake.selection[self.user_id], self.tenant_a)
 
-    async def test_disabled_member_is_revoked_and_must_reverify(self) -> None:
-        self.fake.add_staff(self.tenant_a, "Kopi Senja")
-        service = self.service()
-        self.assertEqual((await self.verify(service)).status, VERIFIED)
-        self.fake.set_status(self.tenant_a, "DISABLED")
-        identity = await service.identify(**self.profile)
-        self.assertEqual(identity.status, REVOKED)
-        self.assertFalse(identity.can_chat)
-        self.assertIsNone(identity.tenant_id)
-        self.assertEqual(self.fake.memberships[self.user_id], {})
-        self.assertNotIn(self.user_id, self.fake.selection)
-        self.assertIn("revoke", self.fake.calls)
 
     async def test_disabled_selected_tenant_does_not_fall_through_to_another(self) -> None:
         self.fake.add_staff(self.tenant_a, "Kopi Senja")

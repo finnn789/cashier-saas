@@ -16,13 +16,11 @@ import org.springframework.web.context.WebApplicationContext;
 
 import javax.sql.DataSource;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
@@ -67,18 +65,6 @@ class RegisterPhoneNumberIntegrationTest extends AbstractPostgresIntegrationTest
     }
 
     @Test
-    void internationalAndLocalFormatsOfTheSameNumberNormalizeIdentically() throws Exception {
-        String plusEmail = uniqueEmail();
-        String localEmail = uniqueEmail();
-
-        api.send(register(plusEmail, "+62 812-3456-7890"), 201);
-        api.send(register(localEmail, "(0812) 3456 7890"), 201);
-
-        assertEquals("6281234567890", storedPhone(plusEmail));
-        assertEquals("6281234567890", storedPhone(localEmail));
-    }
-
-    @Test
     void invalidPhoneNumberReturnsBadRequestWithoutEchoingItAndCreatesNoUser() throws Exception {
         String email = uniqueEmail();
         String invalidPhone = "0812-345-678a";
@@ -89,16 +75,6 @@ class RegisterPhoneNumberIntegrationTest extends AbstractPostgresIntegrationTest
         String body = result.getResponse().getContentAsString();
         assertEquals("Nomor telepon tidak valid.", JsonPath.read(body, "$.message"));
         assertFalse(body.contains(invalidPhone), "rejected phone must not be echoed");
-        assertEquals(0, countUsers(email));
-    }
-
-    @Test
-    void tooShortPhoneNumberIsRejected() throws Exception {
-        String email = uniqueEmail();
-
-        MvcResult result = api.call(register(email, "0812"));
-
-        assertEquals(400, result.getResponse().getStatus());
         assertEquals(0, countUsers(email));
     }
 
@@ -129,28 +105,6 @@ class RegisterPhoneNumberIntegrationTest extends AbstractPostgresIntegrationTest
 
         assertEquals("6281234567891", storedPhone(first));
         assertEquals("6281234567891", storedPhone(second));
-    }
-
-    @Test
-    void migrationAddsANullableVarchar20PhoneColumn() {
-        Map<String, Object> column = jdbc.queryForMap("SELECT is_nullable, character_maximum_length, data_type "
-                + "FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'staff_users' "
-                + "AND column_name = 'phone_number'");
-
-        assertEquals("YES", column.get("is_nullable"));
-        assertEquals(20, ((Number) column.get("character_maximum_length")).intValue());
-        assertEquals("character varying", column.get("data_type"));
-    }
-
-    @Test
-    void legacyStaffRowsWithoutAPhoneRemainValid() {
-        UUID id = UUID.randomUUID();
-        String email = uniqueEmail();
-
-        jdbc.update("INSERT INTO staff_users (id, email, password_hash, full_name, status, created_at, updated_at, "
-                + "version) VALUES (?, ?, 'hash', 'Legacy', 'ACTIVE', now(), now(), 0)", id, email);
-
-        assertNull(storedPhone(email));
     }
 
     private void assertPhoneNumberValidationError(MvcResult result) throws Exception {

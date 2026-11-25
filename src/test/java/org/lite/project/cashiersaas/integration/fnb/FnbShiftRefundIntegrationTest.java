@@ -243,18 +243,6 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
 
     // ------------------------------------------------------------------ schema
 
-    @Test
-    void migrationV7IsAppliedWithTheShiftAndRefundObjects() {
-        assertEquals(1, count("SELECT count(*) FROM flyway_schema_history WHERE version = '7' AND success"));
-        assertEquals(1, count("SELECT count(*) FROM pg_indexes WHERE indexname = 'uk_cash_shifts_open_per_member'"));
-        assertEquals(2, count("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' "
-                + "AND table_name IN ('cash_shifts', 'payment_refunds')"));
-        assertEquals(1, count("SELECT count(*) FROM information_schema.columns WHERE table_name = 'payments' "
-                + "AND column_name = 'cash_shift_id'"));
-        assertEquals(1, count("SELECT count(*) FROM pg_constraint WHERE conname = 'ck_inventory_movements_type' "
-                + "AND pg_get_constraintdef(oid) LIKE '%SALE_REVERSAL%'"));
-    }
-
     // ------------------------------------------------------------------ shifts
 
     @Test

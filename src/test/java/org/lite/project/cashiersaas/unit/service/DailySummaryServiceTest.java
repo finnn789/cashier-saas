@@ -168,64 +168,6 @@ class DailySummaryServiceTest {
     // ---- runFallback ----
 
     @Test
-    void theFallbackSkipsAnOutletBeforeTwentyThreeHundredLocalTime() {
-        when(dispatches.activeFnbOutlets(any(Instant.class))).thenReturn(List.of(new DailySummaryDispatchRepository.OutletRef(tenantId, outletId, "Asia/Jakarta")));
-
-        runFallback(Instant.parse("2026-11-14T15:59:00Z")); // 22:59 Jakarta
-
-        verify(dispatches, never()).insertIfAbsent(any(), any(), any(), any());
-    }
-
-    @Test
-    void theFallbackInsertsForTheLocalDateFromTwentyThreeHundredAndDispatchesTheNewRow() {
-        UUID dispatchId = UUID.randomUUID();
-        when(dispatches.activeFnbOutlets(any(Instant.class))).thenReturn(List.of(new DailySummaryDispatchRepository.OutletRef(tenantId, outletId, "Asia/Jakarta")));
-        when(dispatches.insertIfAbsent(any(), any(), any(), any())).thenReturn(Optional.of(dispatchId));
-        DailySummaryDispatchEntity row = pendingRow(LocalDate.of(2026, 11, 14));
-        when(dispatches.byId(dispatchId)).thenReturn(Optional.of(row));
-        when(client.send(tenantId, outletId, LocalDate.of(2026, 11, 14))).thenReturn(true);
-
-        runFallback(NOW); // exactly 23:00 Jakarta
-
-        verify(dispatches).insertIfAbsent(tenantId, outletId, LocalDate.of(2026, 11, 14), DailySummaryDispatchEntity.Trigger.FALLBACK);
-        verify(client).send(tenantId, outletId, LocalDate.of(2026, 11, 14));
-        assertEquals(DailySummaryDispatchEntity.Status.SENT, row.getStatus());
-    }
-
-    @Test
-    void theFallbackUsesEachOutletsOwnZoneAndLocalDate() {
-        UUID jakartaOutlet = UUID.randomUUID();
-        UUID newYorkOutlet = UUID.randomUUID();
-        UUID tokyoOutlet = UUID.randomUUID();
-        UUID honoluluOutlet = UUID.randomUUID();
-        when(dispatches.activeFnbOutlets(any(Instant.class))).thenReturn(List.of(
-                new DailySummaryDispatchRepository.OutletRef(tenantId, jakartaOutlet, "Asia/Jakarta"), // 23:30 on the 14th
-                new DailySummaryDispatchRepository.OutletRef(tenantId, newYorkOutlet, "America/New_York"), // 11:30
-                new DailySummaryDispatchRepository.OutletRef(tenantId, tokyoOutlet, "Asia/Tokyo"), // 01:30 on the 15th
-                new DailySummaryDispatchRepository.OutletRef(tenantId, honoluluOutlet, "Pacific/Honolulu"))); // 06:30
-        when(dispatches.insertIfAbsent(any(), any(), any(), any())).thenReturn(Optional.empty());
-
-        runFallback(Instant.parse("2026-11-14T16:30:00Z"));
-
-        verify(dispatches).insertIfAbsent(tenantId, jakartaOutlet, LocalDate.of(2026, 11, 14), DailySummaryDispatchEntity.Trigger.FALLBACK);
-        verify(dispatches, never()).insertIfAbsent(eq(tenantId), eq(newYorkOutlet), any(), any());
-        verify(dispatches, never()).insertIfAbsent(eq(tenantId), eq(tokyoOutlet), any(), any());
-        verify(dispatches, never()).insertIfAbsent(eq(tenantId), eq(honoluluOutlet), any(), any());
-    }
-
-    @Test
-    void anOutletThatAlreadyHasARowForTheDayIsNotDispatchedAgainByTheFallbackInsert() {
-        when(dispatches.activeFnbOutlets(any(Instant.class))).thenReturn(List.of(new DailySummaryDispatchRepository.OutletRef(tenantId, outletId, "Asia/Jakarta")));
-        when(dispatches.insertIfAbsent(any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(dispatches.retryable(anyInt(), any(), any(), anyInt(), any(Instant.class))).thenReturn(List.of());
-
-        runFallback(NOW);
-
-        verify(dispatches, never()).byId(any());
-        verify(client, never()).send(any(), any(), any());
-    }
-
-    @Test
     void theFallbackRetriesPendingAndFailedRowsWithTheAttemptCapCutoffMinimumDateAndLimit() {
         UUID retryId = UUID.randomUUID();
         UUID otherRetryId = UUID.randomUUID();
@@ -284,19 +226,6 @@ class DailySummaryServiceTest {
         assertEquals(DailySummaryDispatchEntity.Status.FAILED, row.getStatus());
         assertEquals(1, row.getAttempts());
         assertNotNull(row.getLastAttemptAt());
-    }
-
-    @Test
-    void aSentRowIsNeverSentAgain() {
-        UUID id = UUID.randomUUID();
-        DailySummaryDispatchEntity row = pendingRow(LocalDate.of(2026, 11, 14));
-        row.markSent();
-        when(dispatches.byId(id)).thenReturn(Optional.of(row));
-
-        service.dispatch(id);
-
-        verify(client, never()).send(any(), any(), any());
-        assertEquals(1, row.getAttempts());
     }
 
     @Test

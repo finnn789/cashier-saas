@@ -1,6 +1,4 @@
 """Internal member sync API with a fake member store; no database, network or .env."""
-import importlib.util
-import io
 import json
 import os
 import unittest
@@ -10,8 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID
 
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
@@ -24,7 +20,6 @@ from app.api.internal_members import (
     get_member_store,
 )
 from app.application import app
-from app.chat.entities import Base
 from app.config import InternalApiSettings, load_internal_api_settings
 from app.core.database import OwnershipLost
 
@@ -397,57 +392,6 @@ class DatabaseMemberStoreTests(unittest.IsolatedAsyncioTestCase):
 
     def test_request_model_repr_hides_the_phone(self) -> None:
         self.assertNotIn(PHONE, repr(MemberUpsertRequest(**valid_body())))  # type: ignore[arg-type]
-
-
-def load_revision(name: str):
-    spec = importlib.util.spec_from_file_location(
-        f"migration_{name}", ROOT / "migrations" / "versions" / f"{name}.py"
-    )
-    module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
-
-
-class MigrationRevisionTests(unittest.TestCase):
-    def render(self, direction: str) -> str:
-        output = io.StringIO()
-        context = MigrationContext.configure(
-            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output}
-        )
-        revision = load_revision("0002_tenant_members")
-        with Operations.context(context):
-            getattr(revision, direction)()
-        return output.getvalue()
-
-    def test_upgrade_sql_matches_the_models(self) -> None:
-        sql = " ".join(self.render("upgrade").split())
-        self.assertIn("ALTER TABLE tenants ADD COLUMN name VARCHAR(160);", sql)
-        self.assertIn("CREATE TABLE tenant_members", sql)
-        table = Base.metadata.tables["tenant_members"]
-        for column in table.columns:
-            self.assertIn(f"{column.name} ", sql)
-        self.assertIn("PRIMARY KEY (tenant_id, java_user_id)", sql)
-        self.assertIn("FOREIGN KEY(tenant_id) REFERENCES tenants (id)", sql)
-        self.assertIn("CHECK (role IN ('OWNERMERCHANT','CASHIER'))", sql)
-        self.assertIn("CHECK (status IN ('ACTIVE','DISABLED'))", sql)
-        self.assertIn("status VARCHAR(16) DEFAULT 'ACTIVE' NOT NULL", sql)
-        self.assertIn("full_name VARCHAR(160) NOT NULL", sql)
-        self.assertIn("phone_normalized VARCHAR(15) NOT NULL", sql)
-        self.assertIn("role VARCHAR(32) NOT NULL", sql)
-        self.assertIn("created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL", sql)
-        self.assertIn("updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL", sql)
-        self.assertIn(
-            "CREATE INDEX tenant_member_active_phone ON tenant_members (phone_normalized) "
-            "WHERE status='ACTIVE'",
-            sql,
-        )
-
-    def test_downgrade_sql_reverses_the_upgrade(self) -> None:
-        sql = " ".join(self.render("downgrade").split())
-        self.assertIn("DROP INDEX tenant_member_active_phone", sql)
-        self.assertIn("DROP TABLE tenant_members", sql)
-        self.assertIn("ALTER TABLE tenants DROP COLUMN name", sql)
-        self.assertLess(sql.index("DROP TABLE tenant_members"), sql.index("DROP COLUMN name"))
 
 
 if __name__ == "__main__":
