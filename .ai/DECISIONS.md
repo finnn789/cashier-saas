@@ -2,10 +2,18 @@
 
 The PRD and explicit user instructions remain authoritative; this file records decisions captured during AI Services work.
 
+## PRD v3 and refactor-not-rebuild — 2026-11-20
+
+- Explicit user instruction: old PRD v2.2 removed; `PRD-MVP.md` is now PRD v3 ("Kasir SaaS Multi-Outlet dengan AI"). Its §0 reconciliation table is binding where the new document conflicts with the code: stack, layout, auth, money type and Java<->Python integration stay as in `AGENTS.md`; RLS, ArchUnit, transfers, Manager/PIN later; offline after pilot; plans and business rules kept in Lampiran A.
+- User chose refactor of the existing repo, not a rebuild. Slice order: (1) opname + leakage, (2) margin alerts, (3) purchase + OCR, (4) AI command agent with approval + per-outlet price, (5) Manager/PIN, transfer, RLS, ArchUnit.
+- AI write actions are allowed only through proposal + explicit approval (slice 4); otherwise AI stays read-only.
+- OPEN USER DECISION: add role `MANAGER` (recommended) or keep 3 roles. Not needed before slice 5.
+- New housekeeping agent `.claude/agents/tidy-worker.md` (haiku) for non-code file moves/link fixes.
+
 ## Multi-outlet — 2026-11-14 (TASK-083)
 
 - Explicit user instruction: multi-outlet comes into scope now (was post-pilot). Supersedes "Multi-outlet is a later per-outlet add-on" below and PRD §5/§16 wording.
-- Orchestrator decisions M1-M7 in `tasks/TASK-083.md`: FREETIER = 1 outlet; PRO/PREMIUM = 1 + `extra_outlets` of active paid rows (operator-activated add-on, Rp49.000/outlet/month, expires with the paid row, trial gives none); over-allowance outlets (ranked by created_at, id) are unusable (402) but never deleted, first outlet always usable; outlet lock replaces the tenant lock for operational writes (tenant lock only for business settings); AI quota stays on `tenants.time_zone` (billing zone), which follows business settings only while one outlet is active; consolidated owner report sums usable outlets, each in its own zone.
+- Orchestrator decisions M1-M7 (TASK-083 packet, removed in tidy; see Git history): FREETIER = 1 outlet; PRO/PREMIUM = 1 + `extra_outlets` of active paid rows (operator-activated add-on, Rp49.000/outlet/month, expires with the paid row, trial gives none); over-allowance outlets (ranked by created_at, id) are unusable (402) but never deleted, first outlet always usable; outlet lock replaces the tenant lock for operational writes (tenant lock only for business settings); AI quota stays on `tenants.time_zone` (billing zone), which follows business settings only while one outlet is active; consolidated owner report sums usable outlets, each in its own zone.
 
 ## Subscription plans and AI quota — 2026-11-14
 
@@ -38,7 +46,7 @@ The PRD and explicit user instructions remain authoritative; this file records d
 - CASHIER may RESTOCK and WASTE; ADJUSTMENT, ingredient CRUD and recipes are OWNERMERCHANT only.
 - One unit per ingredient, no unit conversion. Add-on stock is a recipe line on the option; reusable option groups across products is Phase 2 (after TASK-061).
 - Product category stays dynamic data (no FOOD/DRINK enum). Stock is deducted only when an order becomes paid (both settle paths); paid orders cannot be cancelled, so no stock reversal exists.
-- Workers must reuse existing code and avoid new files/duplicate functions (see tasks/TASK-061.md "Reuse rules").
+- Workers must reuse existing code and avoid new files/duplicate functions (see TASK-061 "Reuse rules" in Git history).
 
 ## AI Services schema — 2026-10-13
 

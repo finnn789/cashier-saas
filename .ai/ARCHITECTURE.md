@@ -5,7 +5,7 @@ Evidence: current working-tree source, pom.xml, AGENTS.md, PRD-MVP.md, and Codeb
 
 ## Application structure
 
-Entity package update, 2026-10-08 (memory15): shared/catalog owns ProductEntity, CategoryEntity, OptionGroupEntity, ProductOptionEntity and CashierCatalogItemEntity. Shared/sales additionally owns CashierSaleEntity, CashierSaleItemEntity and PickupDeliveryJobEntity. F&B retains order lifecycle, order snapshots, payment/discount/gateway, table and QR models; laundry retains service/pricing and laundry-order models. Package/import refactor only; schemas and separate existing catalog/sales models remain unchanged. Evidence: reports/ENTITY-20261008-orchestrator.md.
+Entity package update, 2026-10-08 (memory15): shared/catalog owns ProductEntity, CategoryEntity, OptionGroupEntity, ProductOptionEntity and CashierCatalogItemEntity. Shared/sales additionally owns CashierSaleEntity, CashierSaleItemEntity and PickupDeliveryJobEntity. F&B retains order lifecycle, order snapshots, payment/discount/gateway, table and QR models; laundry retains service/pricing and laundry-order models. Package/import refactor only; schemas and separate existing catalog/sales models remain unchanged. Evidence: `reports/ENTITY-20261008-orchestrator.md` (removed in tidy; see Git history).
 
 One Java 17 / Spring Boot 4.1.1 backend: a modular monolith organized in existing top-level packages under `org.lite.project.cashiersaas`.
 
@@ -65,26 +65,3 @@ FnbOrderRepository locks the tenant row with PESSIMISTIC_WRITE. Checkout/payment
 - F&B mutation services publish immutable minimal invalidation snapshots; a TransactionalEventListener dispatches only AFTER_COMMIT through a bounded asynchronous executor. QR/POS checkout, settlement/mock outcomes, discount/cancellation and kitchen transitions have hooks; idempotent replays do not emit. Clients resync through REST. Delivery is single-JVM best effort, with no replay/distributed broker; overload drops require polling fallback. Source-reviewed only: container/compile/runtime acceptance pending.
 - PRD describes additional Manager/Kitchen roles and pay-after-meal flows; explicit active repository policy takes precedence for this snapshot: three roles and Pay First. Reconciliation of product documentation is pending, not a newly approved product decision.
 - No frontend package.json/tsx/vue/html files were found by repository file search. This snapshot covers backend architecture.
-
-## Ruflo evidence
-
-Swarm `swarm-1791361273309-rota2f` initialized with hierarchical topology, specialized strategy, maximum 3 agents. Memory search returned no prior architecture entries; keyword routing recommended security-architect. Registered Sonnet reviewers: `agent-1791361308449-h63kyb` (security) and `agent-1791361308340-gxo7t6` (operations).
-
-Actual agent_execute attempts failed: no LLM provider configured (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OLLAMA_API_KEY absent from Ruflo provider configuration). Registration is not executed review evidence. This snapshot was reviewed by the orchestrator using source and graph, not produced by those workers. No provider configuration, application code, SQL or tests changed. No builds, tests, startup or database commands ran.
-
-### Verified alternative execution
-
-Authenticated Codex CLI execution succeeded without adding provider API keys. The tested arrangement is Ruflo coordination plus separate Codex execution, not a native agent_execute provider integration. Claude Code is not required.
-
-Initial read-only Codex workers could not invoke file-reading commands under the environment policy. The orchestrator supplied bounded, labelled source bundles over stdin instead; reviewers used no tools and had no independent filesystem access. Both subsequent reviews completed with exit code 0:
-
-- Security: thread `01a11593-6548-7a41-ba9f-9ad9c62549b3`; report `reports/RUFLO-ARCH-SECURITY.md`.
-- F&B: thread `01a11594-d925-7790-9ac3-c0b406c43b61`; report `reports/RUFLO-ARCH-FNB.md`.
-
-Task contracts, input bundles and dirty-tree baseline are retained in `tasks/TASK-RUFLO-ARCH-*.md` and `reports/RUFLO-ARCH-*`. Worker memory baseline was 2. Orchestrator reviewed reports against source before advancing memory to 3.
-
-Reviewed qualifications: operational membership guards currently require FREETIER subscriptions. Guards do not visibly consult session revocation or bind their query to the JWT membership_id; immediate revocation of already-issued access JWTs is not established. These are review questions, not proven externally reachable defects. Checkout replay additionally depends on currently valid QR/table context; kitchen transition retries are not idempotent. Reports count paid transactions without requiring completion; product metrics are line totals and do not allocate order discounts/tax/service charges. Full call-site/security, database and runtime acceptance remain pending.
-
-### Delegated implementation evidence
-
-TASK-030/031/032 subsequently executed using authenticated Codex CLI workers with independent contexts and disjoint reserved writes; Ruflo swarm/registrations coordinated only. All three implementations and worker corrections were reviewed against current source and the dirty-tree baseline. No worker allowlist violations were found. Reports and actual thread IDs: `reports/MVP-20261007-orchestrator.md`. The orchestrator authored coordination/canonical documents, not application code. No SQL, tests, builds, startup or database operations ran. General HTTP guard review questions above remain; the new WebSocket access service explicitly validates live sessions, selected merchant scope and membership binding.
