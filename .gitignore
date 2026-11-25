@@ -37,12 +37,12 @@ build/
 ### VS Code ###
 .vscode/
 
-# Ruflo local secrets and runtime data
+# Local secrets and runtime data
 .env.local
 .env.*.local
+.claude/
 .claude-flow/
 .swarm/
-.claude/
 
 # Generated worker artifacts and DB dumps (kept in git history only)
 reports/artifacts/

@@ -5,7 +5,6 @@ target
 .ai
 .agents
 .claude
-.claude-flow
 .codebase-memory
 .codex
 .swarm

@@ -1,7 +1,7 @@
 # PROMPT UNTUK STITCH WITH GOOGLE (AGY) — UI MANAJEMEN PRODUK & STOK BAHAN
 
 Produk: **KedaiMbo** (POS SaaS untuk F&B/UMKM Indonesia) · Modul: **Manajemen Produk, Varian/Tambahan, Resep, dan Stok Bahan**
-Sumber kebenaran backend: `tasks/TASK-061.md` (kontrak inventory), controller `FnbCatalogController` (katalog). Frontend repo: `E:\Java\cashier-saas-ui` (React 19 + Tailwind 4 + Radix).
+Sumber kebenaran backend: TASK-061 (kontrak inventory, packet dihapus; lihat Git history), controller `FnbCatalogController` (katalog). Frontend repo: `E:\Java\cashier-saas-ui` (React 19 + Tailwind 4 + Radix).
 
 ## Cara pakai
 
