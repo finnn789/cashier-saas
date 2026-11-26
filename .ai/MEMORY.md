@@ -1,12 +1,13 @@
 # Project memory
 
-Memory version: 104
-Updated: 2026-11-25 (Asia/Jakarta)
+Memory version: 105
+Updated: 2026-11-26 (Asia/Jakarta)
 
 Compact on purpose. Full history through v91 (per-task evidence, old reviews) is in Git history.
 
 ## Current state (2026-11-20)
 
+- 2026-11-26 (v105): TASK-113 image upload to local disk (public UUID URL, `/media/**`, orphan sweep) done + reviewed, targeted unit+IT green, NOT COMMITTED. Storage decision: local disk, no object storage, no presigned URL (user 2026-11-26).
 - 2026-11-25 (v104): TASK-109 test dedup + legacy chat path removed, tests green, NOT COMMITTED (details in `.ai/TASKS.md`).
 - 2026-11-25 (v103): TASK-105 (mock checkout, V18), TASK-106 (SUPERADMIN panel, V19) done + reviewed + compiled, NOT COMMITTED; TASK-107 Python tests fixed (unit 270 OK).
 - 2026-11-25 (v102): TASK-104 debt fix (copy locks both outlets, tests aligned to RBAC; test-compile 0, not run) done; user does QA next.

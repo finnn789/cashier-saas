@@ -27,6 +27,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.ServletRequestBindingException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.lite.project.cashiersaas.shared.response.ApiResponse;
 import org.springframework.http.HttpStatus;
@@ -232,6 +234,18 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_ACCEPTABLE)
     public ApiResponse<Object> handleUnacceptableMediaType(HttpMediaTypeNotAcceptableException exception) {
         return ApiResponse.error(HttpStatus.NOT_ACCEPTABLE.value(), "Format respons pada header Accept tidak didukung.");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.CONTENT_TOO_LARGE)
+    public ApiResponse<Object> handleUploadTooLarge(MaxUploadSizeExceededException exception) {
+        return ApiResponse.error(HttpStatus.CONTENT_TOO_LARGE.value(), "Ukuran gambar maksimal 2 MB.");
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Object> handleMissingPart(MissingServletRequestPartException exception) {
+        return ApiResponse.error(HttpStatus.BAD_REQUEST.value(), "Bagian '" + exception.getRequestPartName() + "' wajib diisi.");
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

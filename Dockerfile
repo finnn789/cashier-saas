@@ -18,6 +18,7 @@ FROM eclipse-temurin:17-jre
 RUN groupadd --system app && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app
 WORKDIR /app
 COPY --from=build --chown=app:app /workspace/app.jar /app/app.jar
+RUN mkdir -p /app/data/media && chown -R app:app /app/data
 USER app
 EXPOSE 8080 9090
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75"
