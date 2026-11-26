@@ -25,6 +25,7 @@ import java.util.Objects;
 @NoArgsConstructor
 public class TenantEntity extends MutableBaseEntity {
     public static final Duration PREMIUM_TRIAL_DURATION = Duration.ofDays(14);
+    public static final String SUSPENDED = "SUSPENDED";
 
     @Column(nullable = false, length = 120)
     private String name;
@@ -78,6 +79,24 @@ public class TenantEntity extends MutableBaseEntity {
 
     public boolean isActive() {
         return StatusConstants.ACTIVE.equals(status);
+    }
+
+    public boolean isSuspended() {
+        return SUSPENDED.equals(status);
+    }
+
+    public void suspend() {
+        if (!isActive()) {
+            throw new IllegalStateException("Only an active merchant can be suspended.");
+        }
+        status = SUSPENDED;
+    }
+
+    public void reactivate() {
+        if (!isSuspended()) {
+            throw new IllegalStateException("Only a suspended merchant can be reactivated.");
+        }
+        status = StatusConstants.ACTIVE;
     }
 
     public void startPremiumTrial(Instant now) {

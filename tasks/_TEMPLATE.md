@@ -17,7 +17,12 @@ Worker agents already carry the standing rules (`.claude/agents/*.md` + `AGENTS.
 ## Contracts shared between workers
 - `<Class.method(signature)>: <return>` — provider <W1>, consumers <W2>.
 
-## Wave 1 (parallel)
+## Wave 0 — RED (`test-worker`, before any production code)
+Reserved:
+- `<test path>`
+Do: write the test cases listed under "Test cases"; they must fail until Wave 1 ships.
+
+## Wave 1 — GREEN (parallel, after RED is confirmed; never edit the Wave 0 tests)
 
 ### W1 — <scope> (`java-worker`)
 Reserved:
@@ -32,8 +37,10 @@ Reserved:
 - `<path>`
 Do / Acceptance: ...
 
-## Wave 2 (after Wave 1 review)
+## Wave 2 — REFACTOR / follow-up (after GREEN review, tests stay green)
 ...
 
-## Recommended tests (for when the user requests testing)
-- ...
+## Test cases (TDD - written and RED before any production code)
+- <behaviour>: <input> -> <expected result / error> (test class::method, existing or new)
+- RED evidence (orchestrator): <command> -> fails because <reason>
+- GREEN evidence (orchestrator): <command> -> passes

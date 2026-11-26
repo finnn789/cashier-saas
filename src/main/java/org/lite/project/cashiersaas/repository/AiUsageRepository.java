@@ -65,6 +65,19 @@ public class AiUsageRepository {
                 .executeUpdate();
     }
 
+    /** Adds purchased questions to the month row, creating it when absent. */
+    @Transactional
+    public void addBonusQuestions(UUID tenantId, LocalDate periodMonth, LocalDate today, int questions) {
+        entityManager.createNativeQuery("INSERT INTO ai_usage_periods "
+                        + "(tenant_id, period_month, questions_used, bonus_questions, day_date, day_questions, input_tokens, output_tokens, updated_at) "
+                        + "VALUES (:tenantId, :periodMonth, 0, :questions, :today, 0, 0, 0, now()) "
+                        + "ON CONFLICT (tenant_id, period_month) DO UPDATE SET "
+                        + "bonus_questions = ai_usage_periods.bonus_questions + :questions, updated_at = now()")
+                .setParameter("tenantId", tenantId).setParameter("periodMonth", periodMonth).setParameter("today", today)
+                .setParameter("questions", questions)
+                .executeUpdate();
+    }
+
     /** Read-only month state; no row means nothing used yet. */
     @Transactional(readOnly = true)
     public Usage readUsage(UUID tenantId, LocalDate periodMonth, LocalDate today) {

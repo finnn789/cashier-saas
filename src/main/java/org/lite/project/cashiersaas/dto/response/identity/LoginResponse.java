@@ -21,6 +21,8 @@ public class LoginResponse {
     private UUID tenantId;
     private UUID outletId;
     private String nextStep;
+    /** True when the account may start a platform (SUPERADMIN) session; set by login and the platform entry only. */
+    private boolean platformAdmin;
     @JsonIgnore
     private String refreshToken;
 }

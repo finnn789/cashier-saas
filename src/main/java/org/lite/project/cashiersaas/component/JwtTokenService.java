@@ -84,6 +84,33 @@ public class JwtTokenService {
         return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
+    /** Platform token: no tenant claims, only the SUPERADMIN role; the caller has already verified the admin flag. */
+    public String generatePlatformAccessToken(UUID userId, String email, UUID sessionId, Instant expiresAt) {
+        Objects.requireNonNull(userId, "userId is required.");
+        Objects.requireNonNull(email, "email is required.");
+        Objects.requireNonNull(sessionId, "sessionId is required.");
+        Objects.requireNonNull(expiresAt, "expiresAt is required.");
+
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.getIssuer())
+                .audience(List.of(jwtProperties.getAudience()))
+                .subject(userId.toString())
+                .issuedAt(Instant.now())
+                .expiresAt(expiresAt)
+                .id(UUID.randomUUID().toString())
+                .claim("email", email)
+                .claim("scope", "PLATFORM")
+                .claim("session_id", sessionId.toString())
+                .claim("roles", List.of(Role.SUPERADMIN.name()))
+                .build();
+
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256)
+                .type("JWT")
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
     private void requireTokenSubject(MerchantTokenContext context) {
         Objects.requireNonNull(context, "context is required.");
         Objects.requireNonNull(context.getUserId(), "userId is required.");

@@ -25,15 +25,13 @@ import java.util.List;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.runInParallel;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -47,7 +45,6 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
     private static final String AUTH = HttpHeaders.AUTHORIZATION;
-    private static final String PRICE = "25000";
     private static final ZoneId JAKARTA = ZoneId.of("Asia/Jakarta");
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -71,16 +68,8 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
 
     // ------------------------------------------------------------------ helpers
 
-    private static String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
-    }
-
     private static String settingsUrl(MerchantFixture merchant) {
         return "/api/v1/merchant/outlets/" + merchant.outletId() + "/business-settings";
-    }
-
-    private String product(MerchantFixture owner) throws Exception {
-        return api.createProduct(owner, api.createCategory(owner, "Minuman"), "Es Teh", PRICE);
     }
 
     private MvcResult receipt(MerchantFixture actor, MerchantFixture pathMerchant, String orderId) throws Exception {
@@ -89,15 +78,6 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private MvcResult receipt(MerchantFixture actor, String orderId) throws Exception {
         return receipt(actor, actor, orderId);
-    }
-
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
     }
 
     private static void assertReceiptNumber(String number, int sequence, String datePrefixBefore) {
@@ -143,7 +123,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
     void receiptNumbersAreSequentialPerOutletAndDayAndReplaysAndFailuresConsumeNoNumber() throws Exception {
         MerchantFixture owner = api.onboardOwner("rcp-seq");
         MerchantFixture other = api.onboardOwner("rcp-seq-other");
-        String productId = product(owner);
+        String productId = api.product(owner);
         api.openShift(owner, "0.00");
         api.openShift(other, "0.00");
         String before = prefixNow();
@@ -161,22 +141,22 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
         // Replay of the same key returns the same number and consumes none.
         MvcResult replay = api.pay(owner, order1, "CASH", api.orderTotal(owner, order1), null, key1);
         assertEquals(receiptNumberOf(first), receiptNumberOf(replay));
-        assertEquals(1, count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(1, api.count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
 
         // Refused payments (already paid, short cash) consume none either.
         assertStatus(409, api.pay(owner, order1, "CASH", api.orderTotal(owner, order1), null, null));
         assertStatus(400, api.pay(owner, order2, "CASH", "1", null, null));
-        assertEquals(1, count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(1, api.count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
 
         MvcResult second = api.payCashExact(owner, order2);
         MvcResult third = api.payNonCash(owner, order3, api.firstActiveLabelId(owner));
         assertReceiptNumber(receiptNumberOf(second), 2, before);
         assertReceiptNumber(receiptNumberOf(third), 3, before);
-        assertEquals(3, count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
-        assertEquals(3, count("SELECT count(DISTINCT receipt_number) FROM payments WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(3, api.count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(3, api.count("SELECT count(DISTINCT receipt_number) FROM payments WHERE tenant_id = ?", owner.tenantId()));
 
         // Another outlet has its own sequence starting at 0001.
-        MvcResult otherFirst = api.payCashExact(other, api.createPosOrder(other, product(other), 1));
+        MvcResult otherFirst = api.payCashExact(other, api.createPosOrder(other, api.product(other), 1));
         assertReceiptNumber(receiptNumberOf(otherFirst), 1, before);
 
         // The receipt endpoint prints the same number.
@@ -191,17 +171,17 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
                 todayStamp, yesterdayStamp, owner.outletId());
         MvcResult nextDay = api.payCashExact(owner, api.createPosOrder(owner, productId, 1));
         assertReceiptNumber(receiptNumberOf(nextDay), 1, before);
-        assertEquals(2, count("SELECT count(*) FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
-        assertEquals(3, count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ? AND business_date = ?",
+        assertEquals(2, api.count("SELECT count(*) FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(3, api.count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ? AND business_date = ?",
                 owner.outletId(), java.sql.Date.valueOf(LocalDate.now(JAKARTA).minusDays(1))));
-        assertEquals(1, count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ? AND business_date = ?",
+        assertEquals(1, api.count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ? AND business_date = ?",
                 owner.outletId(), java.sql.Date.valueOf(LocalDate.now(JAKARTA))));
     }
 
     @Test
     void parallelPaymentsGetUniqueGaplessReceiptNumbers() throws Exception {
         MerchantFixture owner = api.onboardOwner("rcp-parallel");
-        String productId = product(owner);
+        String productId = api.product(owner);
         api.openShift(owner, "0.00");
         String before = prefixNow();
         List<String> orderIds = new ArrayList<>();
@@ -227,33 +207,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
         for (String number : numbers) {
             assertReceiptNumber(number, sequence++, before);
         }
-        assertEquals(4, count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
-    }
-
-    private List<MvcResult> runInParallel(List<Callable<MvcResult>> tasks) throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
-        CountDownLatch ready = new CountDownLatch(tasks.size());
-        CountDownLatch go = new CountDownLatch(1);
-        List<Future<MvcResult>> futures = new ArrayList<>();
-        try {
-            for (Callable<MvcResult> task : tasks) {
-                futures.add(pool.submit(() -> {
-                    ready.countDown();
-                    go.await();
-                    return task.call();
-                }));
-            }
-            assertTrue(ready.await(30, TimeUnit.SECONDS), "all threads must reach the start gate");
-            go.countDown();
-            List<MvcResult> results = new ArrayList<>();
-            for (Future<MvcResult> future : futures) {
-                results.add(future.get(60, TimeUnit.SECONDS));
-            }
-            return results;
-        } finally {
-            go.countDown();
-            pool.shutdownNow();
-        }
+        assertEquals(4, api.count("SELECT last_value FROM receipt_sequences WHERE outlet_id = ?", owner.outletId()));
     }
 
     // ------------------------------------------------------------------ receipt content and footer setting
@@ -264,7 +218,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
         MerchantFixture cashier = api.onboardCashier(owner, "rcp-footer-cashier");
         MerchantFixture other = api.onboardOwner("rcp-footer-other");
         api.openShift(owner, "0.00");
-        String paidOrder = ApiTestSupport.read(checkout(owner, product(owner), "Siti", "tanpa gula"), "$.data.orderId");
+        String paidOrder = ApiTestSupport.read(checkout(owner, api.product(owner), "Siti", "tanpa gula"), "$.data.orderId");
         api.payNonCash(owner, paidOrder, api.firstActiveLabelId(owner));
 
         MvcResult noFooter = receipt(owner, paidOrder);
@@ -298,7 +252,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
 
         // Resubmitting the same footer changes nothing and writes no second audit row.
         assertStatus(200, putSettings(owner, owner, "Terima kasih, sampai jumpa!", true));
-        assertEquals(1, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'BUSINESS_SETTINGS_CHANGED'",
+        assertEquals(1, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'BUSINESS_SETTINGS_CHANGED'",
                 owner.tenantId()));
 
         // 200 characters are accepted, 201 are rejected and leave the footer untouched.
@@ -330,7 +284,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
         MerchantFixture owner = api.onboardOwner("rcp-escape");
         api.openShift(owner, "0.00");
         assertStatus(200, putSettings(owner, owner, "<script>alert(1)</script> & \"x\"", true));
-        MvcResult created = checkout(owner, product(owner), "<img src=x onerror=1>", "<b>note</b> & 'q'");
+        MvcResult created = checkout(owner, api.product(owner), "<img src=x onerror=1>", "<b>note</b> & 'q'");
         String orderId = ApiTestSupport.read(created, "$.data.orderId");
         api.payCashExact(owner, orderId);
 
@@ -355,7 +309,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
     void refundedOrdersStillHaveAReceiptWithTheRefundMarkerAndReason() throws Exception {
         MerchantFixture owner = api.onboardOwner("rcp-refund");
         api.openShift(owner, "0.00");
-        String orderId = api.createPosOrder(owner, product(owner), 1);
+        String orderId = api.createPosOrder(owner, api.product(owner), 1);
         api.payNonCash(owner, orderId, api.firstActiveLabelId(owner));
         assertEquals("false", ApiTestSupport.read(receipt(owner, orderId), "$.data.refunded"));
 
@@ -380,7 +334,7 @@ class FnbReceiptIntegrationTest extends AbstractPostgresIntegrationTest {
     void receiptIsNotFoundForUnpaidCancelledAndForeignOrders() throws Exception {
         MerchantFixture owner = api.onboardOwner("rcp-404");
         MerchantFixture other = api.onboardOwner("rcp-404-other");
-        String productId = product(owner);
+        String productId = api.product(owner);
         api.openShift(owner, "0.00");
 
         String unpaid = api.createPosOrder(owner, productId, 1);

@@ -25,7 +25,7 @@ The main session is the orchestrator: it plans tasks, reviews reports and diffs,
 - Use the Maven wrapper (`mvnw.cmd` on Windows) for build and test commands.
 - Prefer cohesive vertical slices over creating many unused abstractions in advance.
 - Keep API, persistence, authorization, validation, and tests aligned within each implemented slice.
-- Do not run unit, API, integration, or Maven test commands while writing a feature. Run tests only when the user explicitly requests testing after the feature is complete end to end. Until then, report testing as not run by policy.
+- Development is test-first (TDD); see "Development rule: test first (TDD)". The orchestrator runs the task's targeted tests during RED and GREEN without asking. Full suites (`mvnw.cmd verify`, full pytest, vitest, Postman collection runs) still run only when the user asks.
 
 ## DTO and code design
 
@@ -66,8 +66,21 @@ The main session is the orchestrator: it plans tasks, reviews reports and diffs,
 - Decompose project work into bounded tasks and assign code implementation to workers. Parallel tasks must have disjoint reserved writes and compatible reviewed contracts. The main session performs orchestration, read-only review and canonical updates.
 - Use Codebase Memory MCP for structural context and verify findings against current source. Fresh workers receive explicit context and task contracts; they do not inherit conversation history.
 - Preserve unrelated user changes and avoid broad rewrites.
-- Do not automatically run tests after implementation. When the end-to-end feature is ready, hand it back as `READY FOR TESTING` with the recommended unit/API scenarios. Execute tests yourself only after the user explicitly requests testing.
-- A feature implementation is ready for testing when its acceptance path is implemented, authorization and tenant boundaries are reviewed, and the result is summarized with remaining risks. Test completion additionally requires the user-requested relevant tests to pass.
+- Every code slice follows the TDD cycle below: failing tests first, then the minimum code that makes them pass, then refactor with the tests green.
+- A slice is ready for review when its targeted tests are green, authorization and tenant boundaries are reviewed, and the result is summarized with remaining risks. Full-suite and Postman results are added only when the user requested them.
+
+## Development rule: test first (TDD) (user, 2026-11-25)
+
+This rule replaces the old "tests only after the feature, only when the user asks" policy.
+
+1. **Specify**: the packet lists every behaviour of the slice as concrete test cases (input, expected result, error case, tenant/role boundary). These test cases are the acceptance criteria.
+2. **RED**: `test-worker` writes the tests first, in the reserved test paths, before any production code for the slice exists. The orchestrator runs only those tests and records that they fail for the expected reason (missing behaviour or wrong result, not a broken fixture or typo). A test that passes before the code exists is rewritten or dropped.
+3. **GREEN**: the implementation worker (`java-worker`, `python-worker`, `fe-worker`) writes the minimum production code that makes those tests pass. It never edits, weakens, skips or deletes the tests; if a test looks wrong it reports why and the orchestrator decides.
+4. **REFACTOR**: clean up only while the targeted tests stay green; the orchestrator reruns them after the refactor.
+5. **Bug fixes** start with a test that reproduces the bug (RED) before the fix.
+- RED and GREEN are separate waves in the packet and may not be merged into one worker unless the slice is trivial and the packet says so.
+- Not test-first (no behaviour to assert): docs, housekeeping, pure config/property changes, UI styling-only changes. A Flyway migration is covered by the repository/service test of the slice that uses it.
+- The unit test writing rule below still applies to every TDD test.
 
 ## Unit test writing rule (user, 2026-11-14)
 
@@ -78,9 +91,9 @@ The main session is the orchestrator: it plans tasks, reviews reports and diffs,
 ## Task lifecycle (user, 2026-11-24)
 
 - A task has three artifacts: the packet `tasks/TASK-N.md` (the contract; written by the orchestrator BEFORE delegation), worker reports `reports/TASK-N-<id>.md` (written by each worker AFTER its work; Python workers use `Ai-services/reports/`), and one ledger line in `.ai/TASKS.md`.
-- Only the orchestrator closes a task. DONE means: diff reviewed against the baseline, compiled (Java `mvnw.cmd compile`; UI `tsc -b` + `oxlint`), user-requested tests passed, and for repo-tracked work committed with the user's approval. The UI repo is not git, so its tasks are DONE after review, compile and the user's go-ahead.
+- Only the orchestrator closes a task. DONE means: diff reviewed against the baseline, compiled (Java `mvnw.cmd compile`; UI `tsc -b` + `oxlint`), RED then GREEN of the task's targeted tests recorded, user-requested full-suite tests passed, and for repo-tracked work committed with the user's approval. The UI repo is not git, so its tasks are DONE after review, compile and the user's go-ahead.
 - On DONE the orchestrator deletes `tasks/TASK-N.md` and every `reports/TASK-N-*.md`, then leaves exactly one line under "Done" in `.ai/TASKS.md` (what shipped, commit hash or "UI repo, not git", open debt). Contracts, debt or decisions worth keeping move into that line, `.ai/DECISIONS.md` or `.ai/ARCHITECTURE.md` BEFORE the deletion.
 - Never delete the packet or reports of a task that is not DONE. Untracked files cannot be recovered from git, so confirm DONE first.
 - Workers never create, edit or delete anything in `tasks/` or `reports/` except their own report file named in the packet, and never delete files outside their reserved paths. Deleting housekeeping files is done by the orchestrator or by `tidy-worker` with an explicit file list.
 - A packet is self-contained: it copies the verified facts it needs and does not point to other tasks' packets or reports, which may already be deleted. Number = next free number. Required sections: user instruction, verified facts, design decisions, reserved paths per worker, acceptance.
-- Compile checks are run by the orchestrator only; tests (Maven, pytest, vitest, Postman) run only when the user asks.
+- Compile checks and test runs are done by the orchestrator only. Targeted TDD tests run as part of the task; full suites and Postman run only when the user asks.

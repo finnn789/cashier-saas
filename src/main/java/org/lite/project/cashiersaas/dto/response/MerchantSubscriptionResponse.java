@@ -7,6 +7,7 @@ import org.lite.project.cashiersaas.enums.PlanCode;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -18,6 +19,9 @@ public class MerchantSubscriptionResponse {
     private Outlets outlets;
     private Ai ai;
     private BigDecimal outletAddOnMonthlyPrice;
+    /** The ISSUED invoice that can still be paid, or null. */
+    private UUID pendingInvoiceId;
+    private boolean mockPaymentEnabled;
 
     @Getter
     @Setter

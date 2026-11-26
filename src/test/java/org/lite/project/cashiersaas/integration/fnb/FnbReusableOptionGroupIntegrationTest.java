@@ -1,6 +1,5 @@
 package org.lite.project.cashiersaas.integration.fnb;
 
-import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,6 @@ import org.springframework.web.context.WebApplicationContext;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -25,6 +23,9 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.readList;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -96,10 +97,6 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
 
     private static String optionRecipeUrl(MerchantFixture merchant, String groupId, String optionId) {
         return optionsUrl(merchant, groupId) + "/" + optionId + "/recipe";
-    }
-
-    private static String orders(MerchantFixture merchant) {
-        return staff(merchant) + "/orders";
     }
 
     private static String stockItems(MerchantFixture merchant) {
@@ -209,20 +206,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
                         + "\"}"), 200, 201);
     }
 
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
-    }
-
     // ------------------------------------------------------------------ JSON and SQL helpers
-
-    private static List<String> readList(MvcResult result, String path) throws Exception {
-        List<Object> raw = JsonPath.read(result.getResponse().getContentAsString(), path);
-        List<String> values = new ArrayList<>();
-        for (Object value : raw) {
-            values.add(String.valueOf(value));
-        }
-        return values;
-    }
 
     private List<String> libraryIds(MerchantFixture actor) throws Exception {
         return readList(api.send(get(libraryUrl(actor)).header(AUTH, actor.bearer()), 200), "$.data[*].id");
@@ -237,28 +221,12 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         assertEquals(0, new BigDecimal(expected).compareTo(actual), message + ": expected " + expected + " but was " + actual);
     }
 
-    private BigDecimal balance(String itemId) {
-        return api.jdbc().queryForObject(
-                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid",
-                BigDecimal.class, itemId);
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
-
-    private int saleMovements(String orderId) {
-        return count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid AND movement_type = 'SALE'",
-                orderId);
-    }
-
     private int links(String productId) {
-        return count("SELECT count(*) FROM product_option_groups WHERE product_id = ?::uuid", productId);
+        return api.count("SELECT count(*) FROM product_option_groups WHERE product_id = ?::uuid", productId);
     }
 
     private int linksOfGroup(String groupId) {
-        return count("SELECT count(*) FROM product_option_groups WHERE option_group_id = ?::uuid", groupId);
+        return api.count("SELECT count(*) FROM product_option_groups WHERE option_group_id = ?::uuid", groupId);
     }
 
     private boolean archived(String groupId) {
@@ -267,16 +235,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
     }
 
     private int storedOrders(MerchantFixture merchant) {
-        return count("SELECT count(*) FROM sales_orders WHERE tenant_id = ?::uuid", merchant.tenantId().toString());
-    }
-
-    /** The movement ledger must always add up to the cached balance. */
-    private void assertLedgerMatchesBalance(String itemId) {
-        BigDecimal sum = api.jdbc().queryForObject(
-                "SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_movements WHERE inventory_item_id = ?::uuid",
-                BigDecimal.class, itemId);
-        assertEquals(0, sum.compareTo(balance(itemId)),
-                "SUM(quantity_delta)=" + sum + " must equal quantity_on_hand=" + balance(itemId));
+        return api.count("SELECT count(*) FROM sales_orders WHERE tenant_id = ?::uuid", merchant.tenantId().toString());
     }
 
     // ------------------------------------------------------------------ 1. reuse + stock deduction
@@ -305,22 +264,22 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         MvcResult paidTeh = payCash(owner, orderTeh);
         assertTrue(readList(paidTeh, "$.data.stockWarnings").isEmpty(),
                 "950 g is above the reorder level 920: " + readList(paidTeh, "$.data.stockWarnings"));
-        assertDecimal("950", balance(boba), "boba after the first product");
-        assertEquals(1, saleMovements(orderTeh));
+        assertDecimal("950", api.balance(boba), "boba after the first product");
+        assertEquals(1, api.saleMovements(orderTeh));
 
         String orderKopi = createOrder(owner, kopi, bobaOption);
         MvcResult paidKopi = payCash(owner, orderKopi);
         assertEquals(List.of("Boba: sisa 900 g (menipis)"), readList(paidKopi, "$.data.stockWarnings"));
-        assertDecimal("900", balance(boba), "boba after both products: 1000 - 2 x 50");
-        assertDecimal("95", balance(gula), "the product recipe of the second product still deducts");
-        assertEquals(2, saleMovements(orderKopi), "boba (shared option) + gula (product recipe)");
+        assertDecimal("900", api.balance(boba), "boba after both products: 1000 - 2 x 50");
+        assertDecimal("95", api.balance(gula), "the product recipe of the second product still deducts");
+        assertEquals(2, api.saleMovements(orderKopi), "boba (shared option) + gula (product recipe)");
 
-        assertEquals(2, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertEquals(2, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND movement_type = 'SALE'", boba), "exactly two SALE movements for the shared option");
-        assertEquals(2, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertEquals(2, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND movement_type = 'SALE' AND quantity_delta = -50", boba));
-        assertLedgerMatchesBalance(boba);
-        assertLedgerMatchesBalance(gula);
+        api.assertLedgerMatchesBalance(boba);
+        api.assertLedgerMatchesBalance(gula);
         MvcResult list = api.send(get(stockItems(owner)).header(AUTH, owner.bearer()), 200);
         assertEquals(List.of("LOW"), readList(list, "$.data[?(@.id=='" + boba + "')].stockStatus"));
         assertEquals(List.of("OK"), readList(list, "$.data[?(@.id=='" + gula + "')].stockStatus"));
@@ -423,7 +382,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         MvcResult archivedGroup = api.send(delete(groupUrl).header(AUTH, owner.bearer()), 200);
         assertEquals(groupId, ApiTestSupport.read(archivedGroup, "$.data.id"));
         assertTrue(archived(groupId), "the group is archived (soft), never deleted");
-        assertEquals(1, count("SELECT count(*) FROM option_groups WHERE id = ?::uuid", groupId));
+        assertEquals(1, api.count("SELECT count(*) FROM option_groups WHERE id = ?::uuid", groupId));
         assertTrue(libraryIds(owner).isEmpty(), "archived groups leave the library");
         assertTrue(productGroupIds(owner, first).isEmpty());
 
@@ -440,7 +399,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         assertStatus(404, api.call(delete(groupUrl).header(AUTH, owner.bearer())));
         assertStatus(404, attach(owner, first, attachJson(groupId)));
         assertEquals(0, links(first));
-        assertEquals(1, count("SELECT count(*) FROM product_options WHERE option_group_id = ?::uuid", groupId),
+        assertEquals(1, api.count("SELECT count(*) FROM product_options WHERE option_group_id = ?::uuid", groupId),
                 "the option row is kept");
         assertEquals("Topping", api.jdbc().queryForObject(
                 "SELECT name FROM option_groups WHERE id = ?::uuid", String.class, groupId));
@@ -473,9 +432,9 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         assertEquals(List.of(groupB, groupA), readList(attached, "$.data[*].id"), "response keeps the request order");
         assertEquals(List.of(groupB, groupA), productGroupIds(owner, product));
         assertEquals(2, links(product));
-        assertEquals(0, count("SELECT display_order FROM product_option_groups WHERE product_id = ?::uuid "
+        assertEquals(0, api.count("SELECT display_order FROM product_option_groups WHERE product_id = ?::uuid "
                 + "AND option_group_id = ?::uuid", product, groupB));
-        assertEquals(1, count("SELECT display_order FROM product_option_groups WHERE product_id = ?::uuid "
+        assertEquals(1, api.count("SELECT display_order FROM product_option_groups WHERE product_id = ?::uuid "
                 + "AND option_group_id = ?::uuid", product, groupA));
 
         // Re-attaching only A removes B from the product, but B stays in the library.
@@ -491,7 +450,7 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         // The same request twice does not duplicate links.
         attachOk(owner, product, groupA);
         assertEquals(1, links(product));
-        assertEquals(0, count("SELECT display_order FROM product_option_groups WHERE product_id = ?::uuid", product));
+        assertEquals(0, api.count("SELECT display_order FROM product_option_groups WHERE product_id = ?::uuid", product));
 
         // Rejected requests leave the previous attachment untouched.
         assertStatus(400, attach(owner, product, attachJson(groupA, groupA)));
@@ -548,9 +507,9 @@ class FnbReusableOptionGroupIntegrationTest extends AbstractPostgresIntegrationT
         assertFalse(archived(groupId));
         assertEquals(1, linksOfGroup(groupId));
         assertEquals(0, links(spare));
-        assertEquals(1, count("SELECT count(*) FROM option_groups WHERE tenant_id = ?::uuid",
+        assertEquals(1, api.count("SELECT count(*) FROM option_groups WHERE tenant_id = ?::uuid",
                 owner.tenantId().toString()));
-        assertEquals(1, count("SELECT count(*) FROM product_options WHERE option_group_id = ?::uuid", groupId));
+        assertEquals(1, api.count("SELECT count(*) FROM product_options WHERE option_group_id = ?::uuid", groupId));
 
         // Another tenant: B's own outlet but A's group id -> 404 everywhere, no sign that the group exists.
         assertTrue(libraryIds(other).isEmpty(), "B's library does not contain A's group");

@@ -37,4 +37,24 @@ public class GatewayEventEntity extends BaseEntity {
     private Instant processedAt;
     @Column(name="processing_status",nullable=false,length=16)
     private String processingStatus;
+
+    /** A gateway event that was matched to an attempt and applied in the same transaction. */
+    public static GatewayEventEntity processed(PlatformPaymentAttemptEntity attempt, String eventId, String normalizedStatus,
+                                               String eventType, String payloadDigest, Instant now) {
+        GatewayEventEntity event = new GatewayEventEntity();
+        event.providerCode = attempt.getProviderCode();
+        event.providerAccountRef = attempt.getProviderAccountRef();
+        event.providerEventId = eventId;
+        event.providerPaymentRef = attempt.getProviderPaymentRef();
+        event.normalizedAmount = attempt.getAmount();
+        event.currencyCode = attempt.getCurrencyCode();
+        event.normalizedStatus = normalizedStatus;
+        event.matchedAttemptId = attempt.getId();
+        event.eventType = eventType;
+        event.payloadDigest = payloadDigest;
+        event.receivedAt = now;
+        event.processedAt = now;
+        event.processingStatus = "PROCESSED";
+        return event;
+    }
 }

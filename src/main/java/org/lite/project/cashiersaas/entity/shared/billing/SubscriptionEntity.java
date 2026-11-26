@@ -14,6 +14,10 @@ import org.lite.project.cashiersaas.shared.StatusConstants;
 @Table(name="subscriptions")
 @NoArgsConstructor
 public class SubscriptionEntity extends MutableBaseEntity {
+    /** Created with an unpaid invoice; never entitles anything (no dates) until the invoice is paid. */
+    public static final String PENDING = "PENDING";
+    public static final String CANCELLED = "CANCELLED";
+
     @ManyToOne(fetch=FetchType.LAZY,optional=false)
     @JoinColumn(name="tenant_id")
     private TenantEntity tenant;
@@ -36,6 +40,29 @@ public class SubscriptionEntity extends MutableBaseEntity {
         subscription.status = StatusConstants.ACTIVE;
         subscription.startsAt = Instant.now();
         return subscription;
+    }
+
+    public static SubscriptionEntity pending(TenantEntity tenant, PlanCode plan, int extraOutlets) {
+        SubscriptionEntity subscription = new SubscriptionEntity();
+        subscription.tenant = tenant;
+        subscription.planCode = plan.name();
+        subscription.status = PENDING;
+        subscription.extraOutlets = extraOutlets;
+        return subscription;
+    }
+
+    public void activate(Instant startsAt, Instant endsAt) {
+        this.status = StatusConstants.ACTIVE;
+        this.startsAt = startsAt;
+        this.endsAt = endsAt;
+    }
+
+    public void cancel() {
+        this.status = CANCELLED;
+    }
+
+    public boolean isPending() {
+        return PENDING.equals(status);
     }
 
     public PlanCode getPlan() {

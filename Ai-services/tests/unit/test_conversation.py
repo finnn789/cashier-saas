@@ -3,15 +3,12 @@
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-import app.chat.service as service_module
-from app.ai.openrouter import AIError, Completion, OpenRouterClient
 from app.ai.prompts import MAX_INPUT_CHARS
 from app.chat.repositories import ChannelRepository, Repository
 from app.chat.service import ChatService
@@ -60,18 +57,18 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.repository.upsert_user = AsyncMock(side_effect=self.upsert_user)
         self.repository.find_duplicate_incoming = AsyncMock(return_value=False)
         self.repository.resolve_conversation = AsyncMock(side_effect=self.resolve_conversation)
-        self.repository.insert_message = AsyncMock(side_effect=self.insert_message)
+        self.repository.insert_message = AsyncMock()
         self.repository.completed_history = AsyncMock(side_effect=self.completed_history)
-        self.ai = Mock(spec=OpenRouterClient)
-        self.ai.reply = AsyncMock(side_effect=self.reply)
+        self.graph = Mock()
+        self.graph.ainvoke = AsyncMock(return_value={"final_response": "answer"})
         self.grpc = Mock()
         self.grpc.consume_ai_question = AsyncMock(return_value={
             "allowed": True, "reason": "", "used": 1, "limit": 300, "warn": False,
         })
         self.grpc.record_ai_usage = AsyncMock()
-        self.service = ChatService(self.database, self.channels, self.ai, grpc_client=self.grpc)
-        self.events: list[tuple[str, int]] = []
-        self.prompt: list[dict[str, str]] | None = None
+        self.service = ChatService(
+            self.database, self.channels, graph=self.graph, grpc_client=self.grpc
+        )
         self.input: dict[str, Any] = {
             "tenant_id": self.tenant_id,
             "external_user_id": "71",
@@ -83,96 +80,35 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             "content": "current",
         }
 
-    def record(self, name: str, connection: Mock) -> None:
+    def record(self, connection: Mock) -> None:
         self.assertTrue(self.boundary.active)
         self.assertIs(connection, self.connection)
-        self.events.append((name, self.boundary.number))
 
     async def upsert_user(
         self, connection: Mock, external_user_id: str,
         username: str | None, first_name: str | None,
     ) -> UUID:
-        self.record("upsert", connection)
+        self.record(connection)
         self.assertEqual((external_user_id, username, first_name), ("71", "handle", "Name"))
         return self.user_id
 
     async def resolve_conversation(
         self, connection: Mock, user_id: UUID, chat_id: str, reset: bool = False,
     ) -> UUID:
-        self.record("resolve", connection)
+        self.record(connection)
         self.assertEqual((user_id, chat_id), (self.user_id, "private-chat"))
         return self.conversation_id
-
-    async def insert_message(
-        self, connection: Mock, conversation_id: UUID, user_id: UUID,
-        chat_id: str, role: str, content: str, external_message_id: str | None = None,
-    ) -> int:
-        self.record(role, connection)
-        self.assertEqual(
-            (conversation_id, user_id, chat_id),
-            (self.conversation_id, self.user_id, "private-chat"),
-        )
-        if role == "USER":
-            self.assertEqual((content, external_message_id), ("current", "provider-1"))
-            return 101
-        self.assertEqual((role, content, external_message_id), ("ASSISTANT", "answer", None))
-        return 102
 
     async def completed_history(
         self, connection: Mock, conversation_id: UUID, user_id: UUID,
         chat_id: str, before_id: int,
     ) -> list[tuple[str, str]]:
-        self.record("history", connection)
+        self.record(connection)
         self.assertEqual(
             (conversation_id, user_id, chat_id, before_id),
             (self.conversation_id, self.user_id, "private-chat", 101),
         )
         return [("old", "answer-old"), ("new", "answer-new")]
-
-    async def reply(
-        self,
-        prompt: list[dict[str, str]],
-        tools: list[dict[str, Any]] | None = None,
-    ) -> Completion:
-        self.assertFalse(self.boundary.active)
-        self.assertEqual(self.boundary.events[-1], ("commit", 1))
-        self.prompt = prompt
-        return Completion("answer", "model", "provider-id", input_tokens=11, output_tokens=5)
-
-    async def test_user_commits_before_ai_and_assistant_commits_before_return(self) -> None:
-        self.assertEqual(await self.service.handle(**self.input), "answer")
-        self.assertEqual(self.events, [
-            ("upsert", 1), ("resolve", 1), ("USER", 1),
-            ("history", 1), ("ASSISTANT", 2),
-        ])
-        self.assertEqual(self.boundary.events, [
-            ("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2),
-        ])
-        self.assertFalse(self.boundary.active)
-        self.ai.reply.assert_awaited_once()
-        assert self.prompt is not None
-        self.assertEqual(self.prompt[2:], [
-            {"role": "user", "content": "old"},
-            {"role": "assistant", "content": "answer-old"},
-            {"role": "user", "content": "new"},
-            {"role": "assistant", "content": "answer-new"},
-            {"role": "user", "content": "current"},
-        ])
-        self.assertEqual(sum(item["content"] == "current" for item in self.prompt), 1)
-        self.repository.completed_history.assert_awaited_once_with(
-            self.connection, self.conversation_id, self.user_id, "private-chat", 101
-        )
-        self.repository.insert_message.assert_awaited_with(
-            self.connection, self.conversation_id, self.user_id,
-            "private-chat", "ASSISTANT", "answer"
-        )
-        # One question is consumed before the LLM; its tokens are reported afterwards.
-        self.grpc.consume_ai_question.assert_awaited_once_with(
-            tenant_id=str(self.tenant_id), user_id=""
-        )
-        self.grpc.record_ai_usage.assert_awaited_once_with(
-            tenant_id=str(self.tenant_id), input_tokens=11, output_tokens=5
-        )
 
     async def test_duplicate_text_skips_session_provider_and_response(self) -> None:
         self.repository.find_duplicate_incoming.return_value = True
@@ -183,7 +119,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.repository.resolve_conversation.assert_not_awaited()
         self.repository.insert_message.assert_not_awaited()
-        self.ai.reply.assert_not_awaited()
+        self.graph.ainvoke.assert_not_awaited()
         self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
 
     async def test_commands_reset_only_new_and_never_call_ai(self) -> None:
@@ -197,7 +133,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.repository.find_duplicate_incoming.assert_not_awaited()
         self.repository.insert_message.assert_not_awaited()
-        self.ai.reply.assert_not_awaited()
+        self.graph.ainvoke.assert_not_awaited()
         self.assertEqual(self.boundary.number, 3)
         self.assertTrue(all(event[0] != "rollback" for event in self.boundary.events))
 
@@ -218,67 +154,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.repository.resolve_conversation.assert_not_awaited()
         self.repository.insert_message.assert_not_awaited()
         self.repository.find_duplicate_incoming.assert_not_awaited()
-        self.ai.reply.assert_not_awaited()
-
-    async def test_hard_ai_error_is_ephemeral_after_user_commit_and_never_retries(self) -> None:
-        self.ai.reply.side_effect = AIError("AI_TRANSPORT_UNKNOWN", retryable=False)
-        sleep = AsyncMock()
-        with patch.object(service_module, "asyncio", SimpleNamespace(sleep=sleep)):
-            answer = await self.service.handle(**self.input)
-        sleep.assert_not_awaited()
-        self.assertIn("hasil permintaan tidak diketahui", answer)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
-        self.assertEqual(self.events[-1], ("history", 1))
-        self.repository.insert_message.assert_awaited_once()
-        self.ai.reply.assert_awaited_once()
-
-    async def test_transient_retry_is_bounded_and_waits_outside_transaction(self) -> None:
-        replies = [
-            AIError("AI_RATE_LIMIT", retryable=True, delay=0),
-            AIError("AI_TEMPORARY", retryable=True, delay=0),
-            Completion("answer", "model", "provider-id"),
-        ]
-        waits: list[float] = []
-
-        async def retry_reply(
-            prompt: list[dict[str, str]],
-            tools: list[dict[str, Any]] | None = None,
-        ) -> Completion:
-            self.assertFalse(self.boundary.active)
-            outcome = replies.pop(0)
-            if isinstance(outcome, AIError):
-                raise outcome
-            return outcome
-
-        async def fake_sleep(seconds: float) -> None:
-            self.assertFalse(self.boundary.active)
-            waits.append(seconds)
-
-        self.ai.reply.side_effect = retry_reply
-        with patch.object(service_module, "asyncio", SimpleNamespace(sleep=fake_sleep)):
-            self.assertEqual(await self.service.handle(**self.input), "answer")
-        self.assertEqual(waits, [5, 10])
-        self.assertEqual(self.ai.reply.await_count, 3)
-        self.assertEqual(self.boundary.events, [
-            ("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2),
-        ])
-        self.assertEqual(self.repository.insert_message.await_count, 2)
-
-    async def test_transient_exhaustion_never_stores_assistant(self) -> None:
-        waits: list[float] = []
-
-        async def fake_sleep(seconds: float) -> None:
-            self.assertFalse(self.boundary.active)
-            waits.append(seconds)
-
-        self.ai.reply.side_effect = AIError("AI_TEMPORARY", retryable=True, delay=0)
-        with patch.object(service_module, "asyncio", SimpleNamespace(sleep=fake_sleep)):
-            answer = await self.service.handle(**self.input)
-        self.assertIn("Layanan AI", answer)
-        self.assertEqual(waits, [5, 10])
-        self.assertEqual(self.ai.reply.await_count, 3)
-        self.assertEqual(self.repository.insert_message.await_count, 1)
-        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+        self.graph.ainvoke.assert_not_awaited()
 
     async def test_assistant_persistence_failure_propagates_after_user_commit(self) -> None:
         async def failed_insert(
@@ -286,7 +162,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             chat_id: str, role: str, content: str,
             external_message_id: str | None = None,
         ) -> int:
-            self.record(role, connection)
+            self.record(connection)
             if role == "ASSISTANT":
                 raise RuntimeError("assistant-write-failed")
             return 101
@@ -298,4 +174,4 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             ("begin", 1), ("commit", 1), ("begin", 2), ("rollback", 2),
         ])
         self.assertFalse(self.boundary.active)
-        self.ai.reply.assert_awaited_once()
+        self.graph.ainvoke.assert_awaited_once()

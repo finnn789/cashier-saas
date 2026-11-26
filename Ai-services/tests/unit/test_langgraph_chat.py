@@ -181,6 +181,16 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             [("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)],
         )
 
+        # Without a verified Java user the question is consumed with an empty user_id.
+        self.grpc.consume_ai_question.assert_awaited_once_with(
+            tenant_id=str(self.tenant_id), user_id=""
+        )
+
+        # History is loaded for this conversation only, before the just inserted USER message.
+        self.repository.completed_history.assert_awaited_once_with(
+            self.connection, self.conversation_id, self.user_id, "tg-chat-200", 101
+        )
+
         # Verify graph input state
         self.assertEqual(len(invoked_state_holder), 1)
         passed_state = invoked_state_holder[0]
@@ -429,3 +439,4 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         # Unconfigured key still compiles graph or detects unconfigured at runtime
         result = await service.handle(**self.input)
         self.assertIn("AI belum dikonfigurasi", result)
+        self.grpc.consume_ai_question.assert_not_awaited()

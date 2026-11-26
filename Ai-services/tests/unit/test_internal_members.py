@@ -377,7 +377,11 @@ class DatabaseMemberStoreTests(unittest.IsolatedAsyncioTestCase):
         @asynccontextmanager
         async def transaction():
             events.append("begin")
-            yield connection
+            try:
+                yield connection
+            except BaseException:
+                events.append("rollback")
+                raise
             events.append("commit")
 
         database = SimpleNamespace(transaction=transaction)
@@ -389,6 +393,13 @@ class DatabaseMemberStoreTests(unittest.IsolatedAsyncioTestCase):
             "OWNERMERCHANT", "ACTIVE", "Kopi Senja",
         )
         self.assertEqual(events, ["begin", "commit"])
+
+        events.clear()
+        failing = AsyncMock(side_effect=RuntimeError("upsert-failed"))
+        with patch("app.api.internal_members.upsert_member", new=failing):
+            with self.assertRaisesRegex(RuntimeError, "upsert-failed"):
+                await DatabaseMemberStore(database).upsert(UUID(TENANT), UUID(USER), member)  # type: ignore[arg-type]
+        self.assertEqual(events, ["begin", "rollback"])
 
     def test_request_model_repr_hides_the_phone(self) -> None:
         self.assertNotIn(PHONE, repr(MemberUpsertRequest(**valid_body())))  # type: ignore[arg-type]

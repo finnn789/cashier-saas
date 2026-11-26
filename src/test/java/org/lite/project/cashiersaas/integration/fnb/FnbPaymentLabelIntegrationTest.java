@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -38,7 +39,6 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
     private static final String AUTH = HttpHeaders.AUTHORIZATION;
-    private static final String PRICE = "25000";
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -97,26 +97,13 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
         return String.valueOf(list(labels, "$.data[?(@.name=='" + name + "')].id").get(0));
     }
 
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
-
-    private String productFor(MerchantFixture owner) throws Exception {
-        return api.createProduct(owner, api.createCategory(owner, "Minuman"), "Es Teh", PRICE);
-    }
-
     // ------------------------------------------------------------------ schema and onboarding
 
     @Test
     void migrationV8IsAppliedMockGatewayIsRejectedAndOnboardingSeedsThreeDefaultLabels() throws Exception {
-        assertEquals(1, count("SELECT count(*) FROM flyway_schema_history WHERE version = '8' AND success"));
-        assertEquals(1, count("SELECT count(*) FROM pg_indexes WHERE indexname = 'uk_payment_labels_outlet_name'"));
-        assertEquals(3, count("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' "
+        assertEquals(1, api.count("SELECT count(*) FROM flyway_schema_history WHERE version = '8' AND success"));
+        assertEquals(1, api.count("SELECT count(*) FROM pg_indexes WHERE indexname = 'uk_payment_labels_outlet_name'"));
+        assertEquals(3, api.count("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' "
                 + "AND table_name IN ('payment_labels', 'cash_expenses', 'receipt_sequences')"));
         String check = api.jdbc().queryForObject("SELECT pg_get_constraintdef(oid) FROM pg_constraint "
                 + "WHERE conname = 'payments_method_check'", String.class);
@@ -128,14 +115,14 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(List.of("QRIS", "Transfer", "Debit"), list(labels, "$.data[*].name"));
         assertEquals(List.of(1, 2, 3), list(labels, "$.data[*].displayOrder"));
         assertEquals(List.of(true, true, true), list(labels, "$.data[*].active"));
-        assertEquals(3, count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(3, api.count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
         // Onboarding itself writes no audit rows for the defaults.
-        assertEquals(0, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'PAYMENT_LABEL_CHANGED'",
+        assertEquals(0, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'PAYMENT_LABEL_CHANGED'",
                 owner.tenantId()));
 
         // The CHECK constraint (not just the enum) refuses the removed gateway method.
         api.openShift(owner, "0.00");
-        String orderId = api.createPosOrder(owner, productFor(owner), 1);
+        String orderId = api.createPosOrder(owner, api.product(owner), 1);
         api.payCashExact(owner, orderId);
         DataIntegrityViolationException refused = assertThrows(DataIntegrityViolationException.class,
                 () -> api.jdbc().update("UPDATE payments SET method = 'MOCK_GATEWAY' WHERE sales_order_id = ?::uuid", orderId));
@@ -205,10 +192,10 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(400, api.call(post(merchantLabels(owner)).header(AUTH, owner.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content(labelJson("Valid", -1, null))));
         assertStatus(400, updateLabel(owner, goPayId, labelJson("", null, null)));
-        assertEquals(4, count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(4, api.count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
 
         // Every successful write is audited with the label name and its resulting state; failures are not.
-        assertEquals(3, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'PAYMENT_LABEL_CHANGED'",
+        assertEquals(3, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'PAYMENT_LABEL_CHANGED'",
                 owner.tenantId()));
         assertEquals("name=GoPay active=true", api.jdbc().queryForObject("SELECT details FROM audit_logs WHERE tenant_id = ? "
                 + "AND action = 'PAYMENT_LABEL_CHANGED' AND entity_id = ?::uuid", String.class, owner.tenantId(), goPayId));
@@ -243,15 +230,15 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
         for (int i = 1; i <= 16; i++) {
             assertStatus(201, createLabel(owner, "Label " + i));
         }
-        assertEquals(20, count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(20, api.count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
         MvcResult tooMany = createLabel(owner, "Label 17");
         assertStatus(409, tooMany);
         assertTrue(tooMany.getResponse().getContentAsString().contains("Jumlah label maksimal 20."));
-        assertEquals(20, count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
+        assertEquals(20, api.count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", owner.outletId()));
         // Deactivated labels still count; the limit is about rows, and editing stays possible.
         assertStatus(200, updateLabel(owner, labelIdByName(owner, "Label 1"), labelJson("Label 1", null, false)));
         assertStatus(409, createLabel(owner, "Label 18"));
-        assertEquals(4, count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", other.outletId()), "3 defaults + GoPay");
+        assertEquals(4, api.count("SELECT count(*) FROM payment_labels WHERE outlet_id = ?", other.outletId()), "3 defaults + GoPay");
     }
 
     // ------------------------------------------------------------------ label rules on payment
@@ -260,7 +247,7 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
     void nonCashPaymentNeedsAnActiveLabelOfTheOutletCashRefusesOneAndTheLabelNameIsSnapshotted() throws Exception {
         MerchantFixture owner = api.onboardOwner("lbl-pay");
         MerchantFixture other = api.onboardOwner("lbl-pay-other");
-        String productId = productFor(owner);
+        String productId = api.product(owner);
         String orderId = api.createPosOrder(owner, productId, 1);
         String total = api.orderTotal(owner, orderId);
         api.openShift(owner, "0.00");
@@ -280,7 +267,7 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(400, inactive);
         assertTrue(inactive.getResponse().getContentAsString().contains("Pilih label pembayaran non-tunai."));
         assertStatus(400, api.pay(owner, orderId, "MOCK_GATEWAY", total, null, null));
-        assertEquals(0, count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
         assertEquals("UNPAID", ApiTestSupport.read(api.send(get("/api/v1/cashier/outlets/" + owner.outletId()
                 + "/fnb/orders/" + orderId).header(AUTH, owner.bearer()), 200), "$.data.paymentStatus"));
 
@@ -300,7 +287,7 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(ApiTestSupport.read(paid, "$.data.receiptNumber"), ApiTestSupport.read(replay, "$.data.receiptNumber"));
         assertStatus(409, api.pay(owner, orderId, "MANUAL_NON_CASH", total, labelIdByName(owner, "Transfer"), key));
         assertStatus(409, api.pay(owner, orderId, "CASH", total, null, key));
-        assertEquals(1, count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(1, api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
 
         // The label name is a snapshot: renaming or deactivating the label later changes nothing on the payment,
         // and a replay of the stored payment still works.
@@ -319,7 +306,7 @@ class FnbPaymentLabelIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     void salesReportAndCsvBreakDownNonCashPerLabel() throws Exception {
         MerchantFixture owner = api.onboardOwner("lbl-report");
-        String productId = productFor(owner);
+        String productId = api.product(owner);
         String qris = labelIdByName(owner, "QRIS");
         String transfer = labelIdByName(owner, "Transfer");
         api.openShift(owner, "0.00");

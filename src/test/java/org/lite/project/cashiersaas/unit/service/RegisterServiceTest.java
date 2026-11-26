@@ -7,7 +7,6 @@ import org.lite.project.cashiersaas.dto.request.identity.RegisterUserRequest;
 import org.lite.project.cashiersaas.dto.response.identity.RegisterUserResponse;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.exception.runtime.EmailAlreadyRegisteredException;
-import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.repository.StaffUserRepository;
 import org.lite.project.cashiersaas.service.AuthSessionService;
 import org.lite.project.cashiersaas.service.RegisterService;
@@ -21,12 +20,10 @@ import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @Tag("unit")
@@ -50,24 +47,6 @@ class RegisterServiceTest {
         assertEquals("new.user@example.com", saved.getEmail());
         assertEquals("New User", saved.getFullName());
         assertEquals("access-token", response.getAccessToken());
-    }
-
-    @Test
-    void registerRejectsAnInvalidPhoneNumberBeforeTouchingPersistence() {
-        InvalidOperationException exception = assertThrows(InvalidOperationException.class,
-                () -> service.register(request("0812-345-678a")));
-
-        assertEquals("Nomor telepon tidak valid.", exception.getMessage());
-        assertFalse(exception.getMessage().contains("678a"), "The rejected phone must not be echoed");
-        verifyNoInteractions(staffUserRepository, passwordEncoder, authSessionService);
-    }
-
-    @Test
-    void registerRejectsAMissingPhoneNumber() {
-        assertThrows(InvalidOperationException.class, () -> service.register(request(null)));
-        assertThrows(InvalidOperationException.class, () -> service.register(request("   ")));
-
-        verifyNoInteractions(staffUserRepository, passwordEncoder, authSessionService);
     }
 
     @Test

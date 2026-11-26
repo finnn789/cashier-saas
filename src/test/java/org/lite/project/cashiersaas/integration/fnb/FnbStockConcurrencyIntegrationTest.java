@@ -1,6 +1,5 @@
 package org.lite.project.cashiersaas.integration.fnb;
 
-import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -33,6 +32,8 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.readList;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -80,10 +81,6 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
 
     private static String stockItems(MerchantFixture merchant) {
         return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/inventory/items";
-    }
-
-    private static String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
     }
 
     private static String productRecipeUrl(MerchantFixture merchant, String productId) {
@@ -167,15 +164,6 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
 
     // ------------------------------------------------------------------ JSON, SQL and result helpers
 
-    private static List<String> readList(MvcResult result, String path) throws Exception {
-        List<Object> raw = JsonPath.read(result.getResponse().getContentAsString(), path);
-        List<String> values = new ArrayList<>();
-        for (Object value : raw) {
-            values.add(String.valueOf(value));
-        }
-        return values;
-    }
-
     private static BigDecimal decimal(String value) {
         return new BigDecimal(value);
     }
@@ -184,37 +172,12 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         assertEquals(0, decimal(expected).compareTo(actual), message + ": expected " + expected + " but was " + actual);
     }
 
-    private BigDecimal balance(String itemId) {
-        return api.jdbc().queryForObject(
-                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid",
-                BigDecimal.class, itemId);
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
-
     private int movementsOfItem(String itemId) {
-        return count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid", itemId);
-    }
-
-    private int saleMovements(String orderId) {
-        return count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid AND movement_type = 'SALE'",
-                orderId);
+        return api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid", itemId);
     }
 
     private int countPayments(String orderId) {
-        return count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId);
-    }
-
-    /** The movement ledger must always add up to the cached balance. */
-    private void assertLedgerMatchesBalance(String itemId) {
-        BigDecimal sum = api.jdbc().queryForObject(
-                "SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_movements WHERE inventory_item_id = ?::uuid",
-                BigDecimal.class, itemId);
-        assertEquals(0, sum.compareTo(balance(itemId)),
-                "SUM(quantity_delta)=" + sum + " must equal quantity_on_hand=" + balance(itemId));
+        return api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId);
     }
 
     private static int status(MvcResult result) {
@@ -316,21 +279,21 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         List<String> ids = createdMovementIds(results);
         assertFalse(ids.isEmpty(), "at least one request must be answered 201");
         assertEquals(1, new HashSet<>(ids).size(), "every 201 body carries the same movement id: " + ids);
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
                 + "AND idempotency_key = ?", owner.tenantId().toString(), key), "exactly one movement for the key");
         assertEquals(1, movementsOfItem(item), "no other movement exists for the ingredient");
-        assertDecimal("100", balance(item), "the restock is applied exactly once");
-        assertLedgerMatchesBalance(item);
+        assertDecimal("100", api.balance(item), "the restock is applied exactly once");
+        api.assertLedgerMatchesBalance(item);
 
         // Deterministic follow-up (TASK-070): a sequential replay of the same key and payload is answered 201
         // with the winner's movement id and changes nothing, whether or not the parallel requests overlapped.
         MvcResult replay = postMovement(owner, item, body);
         assertEquals(201, status(replay), "sequential replay must be 201: " + describe(replay));
         assertEquals(ids.get(0), ApiTestSupport.read(replay, "$.data.id"), "replay returns the winner's movement id");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
                 + "AND idempotency_key = ?", owner.tenantId().toString(), key), "still one movement row for the key");
-        assertDecimal("100", balance(item), "the replay does not apply the restock again");
-        assertLedgerMatchesBalance(item);
+        assertDecimal("100", api.balance(item), "the replay does not apply the restock again");
+        api.assertLedgerMatchesBalance(item);
         System.out.println("[concurrency] A same key+payload: 201=" + ids.size() + " 409="
                 + (results.size() - ids.size()) + " of " + results.size() + " parallel requests");
     }
@@ -354,7 +317,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         List<String> ids = createdMovementIds(results);
         assertEquals(1, new HashSet<>(ids).size(), "exactly one distinct movement id is returned in 201 bodies: " + ids);
         assertEquals(1, ids.size(), "payloads differ, so a replay (second 201) is impossible: " + ids);
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
                 + "AND idempotency_key = ?", owner.tenantId().toString(), key), "exactly one movement row for the key");
         assertEquals(ids.get(0), api.jdbc().queryForObject("SELECT id::text FROM inventory_movements "
                 + "WHERE tenant_id = ?::uuid AND idempotency_key = ?", String.class, owner.tenantId().toString(), key),
@@ -364,8 +327,8 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
                 owner.tenantId().toString(), key);
         assertTrue(delta.compareTo(decimal("100")) >= 0 && delta.compareTo(decimal("107")) <= 0,
                 "stored delta must be one of the submitted quantities, was " + delta);
-        assertEquals(0, delta.compareTo(balance(item)), "balance equals the single applied delta " + delta);
-        assertLedgerMatchesBalance(item);
+        assertEquals(0, delta.compareTo(api.balance(item)), "balance equals the single applied delta " + delta);
+        api.assertLedgerMatchesBalance(item);
 
         // Deterministic follow-up (TASK-070): the stored movement identifies the winner's payload, so the key reuse
         // checks no longer depend on the parallel requests having overlapped.
@@ -374,17 +337,17 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         MvcResult differing = postMovement(owner, item,
                 movementJson("RESTOCK", String.valueOf(winnerQuantity + 50), "Belanja", key));
         assertEquals(409, status(differing), "same key with a different payload must be 409: " + describe(differing));
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
                 + "AND idempotency_key = ?", owner.tenantId().toString(), key), "still one movement row for the key");
-        assertEquals(0, delta.compareTo(balance(item)), "balance unchanged by the rejected payload");
+        assertEquals(0, delta.compareTo(api.balance(item)), "balance unchanged by the rejected payload");
         MvcResult replay = postMovement(owner, item,
                 movementJson("RESTOCK", String.valueOf(winnerQuantity), "Belanja", key));
         assertEquals(201, status(replay), "the winner's exact payload is a replay: " + describe(replay));
         assertEquals(winnerId, ApiTestSupport.read(replay, "$.data.id"), "replay returns the winner's movement id");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
                 + "AND idempotency_key = ?", owner.tenantId().toString(), key), "replay adds no movement row");
-        assertEquals(0, delta.compareTo(balance(item)), "balance unchanged by the replay");
-        assertLedgerMatchesBalance(item);
+        assertEquals(0, delta.compareTo(api.balance(item)), "balance unchanged by the replay");
+        api.assertLedgerMatchesBalance(item);
         System.out.println("[concurrency] B same key+different payloads: 201=" + ids.size() + " 409="
                 + (results.size() - ids.size()) + " of " + results.size() + " parallel requests");
     }
@@ -409,11 +372,11 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         assertEquals(15, results.size());
         assertAllStatus(results, 201);
         assertEquals(15, new HashSet<>(createdMovementIds(results)).size(), "15 distinct movements were created");
-        assertDecimal("180", balance(item), "100 + 10 x 10 - 5 x 4");
-        assertEquals(15, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertDecimal("180", api.balance(item), "100 + 10 x 10 - 5 x 4");
+        assertEquals(15, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND idempotency_key LIKE ?", item, prefix + "%"), "exactly the 15 movements of this scenario");
         assertEquals(16, movementsOfItem(item), "initial restock + 15 movements");
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ D. different orders, shared ingredient
@@ -439,10 +402,10 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
 
         assertNoServerError(results);
         assertAllPaymentSuccess(results);
-        assertEquals(THREADS, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertEquals(THREADS, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND movement_type = 'SALE'", item), "one SALE movement per order");
         for (String orderId : orderIds) {
-            assertEquals(1, saleMovements(orderId), "exactly one SALE movement for order " + orderId);
+            assertEquals(1, api.saleMovements(orderId), "exactly one SALE movement for order " + orderId);
             assertDecimal("-50", api.jdbc().queryForObject("SELECT quantity_delta FROM inventory_movements "
                     + "WHERE order_id = ?::uuid AND movement_type = 'SALE'", BigDecimal.class, orderId), "sale delta");
             assertEquals("sale:" + orderId + ":" + item, api.jdbc().queryForObject("SELECT idempotency_key "
@@ -451,8 +414,8 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
             assertEquals(1, countPayments(orderId), "order is paid exactly once");
             assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
         }
-        assertDecimal("600", balance(item), "1000 - 8 x 50");
-        assertLedgerMatchesBalance(item);
+        assertDecimal("600", api.balance(item), "1000 - 8 x 50");
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ E1. same order, same payment key
@@ -487,10 +450,10 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         assertTrue(successes >= 1, "at least one payment must succeed");
         assertEquals(1, receipts.size(), "every successful response refers to the same payment: " + receipts);
         assertEquals(1, countPayments(orderId), "exactly one payment row");
-        assertEquals(1, saleMovements(orderId), "exactly one SALE movement for the order");
-        assertDecimal("950", balance(item), "stock deducted once");
+        assertEquals(1, api.saleMovements(orderId), "exactly one SALE movement for the order");
+        assertDecimal("950", api.balance(item), "stock deducted once");
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ E2. same order, different payment keys
@@ -524,10 +487,10 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         assertEquals(1, successes, "exactly one payment succeeds");
         assertEquals(THREADS - 1, conflicts, "all others are rejected with 409");
         assertEquals(1, countPayments(orderId), "exactly one payment row");
-        assertEquals(1, saleMovements(orderId), "exactly one SALE movement for the order");
-        assertDecimal("950", balance(item), "stock deducted once");
+        assertEquals(1, api.saleMovements(orderId), "exactly one SALE movement for the order");
+        assertDecimal("950", api.balance(item), "stock deducted once");
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ F. mixed load, no deadlock
@@ -568,12 +531,12 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
             }
         }
         for (String orderId : orderIds) {
-            assertEquals(1, saleMovements(orderId), "exactly one SALE movement for order " + orderId);
+            assertEquals(1, api.saleMovements(orderId), "exactly one SALE movement for order " + orderId);
             assertEquals(1, countPayments(orderId), "order is paid exactly once");
         }
-        assertDecimal("1080", balance(item), "1000 + 4 x 100 - 4 x 30 - 4 x 50");
+        assertDecimal("1080", api.balance(item), "1000 + 4 x 100 - 4 x 30 - 4 x 50");
         assertEquals(13, movementsOfItem(item), "initial restock + 8 manual + 4 sale movements");
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ G. negative stock stays non-blocking
@@ -599,11 +562,11 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
 
         assertNoServerError(results);
         assertAllPaymentSuccess(results);
-        assertDecimal("-200", balance(item), "100 - 6 x 50");
-        assertEquals(6, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertDecimal("-200", api.balance(item), "100 - 6 x 50");
+        assertEquals(6, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND movement_type = 'SALE'", item), "6 SALE movements");
         for (String orderId : orderIds) {
-            assertEquals(1, saleMovements(orderId), "exactly one SALE movement for order " + orderId);
+            assertEquals(1, api.saleMovements(orderId), "exactly one SALE movement for order " + orderId);
             assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
         }
 
@@ -625,7 +588,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         Collections.sort(expectedWarnings);
         Collections.sort(actualWarnings);
         assertEquals(expectedWarnings, actualWarnings);
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ H. payment racing with cancel
@@ -667,7 +630,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
                 assertEquals("PAID", paymentStatus, "payment won: " + context);
                 assertFalse("CANCELLED".equals(orderStatus), "payment won, order must not be cancelled: " + context);
                 assertEquals(1, countPayments(orderId), "payment won, exactly one payment row: " + context);
-                assertEquals(1, saleMovements(orderId), "payment won, exactly one SALE movement: " + context);
+                assertEquals(1, api.saleMovements(orderId), "payment won, exactly one SALE movement: " + context);
                 assertDecimal("-50", api.jdbc().queryForObject("SELECT quantity_delta FROM inventory_movements "
                         + "WHERE order_id = ?::uuid AND movement_type = 'SALE'", BigDecimal.class, orderId),
                         "sale delta of " + orderId);
@@ -676,17 +639,17 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
                 assertEquals("UNPAID", paymentStatus, "cancel won: " + context);
                 assertEquals("CANCELLED", orderStatus, "cancel won: " + context);
                 assertEquals(0, countPayments(orderId), "cancel won, no payment row: " + context);
-                assertEquals(0, saleMovements(orderId), "cancel won, no SALE movement: " + context);
+                assertEquals(0, api.saleMovements(orderId), "cancel won, no SALE movement: " + context);
             }
         }
 
         System.out.println("[concurrency] H pay vs cancel: payment won=" + paymentWins + " cancel won=" + cancelWins
                 + " of " + ROUNDS + " rounds");
         assertEquals(ROUNDS, paymentWins + cancelWins);
-        assertDecimal(String.valueOf(10000 - 50 * paymentWins), balance(item), "10000 - 50 x rounds won by the payment");
-        assertEquals(paymentWins, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertDecimal(String.valueOf(10000 - 50 * paymentWins), api.balance(item), "10000 - 50 x rounds won by the payment");
+        assertEquals(paymentWins, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND movement_type = 'SALE'", item), "one SALE movement per paid order");
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 
     // ------------------------------------------------------------------ I. payment racing with discount
@@ -729,7 +692,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
             BigDecimal total = (BigDecimal) order.get("total");
             assertEquals("PAID", order.get("payment_status"), context);
             assertEquals(1, countPayments(orderId), "exactly one payment row: " + context);
-            assertEquals(1, saleMovements(orderId), "exactly one SALE movement: " + context);
+            assertEquals(1, api.saleMovements(orderId), "exactly one SALE movement: " + context);
             Map<String, Object> paymentRow = api.jdbc().queryForMap("SELECT amount_paid, change_amount "
                     + "FROM payments WHERE sales_order_id = ?::uuid", orderId);
             BigDecimal tendered = (BigDecimal) paymentRow.get("amount_paid");
@@ -739,7 +702,7 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
                             + context);
             assertEquals(0, total.compareTo(subtotal.subtract(discountAmount).add(tax).add(serviceCharge)),
                     "persisted total must add up from its persisted parts: " + context);
-            int discountRows = count("SELECT count(*) FROM discounts WHERE sales_order_id = ?::uuid", orderId);
+            int discountRows = api.count("SELECT count(*) FROM discounts WHERE sales_order_id = ?::uuid", orderId);
             if (is2xx(discount)) {
                 discountApplied++;
                 assertEquals(1, discountRows, "discount applied, exactly one discount row: " + context);
@@ -761,9 +724,9 @@ class FnbStockConcurrencyIntegrationTest extends AbstractPostgresIntegrationTest
         System.out.println("[concurrency] I pay vs discount: discount applied before payment=" + discountApplied
                 + " rejected=" + discountRejected + " of " + ROUNDS + " rounds");
         assertEquals(ROUNDS, discountApplied + discountRejected);
-        assertDecimal(String.valueOf(10000 - 50 * ROUNDS), balance(item), "every order was paid, 50 g each");
-        assertEquals(ROUNDS, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
+        assertDecimal(String.valueOf(10000 - 50 * ROUNDS), api.balance(item), "every order was paid, 50 g each");
+        assertEquals(ROUNDS, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid "
                 + "AND movement_type = 'SALE'", item), "one SALE movement per paid order");
-        assertLedgerMatchesBalance(item);
+        api.assertLedgerMatchesBalance(item);
     }
 }

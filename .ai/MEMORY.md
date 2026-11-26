@@ -1,12 +1,14 @@
 # Project memory
 
-Memory version: 102
+Memory version: 104
 Updated: 2026-11-25 (Asia/Jakarta)
 
 Compact on purpose. Full history through v91 (per-task evidence, old reviews) is in Git history.
 
 ## Current state (2026-11-20)
 
+- 2026-11-25 (v104): TASK-109 test dedup + legacy chat path removed, tests green, NOT COMMITTED (details in `.ai/TASKS.md`).
+- 2026-11-25 (v103): TASK-105 (mock checkout, V18), TASK-106 (SUPERADMIN panel, V19) done + reviewed + compiled, NOT COMMITTED; TASK-107 Python tests fixed (unit 270 OK).
 - 2026-11-25 (v102): TASK-104 debt fix (copy locks both outlets, tests aligned to RBAC; test-compile 0, not run) done; user does QA next.
 - 2026-11-25 (v101): TASK-103 RBAC (V17 cashier discount cap) and TASK-101 copy menu: J1+F1 done, reviewed, compiled, NOT COMMITTED. Next: TASK-102 API tests (only when the user asks), then commits per task after approval.
 
@@ -19,7 +21,7 @@ Compact on purpose. Full history through v91 (per-task evidence, old reviews) is
 - TASK-086 (tests for 084/085): IN PROGRESS. T3 Python done: `.venv` unittest unit 273 OK. T1 (Java unit: fixes for 7 failing `FnbInventoryCostAndStockCountTest` + new tests) and T2 (Java IT) running. Then orchestrator runs `mvnw -B verify` (needs Docker Desktop) and fixes failures. Packet `tasks/TASK-086.md`.
 - TASK-087 (V15 index `audit_logs(tenant_id, entity_id, action)`; additive fields order cashierName/methodLabel/receiptNumber, product categoryName, recipe costEstimate, movement actorName): IMPLEMENTED, REVIEWED, COMPILED. FE report+prompt `reports/TASK-087-FE-CONTRACT.md`. Temporary audit files `.ai/context/contract-data/` (delete when FE aligned).
 - Not yet proven: Flyway V13/V14/V15 on a real DB, JPQL on Postgres, Postman run.
-- Next Flyway version: V18 (V16 purchases TASK-100, V17 cashier discount cap TASK-103; neither run on a DB yet).
+- Next Flyway version: V20 (V18 billing checkout TASK-105, V19 platform admin TASK-106; none run on a DB yet).
 - Housekeeping done 2026-11-20: all Ruflo/claude-flow tooling removed (user request); `.claude/` is gitignored (project agents are local only); `.ai` compacted (this file, TASKS.md, INDEX.md; older originals are in Git history).
 
 ## Last verified baselines

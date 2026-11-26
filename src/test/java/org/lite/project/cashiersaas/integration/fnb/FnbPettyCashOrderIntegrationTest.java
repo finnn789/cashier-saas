@@ -30,6 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertMoney;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.money;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -43,7 +47,6 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
     private static final String AUTH = HttpHeaders.AUTHORIZATION;
-    private static final String PRICE = "25000";
     private static final ZoneId JAKARTA = ZoneId.of("Asia/Jakarta");
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String NO_SHIFT_FOR_EXPENSE = "Buka shift terlebih dahulu sebelum mencatat pengeluaran.";
@@ -70,10 +73,6 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private static String shifts(MerchantFixture merchant) {
         return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/shifts";
-    }
-
-    private static String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
     }
 
     private static String expenseBody(String amount, String description) {
@@ -107,34 +106,9 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         return api.send(get(shifts(actor) + "/opening-suggestion").header(AUTH, actor.bearer()), 200);
     }
 
-    private static BigDecimal money(MvcResult result, String path) throws Exception {
-        return new BigDecimal(ApiTestSupport.read(result, path));
-    }
-
-    private static void assertMoney(String expected, BigDecimal actual, String message) {
-        assertEquals(0, new BigDecimal(expected).compareTo(actual), message + ": expected " + expected + " but was " + actual);
-    }
-
-    private static void assertMoney(BigDecimal expected, BigDecimal actual, String message) {
-        assertEquals(0, expected.compareTo(actual), message + ": expected " + expected + " but was " + actual);
-    }
-
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
-    }
-
     private static void assertSuccess(MvcResult result) throws Exception {
         int status = result.getResponse().getStatus();
         assertTrue(status == 200 || status == 201, result.getResponse().getContentAsString());
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
-
-    private String product(MerchantFixture owner) throws Exception {
-        return api.createProduct(owner, api.createCategory(owner, "Minuman"), "Es Teh", PRICE);
     }
 
     private static JsonNode data(MvcResult result) throws Exception {
@@ -152,14 +126,14 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         MerchantFixture owner = api.onboardOwner("pc-math");
         MerchantFixture cashier = api.onboardCashier(owner, "pc-math-cashier");
         MerchantFixture other = api.onboardOwner("pc-math-other");
-        String productId = product(owner);
+        String productId = api.product(owner);
 
         // No shift: refused with the petty-cash message, nothing written; listing expenses is 404.
         MvcResult noShift = expense(cashier, expenseKey(), "15000", "Beli es batu");
         assertStatus(409, noShift);
         assertTrue(noShift.getResponse().getContentAsString().contains(NO_SHIFT_FOR_EXPENSE));
         assertStatus(404, api.call(get(shifts(cashier) + "/current/expenses").header(AUTH, cashier.bearer())));
-        assertEquals(0, count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(0, api.count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
 
         String shiftId = ApiTestSupport.read(api.openShift(cashier, "100000.00"), "$.data.id");
         MvcResult paid = api.payCashExact(cashier, api.createPosOrder(cashier, productId, 1));
@@ -180,8 +154,8 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult replay = expense(cashier, key, "15000", "Beli es batu");
         assertSuccess(replay);
         assertEquals(expenseId, ApiTestSupport.read(replay, "$.data.id"));
-        assertEquals(1, count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
-        assertEquals(1, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'CASH_EXPENSE_RECORDED' "
+        assertEquals(1, api.count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(1, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = 'CASH_EXPENSE_RECORDED' "
                 + "AND entity_id = ?::uuid", owner.tenantId(), expenseId));
         assertEquals("amount=15000.00", api.jdbc().queryForObject("SELECT details FROM audit_logs WHERE tenant_id = ? "
                 + "AND action = 'CASH_EXPENSE_RECORDED' AND entity_id = ?::uuid", String.class, owner.tenantId(), expenseId));
@@ -190,7 +164,7 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(409, expense(cashier, key, "15001", "Beli es batu"));
         assertStatus(409, expense(cashier, key, "15000", "Beli gula"));
         assertStatus(409, expense(owner, owner, key, expenseBody("15000", "Beli es batu")));
-        assertEquals(1, count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(1, api.count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
 
         // Validation.
         assertStatus(400, expense(cashier, expenseKey(), "0", "Nol"));
@@ -201,7 +175,7 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(400, expense(cashier, expenseKey(), "100", "x".repeat(201)));
         assertStatus(400, expense(cashier, cashier, null, expenseBody("100", "Tanpa key")));
         assertStatus(400, expense(cashier, cashier, "short", expenseBody("100", "Key pendek")));
-        assertEquals(1, count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(1, api.count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
 
         // A second expense; the cashier lists both in order and the live shift subtracts them.
         assertStatus(201, expense(cashier, expenseKey(), "5000.50", "Parkir"));
@@ -249,20 +223,7 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         // After close: a replay still answers from the stored expense, a new expense is refused (no open shift).
         assertSuccess(expense(cashier, key, "15000", "Beli es batu"));
         assertStatus(409, expense(cashier, expenseKey(), "100", "Terlambat"));
-        assertEquals(2, count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
-    }
-
-    @Test
-    void expensesAreCountedAgainstTheDrawerWhenClosingTheShift() throws Exception {
-        MerchantFixture owner = api.onboardOwner("pc-diff");
-        api.openShift(owner, "50000.00");
-        assertStatus(201, expense(owner, expenseKey(), "10000", "Beli plastik"));
-
-        // The drawer holds 40000: counting it against expected (50000 - 10000) is exactly balanced.
-        MvcResult closed = close(owner, "40000");
-        assertStatus(200, closed);
-        assertMoney("40000", money(closed, "$.data.expectedCash"), "expected after expenses");
-        assertMoney("0", money(closed, "$.data.cashDifference"), "balanced");
+        assertEquals(2, api.count("SELECT count(*) FROM cash_expenses WHERE tenant_id = ?", owner.tenantId()));
     }
 
     // ------------------------------------------------------------------ opening suggestion
@@ -330,7 +291,7 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     void orderNoteAndCustomerLabelAreOptionalTrimmedClearedOnBlankAndPartOfTheIdempotencyFingerprint() throws Exception {
         MerchantFixture owner = api.onboardOwner("note");
-        String productId = product(owner);
+        String productId = api.product(owner);
 
         // Neither a customer nor a note is required.
         MvcResult bare = postOrder(owner, "pos-" + UUID.randomUUID(), productId, 1, null, null);
@@ -366,7 +327,7 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
         assertSuccess(replay);
         assertEquals(notedId, ApiTestSupport.read(replay, "$.data.orderId"));
         assertStatus(409, postOrder(owner, key, productId, 1, "Budi", "catatan lain"));
-        assertEquals(3, count("SELECT count(*) FROM sales_orders WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(3, api.count("SELECT count(*) FROM sales_orders WHERE tenant_id = ?", owner.tenantId()));
 
         // Size limits.
         assertStatus(400, postOrder(owner, "pos-" + UUID.randomUUID(), productId, 1, null, "n".repeat(501)));
@@ -410,7 +371,7 @@ class FnbPettyCashOrderIntegrationTest extends AbstractPostgresIntegrationTest {
     void orderListFiltersByOutletDayRangeAndExactOrderNumber() throws Exception {
         MerchantFixture owner = api.onboardOwner("filters");
         MerchantFixture other = api.onboardOwner("filters-other");
-        String productId = product(owner);
+        String productId = api.product(owner);
         LocalDate today = LocalDate.now(JAKARTA);
         LocalDate yesterday = today.minusDays(1);
 

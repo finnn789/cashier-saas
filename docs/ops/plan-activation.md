@@ -1,7 +1,7 @@
 # Runbook operator: aktivasi paket Pro/Premium dan top-up kuota AI
 
 Pemilik: orchestrator. Versi 2 (2026-11-14), TASK-082 (PRD v2.2 bagian 8.15, keputusan E1/E4) dan TASK-083 (add-on outlet tambahan, `subscriptions.extra_outlets`, keputusan M1-M3).
-Untuk masa pilot: pembayaran lewat transfer manual dan paket diaktifkan oleh operator dengan SQL. Belum ada endpoint, tidak ada integrasi pembayaran, dan tidak ada login SUPERADMIN di kode.
+Untuk masa pilot: pembayaran lewat transfer manual. Sejak TASK-105/106 owner bisa membuat tagihan sendiri (`/merchant/subscription/checkout`, gateway MOCK), dan SUPERADMIN mengonfirmasi transfer lewat `/api/v1/platform` (lihat bagian 8). SQL di runbook ini tetap berlaku sebagai jalur darurat. Belum ada integrasi payment gateway sungguhan.
 
 ## Aturan sebelum menjalankan apa pun
 
@@ -245,6 +245,33 @@ SELECT (SELECT count(*) FROM outlets WHERE tenant_id = :'tenant_id' AND active) 
 ```
 
 Catatan: trial Premium 14 hari tidak menambah jatah outlet; jatahnya tetap 1 tanpa baris berbayar. Bila `outlet_aktif` lebih besar dari `jatah_outlet`, outlet berurutan di atas jatah sedang tidak bisa dipakai (402), dan itu perilaku yang benar.
+
+## 8. Superadmin (panel platform, TASK-106)
+
+Akun SUPERADMIN adalah akun `staff_users` biasa dengan `platform_admin = true` (Flyway V19). **Tidak ada endpoint yang membuat admin**; hanya operator yang menyetel kolom ini dengan SQL. Admin masuk lewat login biasa, lalu aplikasi memanggil `POST /api/v1/auth/platform` untuk mendapat token PLATFORM (hanya berlaku untuk `/api/v1/platform/**`). Status akun harus `ACTIVE` (profil bisnis sudah selesai atau akun sudah aktif).
+
+Setiap permintaan platform membaca ulang kolom ini, jadi pencabutan berlaku seketika (permintaan berikutnya dijawab 404). Semua aksi tulis admin (beri/akhiri paket, top-up AI, tangguhkan/aktifkan tenant, tandai lunas/batalkan tagihan) wajib beralasan dan tercatat di `audit_logs` dengan admin sebagai pelaku (aksi berawalan `PLATFORM_`).
+
+```sql
+-- Jadikan admin (email huruf kecil); harus tepat 1 baris.
+BEGIN;
+UPDATE staff_users SET platform_admin = true, updated_at = now(), version = version + 1
+WHERE email = lower(:'admin_email') AND status = 'ACTIVE'
+RETURNING id, email, platform_admin;
+COMMIT;
+
+-- Cabut akses.
+BEGIN;
+UPDATE staff_users SET platform_admin = false, updated_at = now(), version = version + 1
+WHERE email = lower(:'admin_email')
+RETURNING id, email, platform_admin;
+COMMIT;
+
+-- Daftar admin saat ini.
+SELECT id, email, full_name, status FROM staff_users WHERE platform_admin ORDER BY email;
+```
+
+Menangguhkan tenant mengubah `tenants.status` menjadi `SUSPENDED` tanpa menghapus data; pemilik dan kasir tidak bisa memilih outlet dan sesi mereka berhenti saat refresh berikutnya (paling lama selama masa berlaku token akses). Gunakan panel, bukan SQL, supaya tercatat di audit.
 
 ## Pemecahan masalah
 

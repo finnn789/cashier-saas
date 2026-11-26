@@ -315,11 +315,12 @@ class CashierInsightGrpcHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    void leakageAndMarginRpcsAreDeniedLikeAnomaliesForANonOwnerOrNonPremiumTenant(boolean notPremium) {
+    void salesLeakageAndMarginRpcsAreDeniedBeforeArgumentFeedbackForANonOwnerOrNonPremiumTenant(boolean notPremium) {
         StatusRuntimeException denied = Status.PERMISSION_DENIED.withDescription("Tenant is not permitted for this service").asRuntimeException();
         if (notPremium) org.mockito.Mockito.doThrow(denied).when(policy).requirePremium(tenantId);
         else when(policy.requireOwnerOutlets(tenantId, USER)).thenThrow(denied);
 
+        StatusRuntimeException salesDenied = salesError(sales("garbage", "garbage"), Status.Code.PERMISSION_DENIED);
         handler.getLeakageReport(GetLeakageReportRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setFrom("garbage").build(), leakageObserver);
         handler.getMenuMargins(GetMenuMarginsRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setMaxMarginPct("garbage").build(), marginObserver);
 
@@ -328,6 +329,7 @@ class CashierInsightGrpcHandlerTest {
         verify(leakageObserver).onError(leakageError.capture());
         verify(marginObserver).onError(marginError.capture());
         // permission is checked before any argument feedback
+        assertEquals("Tenant is not permitted for this service", salesDenied.getStatus().getDescription());
         assertEquals(Status.Code.PERMISSION_DENIED, ((StatusRuntimeException) leakageError.getValue()).getStatus().getCode());
         assertEquals(Status.Code.PERMISSION_DENIED, ((StatusRuntimeException) marginError.getValue()).getStatus().getCode());
         verifyNoInteractions(leakageService, menuMarginService, accessRepository);
@@ -339,17 +341,6 @@ class CashierInsightGrpcHandlerTest {
         menu.setStatus(status);
         menu.setMarginPct(marginPct == null ? null : new BigDecimal(marginPct));
         return menu;
-    }
-
-    @Test
-    void aRejectedCallerGetsPermissionDeniedBeforeAnyArgumentFeedback() {
-        StatusRuntimeException denied = Status.PERMISSION_DENIED.withDescription("Tenant is not permitted for this service").asRuntimeException();
-        when(policy.requireOwnerOutlets(tenantId, USER)).thenThrow(denied);
-
-        StatusRuntimeException ex = salesError(sales("garbage", "garbage"), Status.Code.PERMISSION_DENIED);
-
-        assertEquals("Tenant is not permitted for this service", ex.getStatus().getDescription());
-        verifyNoInteractions(accessRepository);
     }
 
     @Test

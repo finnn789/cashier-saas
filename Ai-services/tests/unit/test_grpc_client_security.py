@@ -123,14 +123,15 @@ class GrpcClientLimitClampTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
-    SAFE_CODES = (
+    RPC_ERROR_CODES = (
         grpc.StatusCode.UNAUTHENTICATED,
         grpc.StatusCode.PERMISSION_DENIED,
         grpc.StatusCode.RESOURCE_EXHAUSTED,
+        grpc.StatusCode.UNAVAILABLE,
     )
 
-    async def test_catalog_auth_errors_return_empty_without_leaking_key(self) -> None:
-        for code in self.SAFE_CODES:
+    async def test_catalog_rpc_errors_return_empty_without_leaking_key(self) -> None:
+        for code in self.RPC_ERROR_CODES:
             with self.subTest(code=code.name):
                 client = _client()
                 # Server-side details deliberately echo the key to prove it is never logged.
@@ -145,8 +146,8 @@ class GrpcClientSafeErrorTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(code.name, joined)
                 self.assertNotIn(SECRET, joined)
 
-    async def test_order_status_auth_errors_return_none_without_leaking_key(self) -> None:
-        for code in self.SAFE_CODES:
+    async def test_order_status_rpc_errors_return_none_without_leaking_key(self) -> None:
+        for code in self.RPC_ERROR_CODES:
             with self.subTest(code=code.name):
                 client = _client()
                 client._stub.GetOrderStatus = AsyncMock(

@@ -20,6 +20,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -78,10 +79,6 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
         return "/api/v1/merchant/outlets/" + owner.outletId() + "/staff";
     }
 
-    private String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
-    }
-
     private UUID userId(String fullName) {
         return api.jdbc().queryForObject("SELECT id FROM staff_users WHERE full_name = ?", UUID.class, fullName);
     }
@@ -90,13 +87,8 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
         return api.jdbc().queryForObject("SELECT email FROM staff_users WHERE id = ?", String.class, userId);
     }
 
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
-
     private int auditRows(MerchantFixture owner, String action, UUID entityId) {
-        return count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = ? AND entity_id = ?",
+        return api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = ? AND entity_id = ?",
                 owner.tenantId(), action, entityId);
     }
 
@@ -197,7 +189,7 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(404, listOrdersStatus(owner, cashier.bearer()));
         // The session is revoked, so refresh fails; every session of the user is revoked.
         assertEquals(401, refreshStatus(session));
-        assertEquals(0, count("SELECT count(*) FROM auth_sessions WHERE user_id = ? AND revoked_at IS NULL", cashierId));
+        assertEquals(0, api.count("SELECT count(*) FROM auth_sessions WHERE user_id = ? AND revoked_at IS NULL", cashierId));
         // The account itself is untouched: login works, select-merchant does not (inactive membership -> 404).
         MvcResult relogin = login(email, PASSWORD);
         assertEquals(200, relogin.getResponse().getStatus());
@@ -238,7 +230,7 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(200, login(email, temporary).getResponse().getStatus(), "temporary password works");
         assertEquals(401, refreshStatus(session), "existing sessions are revoked");
         assertEquals(1, auditRows(owner, "STAFF_PASSWORD_RESET", cashierId));
-        assertEquals(0, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND (details LIKE '%' || ? || '%' "
+        assertEquals(0, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND (details LIKE '%' || ? || '%' "
                 + "OR reason LIKE '%' || ? || '%')", owner.tenantId(), temporary, temporary),
                 "the temporary password must never be written to the audit log");
     }
@@ -283,9 +275,9 @@ class MerchantStaffIntegrationTest extends AbstractPostgresIntegrationTest {
             assertEquals(404, staffCall(owner, owner.bearer(), "/" + ownerId + "/" + action, true), action);
             assertEquals(404, staffCall(owner, owner.bearer(), "/" + UUID.randomUUID() + "/" + action, true), action);
         }
-        assertEquals(1, count("SELECT count(*) FROM tenant_memberships WHERE tenant_id = ? AND user_id = ? "
+        assertEquals(1, api.count("SELECT count(*) FROM tenant_memberships WHERE tenant_id = ? AND user_id = ? "
                 + "AND active = true", owner.tenantId(), cashierId));
-        assertEquals(0, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action LIKE 'STAFF_%'",
+        assertEquals(0, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action LIKE 'STAFF_%'",
                 owner.tenantId()));
     }
 

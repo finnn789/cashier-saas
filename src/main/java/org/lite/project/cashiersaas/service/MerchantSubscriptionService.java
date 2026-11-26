@@ -3,10 +3,12 @@ package org.lite.project.cashiersaas.service;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.response.MerchantSubscriptionResponse;
+import org.lite.project.cashiersaas.entity.shared.billing.PlatformInvoiceEntity;
 import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.repository.AiUsageRepository;
+import org.lite.project.cashiersaas.repository.PlatformBillingRepository;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,8 @@ public class MerchantSubscriptionService {
     private final PlanEntitlementService planEntitlementService;
     private final SubscriptionRepository subscriptions;
     private final AiUsageRepository aiUsage;
+    private final PlatformBillingRepository billing;
+    private final MockPaymentGateway gateway;
 
     @Transactional(readOnly = true)
     public MerchantSubscriptionResponse get(TenantPrincipal principal) {
@@ -40,6 +44,8 @@ public class MerchantSubscriptionService {
         if (plan == PlanCode.PREMIUM) {
             response.setAi(ai(tenant, tenantId, now));
         }
+        response.setPendingInvoiceId(billing.openInvoice(tenantId, now).map(PlatformInvoiceEntity::getId).orElse(null));
+        response.setMockPaymentEnabled(gateway.isEnabled());
         if (plan != PlanCode.FREETIER) {
             response.setOutletAddOnMonthlyPrice(MembershipPlanCatalogService.OUTLET_ADDON_MONTHLY);
         }
