@@ -23,6 +23,7 @@ public final class MerchantBusinessSettingsMapper {
         response.setTimeZone(outlet.getTimeZone());
         response.setReceiptFooter(tenant.getReceiptFooter());
         response.setTargetMarginPct(tenant.getTargetMarginPct());
+        response.setCashierMaxDiscountPct(tenant.getCashierMaxDiscountPct());
         return response;
     }
 }

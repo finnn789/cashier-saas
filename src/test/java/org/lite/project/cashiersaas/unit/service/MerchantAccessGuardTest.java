@@ -3,11 +3,14 @@ package org.lite.project.cashiersaas.unit.service;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.OutletOverAllowanceException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -92,6 +95,22 @@ class MerchantAccessGuardTest {
         verify(accessRepository).findMember(eq(userId), eq(tenantId), eq(Set.of(Role.CASHIER)),
                 any(Instant.class));
         verifyNoMoreInteractions(accessRepository);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"STOCK_MOVE,true", "STOCK_ADJUST,false"})
+    void cashierGetsTheContextOnlyForPermissionsGrantedToCashiersAndOtherwiseNotFound(Permission permission, boolean granted) {
+        TenantMembershipEntity membership = TenantMembershipEntity.grantCashier(null, new TenantEntity());
+        OutletEntity outlet = new OutletEntity();
+        when(accessRepository.findOutlet(eq(userId), eq(tenantId), eq(outletId),
+                eq(Set.of(Role.CASHIER)), any(Instant.class)))
+                .thenReturn(Optional.of(new MerchantAccessRepository.OutletAccess(membership, outlet, true)));
+
+        if (granted) {
+            assertEquals(outlet, guard.require(cashier, outletId, permission).getOutlet());
+        } else {
+            assertThrows(ResourceNotFoundException.class, () -> guard.require(cashier, outletId, permission));
+        }
     }
 
     @Test

@@ -23,6 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.money;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -63,10 +65,6 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         return "{\"method\":\"" + method + "\",\"amountTendered\":" + tendered + ",\"idempotencyKey\":\"" + key + "\"}";
     }
 
-    private String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
-    }
-
     private String createPosOrder(MerchantFixture merchant, String productId, int quantity)
             throws Exception {
         MvcResult created = api.send(post(orders(merchant)).header(HttpHeaders.AUTHORIZATION, merchant.bearer())
@@ -80,10 +78,6 @@ class FnbPayFirstFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private MvcResult getOrder(MerchantFixture merchant, String orderId) throws Exception {
         return api.send(get(orders(merchant) + "/" + orderId).header(HttpHeaders.AUTHORIZATION, merchant.bearer()), 200);
-    }
-
-    private static BigDecimal money(MvcResult result, String path) throws Exception {
-        return new BigDecimal(ApiTestSupport.read(result, path));
     }
 
     private int countPayments(String orderId) {

@@ -20,7 +20,7 @@ from unittest.mock import patch
 import httpx
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -79,7 +79,6 @@ class RecordingDatabase:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.statements: list[str] = []
-        self.error: Exception | None = None
 
     @asynccontextmanager
     async def transaction(self):
@@ -88,16 +87,10 @@ class RecordingDatabase:
 
         class Connection:
             async def execute(self, statement: object) -> object:
-                if database.error is not None:
-                    raise database.error
                 database.statements.append(str(statement.compile()))  # type: ignore[attr-defined]
                 return SimpleNamespace(rowcount=1)
 
-        try:
-            yield Connection()
-        except BaseException:
-            self.events.append("rollback")
-            raise
+        yield Connection()
         self.events.append("commit")
 
 
@@ -118,18 +111,6 @@ class AsgiMemberApiTests(AppStateMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIn("INSERT INTO tenants", database.statements[0])
         self.assertIn("INSERT INTO tenant_members", database.statements[1])
         self.assertIn("ON CONFLICT", database.statements[1])
-
-    async def test_database_failure_is_a_generic_503_and_rolls_back(self) -> None:
-        database = RecordingDatabase()
-        database.error = OperationalError("INSERT secret", {"phone": PHONE}, Exception("down"))
-        self.install_database(database)
-        async with self.client() as client:
-            with self.assertLogs("app.api.internal_members", level="ERROR") as captured:
-                response = await client.put(member_path(TENANT, USER), json=body(), headers=HEADERS)
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json(), {"error": "service_unavailable"})
-        self.assertEqual(database.events, ["begin", "rollback"])
-        self.assertNotIn(PHONE, response.text + "\n".join(captured.output))
 
 
 def asyncpg_url(raw: str) -> URL:

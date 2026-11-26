@@ -59,7 +59,7 @@ public class SecurityConfiguration {
                                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh", "/api/v1/auth/logout").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
                                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/password").authenticated()
-                                .requestMatchers("/api/v1/auth/select-merchant", "/api/v1/auth/outlets").hasAuthority("SCOPE_ACCOUNT")
+                                .requestMatchers("/api/v1/auth/select-merchant", "/api/v1/auth/outlets", "/api/v1/auth/platform").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/api/v1/onboarding/**").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/api/v1/public/plans").permitAll()

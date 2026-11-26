@@ -227,7 +227,7 @@ class MerchantBusinessSettingsServiceTest {
             "tax-null", "tax-negative", "tax-over100", "tax-scale", "service-null", "service-negative",
             "service-over100", "service-scale", "logo-http", "logo-credentials", "logo-port0", "logo-port70000",
             "business-null", "business-blank", "business-long", "outlet-null", "outlet-blank", "outlet-long",
-            "margin-negative", "margin-100", "margin-scale"})
+            "margin-negative", "margin-100", "margin-scale", "cap-negative", "cap-over100", "cap-scale"})
     void rejectsInvalidValuesBeforeMutation(String scenario) {
         assertRejected(request -> {
             switch (scenario) {
@@ -256,6 +256,9 @@ class MerchantBusinessSettingsServiceTest {
                 case "margin-negative" -> request.setTargetMarginPct(new BigDecimal("-0.01"));
                 case "margin-100" -> request.setTargetMarginPct(new BigDecimal("100"));
                 case "margin-scale" -> request.setTargetMarginPct(new BigDecimal("55.555"));
+                case "cap-negative" -> request.setCashierMaxDiscountPct(new BigDecimal("-0.01"));
+                case "cap-over100" -> request.setCashierMaxDiscountPct(new BigDecimal("100.01"));
+                case "cap-scale" -> request.setCashierMaxDiscountPct(new BigDecimal("10.555"));
                 default -> throw new AssertionError("Unknown scenario: " + scenario);
             }
         });
@@ -382,16 +385,38 @@ class MerchantBusinessSettingsServiceTest {
         assertEquals(stored, details.path("after").path("targetMarginPct").asText());
     }
 
+    @ParameterizedTest
+    @CsvSource({"12.5,12.50", "100,100.00"})
+    void cashierDiscountCapIsStoredWithTwoDecimalsUpToOneHundredAndAuditedBeforeAndAfter(String requested, String stored) throws Exception {
+        Fixture fixture = fixture();
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setCashierMaxDiscountPct(new BigDecimal(requested));
+
+        MerchantBusinessSettingsResponse response = service.update(owner, outletId, request);
+
+        assertEquals(new BigDecimal(stored), fixture.tenant().getCashierMaxDiscountPct());
+        assertEquals(new BigDecimal(stored), response.getCashierMaxDiscountPct());
+        ArgumentCaptor<AuditLogEntity> audit = ArgumentCaptor.forClass(AuditLogEntity.class);
+        verify(auditLogs).persist(audit.capture());
+        JsonNode details = new ObjectMapper().readTree(audit.getValue().getDetails());
+        assertEquals("0.00", details.path("before").path("cashierMaxDiscountPct").asText());
+        assertEquals(stored, details.path("after").path("cashierMaxDiscountPct").asText());
+    }
+
     @Test
-    void omittedTargetMarginLeavesTheCurrentTargetAndWritesNoAudit() {
+    void omittedTargetMarginAndCashierCapLeaveTheCurrentValuesAndWriteNoAudit() {
         Fixture fixture = fixture();
         fixture.tenant().changeTargetMargin(new BigDecimal("70.00"));
+        fixture.tenant().changeCashierMaxDiscount(new BigDecimal("25.00"));
         when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
 
         MerchantBusinessSettingsResponse response = service.update(owner, outletId, validRequest());
 
         assertEquals(new BigDecimal("70.00"), fixture.tenant().getTargetMarginPct());
         assertEquals(new BigDecimal("70.00"), response.getTargetMarginPct());
+        assertEquals(new BigDecimal("25.00"), fixture.tenant().getCashierMaxDiscountPct());
+        assertEquals(new BigDecimal("25.00"), response.getCashierMaxDiscountPct());
         verifyNoInteractions(auditLogs);
     }
 

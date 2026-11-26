@@ -57,6 +57,8 @@ class FakeGrpc:
         self.sales: dict[str, object] = {}
         self.restock: dict[str, object] = {}
         self.anomalies: dict[str, object] = {}
+        self.leakage: dict[str, object] = {}
+        self.margins: dict[str, object] = {}
         self.fail: set[str] = set()
         self.calls: list[tuple[str, ...]] = []
 
@@ -79,6 +81,16 @@ class FakeGrpc:
     async def get_anomalies(self, tenant_id: str, user_id: str, date: str):
         self.calls.append(("anomalies", tenant_id, user_id, date))
         return self.anomalies.get(user_id)
+
+    async def get_leakage_report(
+        self, *, tenant_id: str, user_id: str, date_from: str = "", date_to: str = ""
+    ):
+        self.calls.append(("leakage", tenant_id, user_id, date_from, date_to))
+        return self.leakage.get(user_id)
+
+    async def get_menu_margins(self, *, tenant_id: str, user_id: str, max_margin_pct: str = ""):
+        self.calls.append(("margins", tenant_id, user_id))
+        return self.margins.get(user_id)
 
 
 class FakeChannel:
@@ -254,6 +266,30 @@ class DailySummaryEndpointTests(unittest.TestCase):
         for foreign in ("Kedai Lain", "Gula Lain", "Kasir Lain"):
             self.assertNotIn(foreign, text)
 
+    def test_leakage_and_margin_sections_use_only_the_requested_outlet(self) -> None:
+        self.grpc.leakage[str(OWNER_A)] = only(
+            {"outlet_id": OTHER_OUTLET, "stock_count_count": 1, "total_loss": "999", "flagged_count": 1,
+             "lines": [{"name": "Gula Lain", "unit": "kg", "shortage": "1", "loss_amount": "999"}]},
+            {"outlet_id": OUTLET, "stock_count_count": 1, "total_loss": "5000", "flagged_count": 1,
+             "lines": [{"name": "Susu Senja", "unit": "kg", "shortage": "1", "loss_amount": "5000"}]},
+        )
+        self.grpc.margins[str(OWNER_A)] = only(
+            {"outlet_id": OTHER_OUTLET, "target_margin_pct": "60",
+             "menus": [{"name": "Menu Lain", "margin_pct": "10", "suggested_price": "1000"}]},
+            {"outlet_id": OUTLET, "target_margin_pct": "60",
+             "menus": [{"name": "Kopi Senja", "margin_pct": "40", "suggested_price": "25000"}]},
+        )
+
+        self.assertEqual(self.post().json(), {"delivered": 1, "skipped": 0})
+
+        text = self.channel.sent[0][1]
+        self.assertIn("Kebocoran stok", text)
+        self.assertIn("Susu Senja", text)
+        self.assertIn("Menu di bawah target margin", text)
+        self.assertIn("Kopi Senja", text)
+        for foreign in ("Gula Lain", "Menu Lain"):
+            self.assertNotIn(foreign, text)
+
     def test_recipient_without_the_outlet_or_without_data_is_skipped(self) -> None:
         owner_c = UUID("7a9d4e21-8b3c-4f60-a512-9e8d7c6b5a42")
         self.recipients.return_value = [(OWNER_A, CHAT_A), (OWNER_B, CHAT_B), (owner_c, 5550003)]
@@ -319,6 +355,8 @@ class DailySummaryEndpointTests(unittest.TestCase):
         real.get_sales_summary.return_value = only(sales())
         real.get_restock_suggestions.return_value = None
         real.get_anomalies.return_value = None
+        real.get_leakage_report.return_value = None
+        real.get_menu_margins.return_value = None
         app.dependency_overrides[get_grpc_client] = lambda: real
 
         response = self.post()
@@ -327,6 +365,8 @@ class DailySummaryEndpointTests(unittest.TestCase):
         real.get_sales_summary.assert_awaited_once()
         real.get_restock_suggestions.assert_awaited_once()
         real.get_anomalies.assert_awaited_once()
+        real.get_leakage_report.assert_awaited_once()
+        real.get_menu_margins.assert_awaited_once()
 
 
 class OwnerRecipientQueryTests(unittest.IsolatedAsyncioTestCase):

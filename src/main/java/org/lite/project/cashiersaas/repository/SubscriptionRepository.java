@@ -4,6 +4,7 @@ import com.blazebit.persistence.CriteriaBuilderFactory;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
+import org.lite.project.cashiersaas.enums.PlanCode;
 import org.lite.project.cashiersaas.shared.StatusConstants;
 import org.springframework.stereotype.Repository;
 
@@ -28,6 +29,14 @@ public class SubscriptionRepository {
                     .where("subscription.endsAt").gt(now)
                 .endOr()
                 .getResultList();
+    }
+
+    /** Paid ACTIVE rows that are running or scheduled to start later (ends_at null or in the future); the input of the start-date rule. */
+    public List<SubscriptionEntity> findLivePaid(UUID tenantId, Instant now) {
+        return entityManager.createQuery("select s from SubscriptionEntity s where s.tenant.id = :tenantId and s.status = :active "
+                        + "and s.planCode <> :free and (s.endsAt is null or s.endsAt > :now)", SubscriptionEntity.class)
+                .setParameter("tenantId", tenantId).setParameter("active", StatusConstants.ACTIVE)
+                .setParameter("free", PlanCode.FREETIER.name()).setParameter("now", now).getResultList();
     }
 
     public void persist(SubscriptionEntity subscription) {

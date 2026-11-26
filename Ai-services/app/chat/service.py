@@ -7,7 +7,6 @@ tenant to the graph state that `tool.execute(tenant_id=...)` reads.
 '''
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -19,8 +18,8 @@ from langgraph.errors import GraphRecursionError
 
 from app.ai.graph.error_codes import classify_llm_error
 from app.ai.graph.workflow import build_chat_graph
-from app.ai.openrouter import AIError, OpenRouterClient
-from app.ai.prompts import MAX_INPUT_CHARS, build_prompt
+from app.ai.openrouter import AIError
+from app.ai.prompts import MAX_INPUT_CHARS
 from app.chat import members
 from app.chat.members import MemberMatch, VerifiedMembership
 from app.chat.repositories import ChannelRepository
@@ -133,7 +132,6 @@ class ChatService:
         # Development only: used for a user with NO verified membership, never otherwise.
         self.fallback_tenant_id = fallback_tenant_id
         self.ai = ai
-        self.tools = tools
         self._serial = asyncio.Lock()
         if graph is not None:
             self.graph = graph
@@ -410,289 +408,150 @@ class ChatService:
                     extra={'event': 'history_loaded', 'pairs_count': len(pairs)},
                 )
 
-            ai_path = (
-                'graph'
-                if self.graph is not None
-                else 'legacy'
-                if self.ai is not None
-                else 'unconfigured'
+            if self.graph is None:
+                return self._finish_error(started, 'AI_NOT_CONFIGURED', 'ai_not_configured')
+            # One question is consumed here; a failure of the check refuses (fail closed).
+            quota = await self.grpc_client.consume_ai_question(
+                tenant_id=str(tenant_id),
+                user_id=str(java_user_id) if java_user_id else '',
             )
-            logger.info('AI path selected', extra={'event': 'ai_path_selected', 'path': ai_path})
+            if quota is None:
+                return self._finish(started, 'quota_unavailable', QUOTA_UNAVAILABLE_MESSAGE)
+            if not quota.get('allowed'):
+                return self._finish(
+                    started,
+                    'quota_refused',
+                    _QUOTA_REFUSALS.get(quota.get('reason'), QUOTA_UNAVAILABLE_MESSAGE),
+                )
             quota_note = ''
-            if ai_path != 'unconfigured':
-                # One question is consumed here; a failure of the check refuses (fail closed).
-                quota = await self.grpc_client.consume_ai_question(
-                    tenant_id=str(tenant_id),
-                    user_id=str(java_user_id) if java_user_id else '',
+            if quota.get('warn'):
+                quota_note = (
+                    f'\n\nKuota AI: {quota.get("used")}/{quota.get("limit")}'
+                    ' pertanyaan bulan ini.'
                 )
-                if quota is None:
-                    return self._finish(started, 'quota_unavailable', QUOTA_UNAVAILABLE_MESSAGE)
-                if not quota.get('allowed'):
-                    return self._finish(
-                        started,
-                        'quota_refused',
-                        _QUOTA_REFUSALS.get(quota.get('reason'), QUOTA_UNAVAILABLE_MESSAGE),
-                    )
-                if quota.get('warn'):
-                    quota_note = (
-                        f'\n\nKuota AI: {quota.get("used")}/{quota.get("limit")}'
-                        ' pertanyaan bulan ini.'
-                    )
-            if self.graph is not None:
-                if (
-                    self.ai is not None
-                    and getattr(self.ai, 'settings', None) is not None
-                    and (
-                        not getattr(self.ai.settings, 'openrouter_key', None)
-                        or not getattr(self.ai.settings, 'ai_model', None)
-                    )
-                ):
-                    return self._finish_error(started, 'AI_NOT_CONFIGURED', 'ai_not_configured')
-
-                formatted_messages: list[BaseMessage] = []
-                for user_text, assistant_text in pairs:
-                    formatted_messages.append(HumanMessage(content=user_text))
-                    formatted_messages.append(AIMessage(content=assistant_text))
-                formatted_messages.append(HumanMessage(content=content))
-
-                logger.info(
-                    'AI graph invoke started',
-                    extra={
-                        'event': 'ai_graph_invoke_started',
-                        'messages_count': len(formatted_messages),
-                    },
+            if (
+                self.ai is not None
+                and getattr(self.ai, 'settings', None) is not None
+                and (
+                    not getattr(self.ai.settings, 'openrouter_key', None)
+                    or not getattr(self.ai.settings, 'ai_model', None)
                 )
-                graph_started = time.perf_counter()
-                try:
-                    graph_state = await self.graph.ainvoke(
-                        {
-                            'messages': formatted_messages,
-                            'tenant_id': str(tenant_id),
-                            'java_user_id': str(java_user_id) if java_user_id else None,
-                            'user_id': user_id,
-                            'conversation_id': str(conversation_id),
-                            'display_name': display_name,
-                        },
-                        config={'recursion_limit': MAX_AGENT_STEPS},
-                    )
-                except AIError as error:
-                    return self._finish_error(started, error.code, 'ai_graph_error_code')
-                except GraphRecursionError:
-                    # The question stays consumed. Partial usage is not recorded: the error
-                    # carries no state (shortcut: no checkpointer, so tokens of this run are lost).
-                    return self._finish(started, 'too_complex', TOO_COMPLEX_MESSAGE)
-                except Exception as exc:
-                    logger.error(
-                        'Chat graph execution failed: %s',
-                        exc,
-                        exc_info=True,
-                        extra={'event': 'ai_graph_failed'},
-                    )
-                    code = classify_llm_error(exc)
-                    return self._finish_error(started, code, 'ai_graph_error_code')
+            ):
+                return self._finish_error(started, 'AI_NOT_CONFIGURED', 'ai_not_configured')
 
-                logger.info(
-                    'AI graph invoke finished',
-                    extra={
-                        'event': 'ai_graph_invoke_finished',
-                        'elapsed_ms': int((time.perf_counter() - graph_started) * 1000),
-                        'has_final_response': isinstance(graph_state, dict)
-                        and bool(graph_state.get('final_response')),
-                    },
-                )
-                if isinstance(graph_state, dict):
-                    usage = [
-                        getattr(msg, 'usage_metadata', None) or {}
-                        for msg in graph_state.get('messages') or []
-                        if isinstance(msg, AIMessage)
-                    ]
-                    input_tokens = sum(int(item.get('input_tokens') or 0) for item in usage)
-                    output_tokens = sum(int(item.get('output_tokens') or 0) for item in usage)
-                    if input_tokens or output_tokens:
-                        # Awaited (never raises, bounded by the gRPC timeout): no orphan task.
-                        await self.grpc_client.record_ai_usage(
-                            tenant_id=str(tenant_id),
-                            input_tokens=input_tokens,
-                            output_tokens=output_tokens,
-                        )
-                    # Any non-empty error code means the graph failed: never persist a reply.
-                    error_code = graph_state.get('error_code')
-                    if isinstance(error_code, str) and error_code:
-                        return self._finish_error(started, error_code, 'ai_graph_error_code')
+            formatted_messages: list[BaseMessage] = []
+            for user_text, assistant_text in pairs:
+                formatted_messages.append(HumanMessage(content=user_text))
+                formatted_messages.append(AIMessage(content=assistant_text))
+            formatted_messages.append(HumanMessage(content=content))
 
-                final_answer: str | None = None
-                if isinstance(graph_state, dict):
-                    if graph_state.get('final_response'):
-                        final_answer = str(graph_state['final_response'])
-                    elif 'messages' in graph_state and graph_state['messages']:
-                        for msg in reversed(graph_state['messages']):
-                            if isinstance(msg, AIMessage) and msg.content:
-                                final_answer = (
-                                    msg.content
-                                    if isinstance(msg.content, str)
-                                    else str(msg.content)
-                                )
-                                break
-                            elif (
-                                hasattr(msg, 'content')
-                                and msg.content
-                                and not getattr(msg, 'tool_calls', None)
-                            ):
-                                final_answer = str(msg.content)
-                                break
-
-                if not final_answer:
-                    raise RuntimeError('AI_COMPLETION_MISSING')
-
-                async with self.database.transaction() as connection:
-                    await repository.insert_message(
-                        connection,
-                        conversation_id,
-                        user_id,
-                        external_chat_id,
-                        'ASSISTANT',
-                        final_answer,
-                    )
-                logger.info(
-                    'Assistant message stored',
-                    extra={
-                        'event': 'assistant_message_stored',
+            logger.info(
+                'AI graph invoke started',
+                extra={
+                    'event': 'ai_graph_invoke_started',
+                    'messages_count': len(formatted_messages),
+                },
+            )
+            graph_started = time.perf_counter()
+            try:
+                graph_state = await self.graph.ainvoke(
+                    {
+                        'messages': formatted_messages,
+                        'tenant_id': str(tenant_id),
+                        'java_user_id': str(java_user_id) if java_user_id else None,
+                        'user_id': user_id,
                         'conversation_id': str(conversation_id),
-                        'reply_chars': len(final_answer),
+                        'display_name': display_name,
                     },
+                    config={'recursion_limit': MAX_AGENT_STEPS},
                 )
-                return self._finish(started, 'reply', final_answer + quota_note)
-
-            elif self.ai is not None:
-                prompt = build_prompt(display_name, username, pairs, content)
-                completion = None
-                tools_schemas = self.tools.get_openrouter_schemas() if self.tools else None
-                for attempt in range(1, 4):
-                    logger.info(
-                        'AI reply attempt',
-                        extra={'event': 'ai_reply_attempt', 'attempt': attempt, 'stage': 'first'},
-                    )
-                    try:
-                        completion = await self.ai.reply(prompt, tools=tools_schemas)
-                        break
-                    except AIError as error:
-                        if not error.retryable or attempt == 3:
-                            return self._finish_error(started, error.code, 'ai_reply_failed')
-                        delay = max(error.delay, attempt * 5)
-                        logger.warning(
-                            'AI reply retry',
-                            extra={
-                                'event': 'ai_reply_retry',
-                                'attempt': attempt,
-                                'delay_seconds': delay,
-                                'code': error.code,
-                            },
-                        )
-                        await asyncio.sleep(delay)
-                if completion is None:
-                    raise RuntimeError('AI_COMPLETION_MISSING')
-                await self.grpc_client.record_ai_usage(
-                    tenant_id=str(tenant_id),
-                    input_tokens=completion.input_tokens,
-                    output_tokens=completion.output_tokens,
+            except AIError as error:
+                return self._finish_error(started, error.code, 'ai_graph_error_code')
+            except GraphRecursionError:
+                # The question stays consumed. Partial usage is not recorded: the error
+                # carries no state (shortcut: no checkpointer, so tokens of this run are lost).
+                return self._finish(started, 'too_complex', TOO_COMPLEX_MESSAGE)
+            except Exception as exc:
+                logger.error(
+                    'Chat graph execution failed: %s',
+                    exc,
+                    exc_info=True,
+                    extra={'event': 'ai_graph_failed'},
                 )
+                code = classify_llm_error(exc)
+                return self._finish_error(started, code, 'ai_graph_error_code')
 
-                if completion.tool_calls and self.tools:
-                    tool_messages = list(prompt)
-                    tool_messages.append(
-                        completion.raw_message
-                        or {
-                            'role': 'assistant',
-                            'content': completion.content or None,
-                            'tool_calls': completion.tool_calls,
-                        }
+            logger.info(
+                'AI graph invoke finished',
+                extra={
+                    'event': 'ai_graph_invoke_finished',
+                    'elapsed_ms': int((time.perf_counter() - graph_started) * 1000),
+                    'has_final_response': isinstance(graph_state, dict)
+                    and bool(graph_state.get('final_response')),
+                },
+            )
+            if isinstance(graph_state, dict):
+                usage = [
+                    getattr(msg, 'usage_metadata', None) or {}
+                    for msg in graph_state.get('messages') or []
+                    if isinstance(msg, AIMessage)
+                ]
+                input_tokens = sum(int(item.get('input_tokens') or 0) for item in usage)
+                output_tokens = sum(int(item.get('output_tokens') or 0) for item in usage)
+                if input_tokens or output_tokens:
+                    # Awaited (never raises, bounded by the gRPC timeout): no orphan task.
+                    await self.grpc_client.record_ai_usage(
+                        tenant_id=str(tenant_id),
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                     )
-                    for call in completion.tool_calls:
-                        call_id = call.get('id', '')
-                        fn_name = call.get('function', {}).get('name', '')
-                        fn_args = call.get('function', {}).get('arguments', '{}')
-                        tool_started = time.perf_counter()
-                        tool_result = await self.tools.dispatch(
-                            tool_name=fn_name,
-                            arguments_json=fn_args,
-                            tenant_id=str(tenant_id),
-                            user_id=str(java_user_id) if java_user_id else None,
-                        )
-                        logger.info(
-                            'AI tool call finished',
-                            extra={
-                                'event': 'ai_tool_call',
-                                'tool_name': fn_name,
-                                'elapsed_ms': int((time.perf_counter() - tool_started) * 1000),
-                            },
-                        )
-                        tool_messages.append(
-                            {
-                                'role': 'tool',
-                                'tool_call_id': call_id,
-                                'name': fn_name,
-                                'content': json.dumps(tool_result),
-                            }
-                        )
-                    logger.info(
-                        'AI second completion started',
-                        extra={'event': 'ai_second_completion_started'},
-                    )
-                    for attempt in range(1, 4):
-                        logger.info(
-                            'AI reply attempt',
-                            extra={
-                                'event': 'ai_reply_attempt',
-                                'attempt': attempt,
-                                'stage': 'second',
-                            },
-                        )
-                        try:
-                            second_completion = await self.ai.reply(tool_messages)
-                            completion = second_completion
-                            await self.grpc_client.record_ai_usage(
-                                tenant_id=str(tenant_id),
-                                input_tokens=second_completion.input_tokens,
-                                output_tokens=second_completion.output_tokens,
+                # Any non-empty error code means the graph failed: never persist a reply.
+                error_code = graph_state.get('error_code')
+                if isinstance(error_code, str) and error_code:
+                    return self._finish_error(started, error_code, 'ai_graph_error_code')
+
+            final_answer: str | None = None
+            if isinstance(graph_state, dict):
+                if graph_state.get('final_response'):
+                    final_answer = str(graph_state['final_response'])
+                elif 'messages' in graph_state and graph_state['messages']:
+                    for msg in reversed(graph_state['messages']):
+                        if isinstance(msg, AIMessage) and msg.content:
+                            final_answer = (
+                                msg.content
+                                if isinstance(msg.content, str)
+                                else str(msg.content)
                             )
                             break
-                        except AIError as error:
-                            if not error.retryable or attempt == 3:
-                                return self._finish_error(
-                                    started, error.code, 'ai_reply_failed'
-                                )
-                            delay = max(error.delay, attempt * 5)
-                            logger.warning(
-                                'AI reply retry',
-                                extra={
-                                    'event': 'ai_reply_retry',
-                                    'attempt': attempt,
-                                    'delay_seconds': delay,
-                                    'code': error.code,
-                                },
-                            )
-                            await asyncio.sleep(delay)
+                        elif (
+                            hasattr(msg, 'content')
+                            and msg.content
+                            and not getattr(msg, 'tool_calls', None)
+                        ):
+                            final_answer = str(msg.content)
+                            break
 
-                async with self.database.transaction() as connection:
-                    await repository.insert_message(
-                        connection,
-                        conversation_id,
-                        user_id,
-                        external_chat_id,
-                        'ASSISTANT',
-                        completion.content,
-                    )
-                logger.info(
-                    'Assistant message stored',
-                    extra={
-                        'event': 'assistant_message_stored',
-                        'conversation_id': str(conversation_id),
-                        'reply_chars': len(completion.content or ''),
-                    },
+            if not final_answer:
+                raise RuntimeError('AI_COMPLETION_MISSING')
+
+            async with self.database.transaction() as connection:
+                await repository.insert_message(
+                    connection,
+                    conversation_id,
+                    user_id,
+                    external_chat_id,
+                    'ASSISTANT',
+                    final_answer,
                 )
-                return self._finish(started, 'reply', (completion.content or '') + quota_note)
-            else:
-                return self._finish_error(started, 'AI_NOT_CONFIGURED', 'ai_not_configured')
+            logger.info(
+                'Assistant message stored',
+                extra={
+                    'event': 'assistant_message_stored',
+                    'conversation_id': str(conversation_id),
+                    'reply_chars': len(final_answer),
+                },
+            )
+            return self._finish(started, 'reply', final_answer + quota_note)
 
     def _finish(self, started: float, outcome: str, reply: str | None) -> str | None:
         '''Log the end of `handle` (outcome, length, duration only) and return `reply`.'''

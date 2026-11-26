@@ -25,6 +25,15 @@ public class TenantJwtAuthenticationConverter implements Converter<Jwt, Abstract
             return new UsernamePasswordAuthenticationToken(principal, null, authorities);
         }
 
+        if ("PLATFORM".equals(jwt.getClaimAsString("scope"))) {
+            if (!requiredRoles(jwt).contains(Role.SUPERADMIN)) {
+                throw new BadCredentialsException("JWT contains an unsupported role.");
+            }
+            PlatformPrincipal principal = new PlatformPrincipal(userId, requiredEmail(jwt), sessionId);
+            Set<SimpleGrantedAuthority> authorities = Set.of(new SimpleGrantedAuthority("ROLE_" + Role.SUPERADMIN.name()));
+            return new UsernamePasswordAuthenticationToken(principal, null, authorities);
+        }
+
         if (!"MERCHANT".equals(jwt.getClaimAsString("scope"))) {
             throw new BadCredentialsException("JWT scope is invalid.");
         }
@@ -33,6 +42,10 @@ public class TenantJwtAuthenticationConverter implements Converter<Jwt, Abstract
         UUID outletId = requiredUuidClaim(jwt, "outlet_id");
         UUID membershipId = requiredUuidClaim(jwt, "membership_id");
         Set<Role> roles = requiredRoles(jwt);
+        // SUPERADMIN exists only in a PLATFORM token; a tenant membership never grants platform access.
+        if (roles.contains(Role.SUPERADMIN)) {
+            throw new BadCredentialsException("JWT contains an unsupported role.");
+        }
 
         TenantPrincipal principal = new TenantPrincipal(userId, tenantId, outletId, membershipId, sessionId, roles);
         Set<SimpleGrantedAuthority> authorities = roles.stream()

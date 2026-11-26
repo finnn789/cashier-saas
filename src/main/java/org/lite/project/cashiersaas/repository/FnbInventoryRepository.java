@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryMovementEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.PurchaseEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.PurchaseLineEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.QInventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.QInventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.QInventoryMovementEntity;
@@ -45,6 +47,12 @@ public class FnbInventoryRepository {
         return criteriaBuilderFactory.create(entityManager, InventoryItemEntity.class, ITEM.getMetadata().getName())
                 .where(ITEM.tenant.id.toString()).eq(tenant).where(ITEM.outlet.id.toString()).eq(outlet)
                 .where(ITEM.active.toString()).eq(true).orderByAsc(ITEM.name.toString()).getResultList();
+    }
+
+    /** True when the outlet owns any inventory item, inactive ones included. */
+    public boolean hasItems(UUID tenant, UUID outlet) {
+        return !entityManager.createQuery("select i.id from InventoryItemEntity i where i.tenant.id = :tenant and i.outlet.id = :outlet", UUID.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).setMaxResults(1).getResultList().isEmpty();
     }
 
     public Optional<InventoryBalanceEntity> balance(UUID tenant, UUID outlet, UUID itemId) {
@@ -144,6 +152,44 @@ public class FnbInventoryRepository {
                 .setParameter("tenant", tenant).setParameter("count", stockCountId).getResultList();
     }
 
+    public Optional<PurchaseEntity> purchaseByKey(UUID tenant, String idempotencyKey) {
+        return entityManager.createQuery("select p from PurchaseEntity p where p.tenantId = :tenant and p.idempotencyKey = :key",
+                        PurchaseEntity.class)
+                .setParameter("tenant", tenant).setParameter("key", idempotencyKey).setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    public Optional<PurchaseEntity> purchase(UUID tenant, UUID outlet, UUID id) {
+        return entityManager.createQuery("select p from PurchaseEntity p where p.tenantId = :tenant and p.outletId = :outlet and p.id = :id",
+                        PurchaseEntity.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet).setParameter("id", id)
+                .setMaxResults(1).getResultList().stream().findFirst();
+    }
+
+    /** Newest purchase date first. */
+    public List<PurchaseEntity> purchases(UUID tenant, UUID outlet, int page, int size) {
+        return entityManager.createQuery("select p from PurchaseEntity p where p.tenantId = :tenant and p.outletId = :outlet "
+                        + "order by p.purchasedOn desc, p.createdAt desc, p.id desc", PurchaseEntity.class)
+                .setParameter("tenant", tenant).setParameter("outlet", outlet)
+                .setFirstResult(page * size).setMaxResults(size).getResultList();
+    }
+
+    public List<PurchaseLineEntity> purchaseLines(UUID tenant, UUID purchaseId) {
+        return entityManager.createQuery("select l from PurchaseLineEntity l join fetch l.inventoryItem i "
+                        + "where l.tenantId = :tenant and l.purchase.id = :purchase order by i.name, i.id", PurchaseLineEntity.class)
+                .setParameter("tenant", tenant).setParameter("purchase", purchaseId).getResultList();
+    }
+
+    /** Line count per purchase id in one grouped query. */
+    public Map<UUID, Integer> purchaseLineCounts(UUID tenant, List<UUID> purchaseIds) {
+        Map<UUID, Integer> counts = new HashMap<>();
+        if (purchaseIds.isEmpty()) return counts;
+        for (Object[] row : entityManager.createQuery("select l.purchase.id, count(l) from PurchaseLineEntity l "
+                        + "where l.tenantId = :tenant and l.purchase.id in :ids group by l.purchase.id", Object[].class)
+                .setParameter("tenant", tenant).setParameter("ids", purchaseIds).getResultList())
+            counts.put((UUID) row[0], ((Long) row[1]).intValue());
+        return counts;
+    }
+
     /** Per item, the counted_at of its latest stock count strictly before {@code before}; items never counted are absent. */
     public Map<UUID, Instant> previousCountTimes(UUID tenant, UUID outlet, List<UUID> itemIds, Instant before) {
         Map<UUID, Instant> times = new HashMap<>();
@@ -216,6 +262,8 @@ public class FnbInventoryRepository {
     public void persist(RecipeLineEntity recipeLine) { entityManager.persist(recipeLine); }
     public void persist(StockCountEntity stockCount) { entityManager.persist(stockCount); }
     public void persist(StockCountLineEntity line) { entityManager.persist(line); }
+    public void persist(PurchaseEntity purchase) { entityManager.persist(purchase); }
+    public void persist(PurchaseLineEntity line) { entityManager.persist(line); }
 
     public void flush() {
         entityManager.flush();

@@ -9,6 +9,7 @@ import org.lite.project.cashiersaas.dto.request.identity.LoginRequest;
 import org.lite.project.cashiersaas.dto.request.identity.RegisterUserRequest;
 import org.lite.project.cashiersaas.dto.request.identity.SelectMerchantRequest;
 import org.lite.project.cashiersaas.component.AccountPrincipal;
+import org.lite.project.cashiersaas.component.PlatformPrincipal;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.component.RefreshCookieService;
 import org.lite.project.cashiersaas.dto.response.identity.LoginResponse;
@@ -66,13 +67,21 @@ public class AuthController {
                 loginService.selectMerchant(principal, request.getTenantId(), request.getOutletId()));
     }
 
-    /** Any authenticated caller: exactly one of the two principals is non-null (the resolver returns null on a type mismatch). */
+    @PostMapping("/platform")
+    public ApiResponse<LoginResponse> platform(@AuthenticationPrincipal AccountPrincipal principal) {
+        return ApiResponse.success("Sesi superadmin dimulai.", loginService.startPlatformSession(principal));
+    }
+
+    /** Any authenticated caller: exactly one of the three principals is non-null (the resolver returns null on a type mismatch). */
     @PostMapping("/password")
     public ApiResponse<Void> changePassword(@AuthenticationPrincipal AccountPrincipal account,
                                             @AuthenticationPrincipal TenantPrincipal tenant,
+                                            @AuthenticationPrincipal PlatformPrincipal platform,
                                             @Valid @RequestBody ChangePasswordRequest request) {
         if (account != null) {
             accountPasswordService.change(account.getUserId(), account.getSessionId(), request);
+        } else if (platform != null) {
+            accountPasswordService.change(platform.getUserId(), platform.getSessionId(), request);
         } else {
             accountPasswordService.change(tenant.getUserId(), tenant.getSessionId(), request);
         }

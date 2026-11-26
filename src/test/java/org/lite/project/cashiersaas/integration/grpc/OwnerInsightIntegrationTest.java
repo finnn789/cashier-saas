@@ -278,7 +278,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         assertDec("150", nasi.getCostOfGoodsSold(), "3 x 5 g x 10");
 
         // Owner extras computed from the seeded facts.
-        assertEquals(count("SELECT count(*) FROM sales_orders WHERE tenant_id = ? AND discount_amount > 0 "
+        assertEquals(api.count("SELECT count(*) FROM sales_orders WHERE tenant_id = ? AND discount_amount > 0 "
                 + "AND payment_status = 'PAID' AND status <> 'CANCELLED'", owner.tenantId()), grpc.getDiscountedOrderCount());
         assertEquals(3, grpc.getDiscountedOrderCount());
         assertDec("7500.50", grpc.getExpensesTotal(), "petty cash recorded");
@@ -449,7 +449,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         ConsumeAiQuestionResponse consume = consume(shop.tenantId(), shopOwner);
         assertFalse(consume.getAllowed());
         assertEquals("PLAN_PREMIUM_REQUIRED", consume.getReason());
-        assertEquals(0, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ?", shop.tenantId()));
+        assertEquals(0, api.count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ?", shop.tenantId()));
     }
 
     @Test
@@ -458,7 +458,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
 
         assertCode(Status.Code.PERMISSION_DENIED, () -> consume(owner.tenantId(), mainUserId));
         assertCode(Status.Code.PERMISSION_DENIED, () -> consume(other.tenantId(), ownerUserId));
-        assertEquals(0, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id IN (?, ?)", owner.tenantId(), other.tenantId()));
+        assertEquals(0, api.count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id IN (?, ?)", owner.tenantId(), other.tenantId()));
     }
 
     /**
@@ -505,7 +505,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
 
         assertTrue(response.getAllowed());
         assertEquals(1, response.getUsed());
-        assertEquals(1, count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ? AND questions_used = 1 AND day_questions = 1 "
+        assertEquals(1, api.count("SELECT count(*) FROM ai_usage_periods WHERE tenant_id = ? AND questions_used = 1 AND day_questions = 1 "
                 + "AND period_month = ?", other.tenantId(), java.sql.Date.valueOf(today().withDayOfMonth(1))));
     }
 
@@ -524,8 +524,8 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
 
             assertEquals(1, responses.stream().filter(ConsumeAiQuestionResponse::getAllowed).count());
             assertEquals(List.of(refusedReason), responses.stream().filter(r -> !r.getAllowed()).map(ConsumeAiQuestionResponse::getReason).toList());
-            assertEquals(used + 1, count("SELECT questions_used FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
-            assertEquals(dayQuestions + 1, count("SELECT day_questions FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
+            assertEquals(used + 1, api.count("SELECT questions_used FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
+            assertEquals(dayQuestions + 1, api.count("SELECT day_questions FROM ai_usage_periods WHERE tenant_id = ?", other.tenantId()));
         } finally {
             pool.shutdownNow();
         }
@@ -555,7 +555,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
                 "cash_shifts", "cash_expenses"};
         int[] before = new int[tables.length];
         for (int i = 0; i < tables.length; i++) {
-            before[i] = count("SELECT count(*) FROM " + tables[i]);
+            before[i] = api.count("SELECT count(*) FROM " + tables[i]);
         }
         stub().getSalesSummary(salesRequest(owner.tenantId(), ownerUserId, today().minusDays(1).toString(), today().toString()));
         stub().getRestockSuggestions(restockRequest(owner.tenantId(), ownerUserId));
@@ -563,7 +563,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         stub().getLeakageReport(leakageRequest(owner.tenantId(), ownerUserId, "", ""));
         stub().getMenuMargins(marginRequest(owner.tenantId(), ownerUserId, "100"));
         for (int i = 0; i < tables.length; i++) {
-            assertEquals(before[i], count("SELECT count(*) FROM " + tables[i]), tables[i]);
+            assertEquals(before[i], api.count("SELECT count(*) FROM " + tables[i]), tables[i]);
         }
     }
 
@@ -582,7 +582,7 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
         quietUserId = cashierUserId(owner, "Cashier ins-quiet");
         vetAUserId = cashierUserId(owner, "Cashier ins-veta");
         vetBUserId = cashierUserId(owner, "Cashier ins-vetb");
-        assertTrue(count("SELECT count(*) FROM membership_outlet_access a JOIN tenant_memberships m ON m.id = a.membership_id "
+        assertTrue(api.count("SELECT count(*) FROM membership_outlet_access a JOIN tenant_memberships m ON m.id = a.membership_id "
                 + "WHERE m.user_id = ?", mainUserId) > 0, "the cashier does have outlet access: denial is about the role");
 
         beras = ingredient("Beras", "g");
@@ -762,11 +762,6 @@ class OwnerInsightIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     // ------------------------------------------------------------------ value helpers
-
-    private int count(String sql, Object... args) {
-        Integer value = jdbc.queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
 
     private static String str(MvcResult result, String path) throws Exception {
         return ApiTestSupport.read(result, path);

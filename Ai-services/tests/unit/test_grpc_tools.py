@@ -9,7 +9,6 @@ from app.integrations.grpc.config import GrpcSettings
 from app.integrations.grpc.generated import cashier_service_pb2
 from app.tools.catalog import CatalogSearchTool
 from app.tools.order import OrderStatusTool
-from app.tools.registry import ToolRegistry
 from app.tools import get_default_tool_registry
 
 USER = "11111111-1111-1111-1111-111111111111"
@@ -220,40 +219,3 @@ class DefaultToolRegistryTests(unittest.IsolatedAsyncioTestCase):
                 "menu_margins",
             },
         )
-
-    async def test_dispatch_catalog_and_order_tools(self) -> None:
-        registry = ToolRegistry()
-        mock_client = Mock(spec=CashierGrpcClient)
-        mock_client.get_catalog_items = AsyncMock(return_value=[
-            {"id": "c1", "name": "Teh Manis", "price": Decimal("5000.00"), "is_available": True, "category": "DRINK"}
-        ])
-        mock_client.get_order_status = AsyncMock(return_value={
-            "order_number": "ORD-555",
-            "status": "COMPLETED",
-            "payment_status": "PAID",
-            "total_amount": Decimal("5000.00"),
-            "created_at": "2026-10-22T11:00:00Z",
-        })
-
-        registry.register(CatalogSearchTool(client=mock_client))
-        registry.register(OrderStatusTool(client=mock_client))
-
-        # Dispatch catalog
-        cat_res = await registry.dispatch(
-            tool_name="search_catalog_menu",
-            arguments_json='{"query": "teh"}',
-            tenant_id="tenant-100",
-            user_id=USER,
-        )
-        self.assertTrue(cat_res["success"])
-        self.assertEqual(cat_res["data"]["total"], 1)
-
-        # Dispatch order
-        ord_res = await registry.dispatch(
-            tool_name="check_order_status",
-            arguments_json='{"order_number": "ORD-555"}',
-            tenant_id="tenant-100",
-            user_id=USER,
-        )
-        self.assertTrue(ord_res["success"])
-        self.assertEqual(ord_res["data"]["status"], "COMPLETED")

@@ -29,6 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -78,10 +80,6 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         return "/api/v1/merchant/outlets/" + m.outletId() + "/fnb/inventory/stock-counts";
     }
 
-    private static String orders(MerchantFixture m) {
-        return "/api/v1/cashier/outlets/" + m.outletId() + "/fnb/orders";
-    }
-
     private static String optionGroups(MerchantFixture m) {
         return "/api/v1/merchant/outlets/" + m.outletId() + "/fnb/option-groups";
     }
@@ -97,10 +95,6 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
     private static void assertDec(String expected, Object actual, String message) {
         assertEquals(0, new BigDecimal(expected).compareTo(dec(actual)),
                 message + ": expected " + expected + " but was " + actual);
-    }
-
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
     }
 
     @SuppressWarnings("unchecked")
@@ -191,11 +185,6 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
                 .header(AUTH, owner.bearer()), 200);
     }
 
-    private BigDecimal balance(String itemId) {
-        return api.jdbc().queryForObject(
-                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid", BigDecimal.class, itemId);
-    }
-
     private BigDecimal average(String itemId) {
         return api.jdbc().queryForObject(
                 "SELECT average_unit_cost FROM inventory_balances WHERE inventory_item_id = ?::uuid", BigDecimal.class,
@@ -205,11 +194,6 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
     private BigDecimal movementCost(String orderId, String itemId, String type) {
         return api.jdbc().queryForObject("SELECT unit_cost FROM inventory_movements WHERE order_id = ?::uuid "
                 + "AND inventory_item_id = ?::uuid AND movement_type = ?", BigDecimal.class, orderId, itemId, type);
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
     }
 
     private BigDecimal itemCost(String orderId) {
@@ -226,11 +210,11 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
 
     @Test
     void v9AppliesAndWeightedAverageFeedsSaleUnitCostAndItemCostForProductAndOptionRecipes() throws Exception {
-        assertEquals(3, count("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND "
+        assertEquals(3, api.count("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND "
                 + "((table_name = 'inventory_balances' AND column_name = 'average_unit_cost') OR "
                 + "(table_name = 'inventory_movements' AND column_name = 'unit_cost') OR "
                 + "(table_name = 'order_items' AND column_name = 'cost_amount'))"));
-        assertEquals(1, count("SELECT count(*) FROM flyway_schema_history WHERE version = '9' AND success"));
+        assertEquals(1, api.count("SELECT count(*) FROM flyway_schema_history WHERE version = '9' AND success"));
 
         MerchantFixture owner = api.onboardOwner("cost-avg");
         String biji = ingredient(owner, "Biji Kopi", "g");
@@ -258,7 +242,7 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
 
         String orderId = pay(owner, order(owner, productId, 2, shot));
 
-        assertDec("3928", balance(biji), "4000 - 2 x (18 + 18)");
+        assertDec("3928", api.balance(biji), "4000 - 2 x (18 + 18)");
         assertDec("13", movementCost(orderId, biji, "SALE"), "SALE unit cost = average at sale time");
         assertDec("8", movementCost(orderId, susu, "SALE"), "SALE unit cost = average at sale time");
         // 2 x (18*13 + 100*8) + 2 x (18*13) = 2068 + 468
@@ -291,14 +275,14 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         api.send(delete(adminItems(owner) + "/" + b).header(AUTH, owner.bearer()), 200);
 
         String first = pay(owner, order(owner, mixed, 3, null));
-        assertDec("970", balance(a), "active ingredient deducted 3 x 10");
-        assertDec("100", balance(b), "inactive ingredient untouched");
-        assertEquals(0, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid AND inventory_item_id "
+        assertDec("970", api.balance(a), "active ingredient deducted 3 x 10");
+        assertDec("100", api.balance(b), "inactive ingredient untouched");
+        assertEquals(0, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid AND inventory_item_id "
                 + "= ?::uuid", first, b));
         assertDec("150.00", itemCost(first), "only the active ingredient adds cost: 3 x 10 x 5");
 
         String second = pay(owner, order(owner, onlyInactive, 1, null));
-        assertDec("100", balance(b), "still untouched");
+        assertDec("100", api.balance(b), "still untouched");
         assertNull(itemCost(second), "an item with no active recipe line has no cost");
     }
 
@@ -317,7 +301,7 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         refund(owner, orderId);
 
         assertDec("12.5", movementCost(orderId, item, "SALE_REVERSAL"), "reversal unit cost = sale unit cost");
-        assertDec("2000", balance(item), "1000 - 8 + 1000 + 8 after the reversal");
+        assertDec("2000", api.balance(item), "1000 - 8 + 1000 + 8 after the reversal");
     }
 
     // ------------------------------------------------------------------ cost visibility
@@ -382,7 +366,7 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         MvcResult first = postCount(owner, body);
         assertStatus(201, first);
         String countId = ApiTestSupport.read(first, "$.data.stockCountId");
-        assertEquals(2, count("SELECT count(*) FROM stock_count_lines WHERE stock_count_id = ?::uuid", countId),
+        assertEquals(2, api.count("SELECT count(*) FROM stock_count_lines WHERE stock_count_id = ?::uuid", countId),
                 "the zero-difference line is stored too");
         Map<String, Object> lineX = single(first, "$.data.lines[?(@.inventoryItemId=='" + x + "')]");
         assertDec("100", lineX.get("previousQuantity"), "previous");
@@ -392,18 +376,18 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
         Map<String, Object> lineY = single(first, "$.data.lines[?(@.inventoryItemId=='" + y + "')]");
         assertDec("0", lineY.get("difference"), "no difference");
         assertNull(lineY.get("movementId"), "no movement for a zero difference");
-        assertDec("80.5", balance(x), "balance after the count");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ADJUSTMENT' AND "
+        assertDec("80.5", api.balance(x), "balance after the count");
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ADJUSTMENT' AND "
                 + "inventory_item_id = ?::uuid AND reason = 'Stok opname' AND quantity_delta = -19.5 "
                 + "AND unit_cost = 5", x), "ADJUSTMENT with the stock count reason and the average as unit cost");
-        assertEquals(0, count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ADJUSTMENT' AND "
+        assertEquals(0, api.count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ADJUSTMENT' AND "
                 + "inventory_item_id = ?::uuid", y));
 
         // Replay: same key and payload returns the same response and changes nothing.
         MvcResult replay = postCount(owner, body);
         assertStatus(201, replay);
         assertEquals(countId, ApiTestSupport.read(replay, "$.data.stockCountId"), "replay returns the same stock count");
-        assertEquals(1, count("SELECT count(*) FROM stock_counts WHERE tenant_id = ?::uuid AND idempotency_key = ?",
+        assertEquals(1, api.count("SELECT count(*) FROM stock_counts WHERE tenant_id = ?::uuid AND idempotency_key = ?",
                 owner.tenantId().toString(), key), "no second header");
         List<Map<String, Object>> firstLines = rows(first, "$.data.lines[*]");
         List<Map<String, Object>> replayLines = rows(replay, "$.data.lines[*]");
@@ -418,28 +402,28 @@ class FnbCostAndStockCountIntegrationTest extends AbstractPostgresIntegrationTes
                 assertDec(dec(before.get(field)).toPlainString(), again.get(field), field);
             }
         }
-        assertDec("80.5", balance(x), "replay does not apply again");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ADJUSTMENT' AND "
+        assertDec("80.5", api.balance(x), "replay does not apply again");
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE movement_type = 'ADJUSTMENT' AND "
                 + "inventory_item_id = ?::uuid", x));
 
         // Same key, different payload.
         assertStatus(409, postCount(owner, countJson(key, null, x, "70", y, "50")));
-        assertDec("80.5", balance(x), "conflict changes nothing");
+        assertDec("80.5", api.balance(x), "conflict changes nothing");
 
         // Roles, tenant isolation and validation.
         assertStatus(403, postCount(cashier, countJson("count-" + UUID.randomUUID(), null, x, "1")));
         assertStatus(404, postCount(owner, countJson("count-" + UUID.randomUUID(), null, x, "1", foreign, "1")));
-        assertDec("80.5", balance(x), "a rejected batch applies no line");
-        assertDec("0", balance(foreign), "the other tenant's stock is untouched");
+        assertDec("80.5", api.balance(x), "a rejected batch applies no line");
+        assertDec("0", api.balance(foreign), "the other tenant's stock is untouched");
         assertStatus(400, postCount(owner, countJson("count-" + UUID.randomUUID(), null, x, "1", x, "2")));
         assertStatus(400, postCount(owner, countJson("count-" + UUID.randomUUID(), null)));
         assertStatus(400, postCount(owner, countJson("count-" + UUID.randomUUID(), null, x, "-1")));
 
         // A note extends the reason.
         assertStatus(201, postCount(owner, countJson("count-" + UUID.randomUUID(), "Akhir bulan", x, "80")));
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid AND "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid AND "
                 + "reason = 'Stok opname: Akhir bulan' AND quantity_delta = -0.5", x));
-        assertDec("80", balance(x), "balance after the second count");
+        assertDec("80", api.balance(x), "balance after the second count");
     }
 
     // ------------------------------------------------------------------ owner sales report

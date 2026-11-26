@@ -29,6 +29,9 @@ public class StaffUserEntity extends MutableBaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "onboarding_intent", length = 20)
     private OnboardingIntent onboardingIntent;
+    /** Platform SUPERADMIN flag; changed by an operator with SQL only. */
+    @Column(name = "platform_admin", nullable = false)
+    private boolean platformAdmin;
 
     /** {@code normalizedPhoneNumber} must already be normalized with {@code PhoneNumberNormalizer}. */
     public static StaffUserEntity registerWithPassword(String normalizedEmail, String passwordHash, String fullName,
@@ -74,7 +77,7 @@ public class StaffUserEntity extends MutableBaseEntity {
     }
 
     public void chooseOnboardingIntent(OnboardingIntent intent) {
-        if (!isPendingProfile() || (onboardingIntent != null && onboardingIntent != intent)) {
+        if (!isPendingProfile()) {
             throw new IllegalStateException("Onboarding intent cannot be changed for this account.");
         }
         onboardingIntent = intent;

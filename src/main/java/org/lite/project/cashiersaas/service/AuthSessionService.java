@@ -100,6 +100,20 @@ public class AuthSessionService {
                 outlet.getId(), membership.getRole());
     }
 
+    /** Platform token for a verified SUPERADMIN on the caller's own live session; it never outlives the session. */
+    @Transactional(readOnly = true)
+    public IssuedTokens issuePlatform(AccountPrincipal principal, StaffUserEntity user) {
+        AuthSessionEntity session = sessionRepository.findById(principal.getSessionId(), principal.getUserId())
+                .orElseThrow(SessionInvalidException::new);
+        Instant now = Instant.now();
+        if (!session.isUsableAt(now)) {
+            throw new SessionInvalidException();
+        }
+        Instant expiry = min(now.plus(jwtProperties.getAccessTokenTtl()), session.getExpiresAt());
+        String access = jwtTokenService.generatePlatformAccessToken(user.getId(), user.getEmail(), session.getId(), expiry);
+        return new IssuedTokens(access, expiry, null, "PLATFORM", null, null, Role.SUPERADMIN);
+    }
+
     @Transactional(noRollbackFor = SessionInvalidException.class)
     public IssuedTokens refresh(String rawRefresh) {
         AuthRefreshTokenEntity token = tokenRepository.findByDigest(digestValidated(rawRefresh))

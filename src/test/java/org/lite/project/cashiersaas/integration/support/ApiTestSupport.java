@@ -10,12 +10,22 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import javax.sql.DataSource;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -226,5 +236,92 @@ public final class ApiTestSupport {
     public static String read(MvcResult result, String jsonPath) throws Exception {
         Object value = JsonPath.read(result.getResponse().getContentAsString(), jsonPath);
         return String.valueOf(value);
+    }
+
+    public static List<String> readList(MvcResult result, String path) throws Exception {
+        List<Object> raw = JsonPath.read(result.getResponse().getContentAsString(), path);
+        List<String> values = new ArrayList<>();
+        for (Object value : raw) {
+            values.add(String.valueOf(value));
+        }
+        return values;
+    }
+
+    public static BigDecimal money(MvcResult result, String path) throws Exception {
+        return new BigDecimal(read(result, path));
+    }
+
+    public static void assertMoney(String expected, BigDecimal actual, String message) {
+        assertEquals(0, new BigDecimal(expected).compareTo(actual), message + ": expected " + expected + " but was " + actual);
+    }
+
+    public static void assertMoney(BigDecimal expected, BigDecimal actual, String message) {
+        assertEquals(0, expected.compareTo(actual), message + ": expected " + expected + " but was " + actual);
+    }
+
+    public static void assertStatus(int expected, MvcResult result) throws Exception {
+        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
+    }
+
+    /** Cashier order collection URL of the merchant's outlet. */
+    public static String orders(MerchantFixture merchant) {
+        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
+    }
+
+    /** One "Es Teh" product (price 25000) in a new "Minuman" category; returns its id. */
+    public String product(MerchantFixture owner) throws Exception {
+        return createProduct(owner, createCategory(owner, "Minuman"), "Es Teh", "25000");
+    }
+
+    public int count(String sql, Object... args) {
+        Integer value = jdbc.queryForObject(sql, Integer.class, args);
+        return value == null ? -1 : value;
+    }
+
+    public BigDecimal balance(String itemId) {
+        return jdbc.queryForObject(
+                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid",
+                BigDecimal.class, itemId);
+    }
+
+    public int saleMovements(String orderId) {
+        return count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid AND movement_type = 'SALE'",
+                orderId);
+    }
+
+    /** The movement ledger must always add up to the cached balance. */
+    public void assertLedgerMatchesBalance(String itemId) {
+        BigDecimal sum = jdbc.queryForObject(
+                "SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_movements WHERE inventory_item_id = ?::uuid",
+                BigDecimal.class, itemId);
+        assertEquals(0, sum.compareTo(balance(itemId)),
+                "SUM(quantity_delta)=" + sum + " must equal quantity_on_hand=" + balance(itemId));
+    }
+
+    /** Runs all tasks released together by a start gate, one thread per task; every wait is bounded. */
+    public static List<MvcResult> runInParallel(List<Callable<MvcResult>> tasks) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
+        CountDownLatch ready = new CountDownLatch(tasks.size());
+        CountDownLatch go = new CountDownLatch(1);
+        List<Future<MvcResult>> futures = new ArrayList<>();
+        try {
+            for (Callable<MvcResult> task : tasks) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    go.await();
+                    return task.call();
+                }));
+            }
+            assertTrue(ready.await(30, TimeUnit.SECONDS), "all threads must reach the start gate");
+            go.countDown();
+            List<MvcResult> results = new ArrayList<>();
+            for (Future<MvcResult> future : futures) {
+                results.add(future.get(60, TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            go.countDown();
+            pool.shutdownNow();
+        }
     }
 }

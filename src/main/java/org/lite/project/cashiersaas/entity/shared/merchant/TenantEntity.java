@@ -25,6 +25,7 @@ import java.util.Objects;
 @NoArgsConstructor
 public class TenantEntity extends MutableBaseEntity {
     public static final Duration PREMIUM_TRIAL_DURATION = Duration.ofDays(14);
+    public static final String SUSPENDED = "SUSPENDED";
 
     @Column(nullable = false, length = 120)
     private String name;
@@ -62,6 +63,8 @@ public class TenantEntity extends MutableBaseEntity {
     private Instant premiumTrialStartedAt;
     @Column(name = "target_margin_pct", nullable = false, precision = 5, scale = 2)
     private BigDecimal targetMarginPct = new BigDecimal("60.00");
+    @Column(name = "cashier_max_discount_pct", nullable = false, precision = 5, scale = 2)
+    private BigDecimal cashierMaxDiscountPct = BigDecimal.ZERO.setScale(2);
 
     public static TenantEntity startFreeTier(StaffUserEntity owner, BusinessTypeEntity type, String key, String fingerprint) {
         TenantEntity tenant = new TenantEntity();
@@ -76,6 +79,24 @@ public class TenantEntity extends MutableBaseEntity {
 
     public boolean isActive() {
         return StatusConstants.ACTIVE.equals(status);
+    }
+
+    public boolean isSuspended() {
+        return SUSPENDED.equals(status);
+    }
+
+    public void suspend() {
+        if (!isActive()) {
+            throw new IllegalStateException("Only an active merchant can be suspended.");
+        }
+        status = SUSPENDED;
+    }
+
+    public void reactivate() {
+        if (!isSuspended()) {
+            throw new IllegalStateException("Only a suspended merchant can be reactivated.");
+        }
+        status = StatusConstants.ACTIVE;
     }
 
     public void startPremiumTrial(Instant now) {
@@ -136,6 +157,13 @@ public class TenantEntity extends MutableBaseEntity {
     public boolean changeTargetMargin(BigDecimal target) {
         if (target == null || !ratesDiffer(targetMarginPct, target)) return false;
         targetMarginPct = target;
+        return true;
+    }
+
+    // A null cap leaves the current one unchanged.
+    public boolean changeCashierMaxDiscount(BigDecimal cap) {
+        if (cap == null || !ratesDiffer(cashierMaxDiscountPct, cap)) return false;
+        cashierMaxDiscountPct = cap;
         return true;
     }
 

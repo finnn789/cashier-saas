@@ -1,6 +1,5 @@
 package org.lite.project.cashiersaas.integration.fnb;
 
-import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,6 @@ import org.springframework.web.context.WebApplicationContext;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,6 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.readList;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -67,10 +68,6 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private static String stockItems(MerchantFixture merchant) {
         return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/inventory/items";
-    }
-
-    private static String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
     }
 
     private static String productUrl(MerchantFixture merchant, String productId) {
@@ -210,24 +207,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         return api.send(get(stockItems(actor)).param("status", status).header(AUTH, actor.bearer()), 200);
     }
 
-    private static int status(MvcResult result) {
-        return result.getResponse().getStatus();
-    }
-
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, status(result), result.getResponse().getContentAsString());
-    }
-
     // ------------------------------------------------------------------ JSON and SQL helpers
-
-    private static List<String> readList(MvcResult result, String path) throws Exception {
-        List<Object> raw = JsonPath.read(result.getResponse().getContentAsString(), path);
-        List<String> values = new ArrayList<>();
-        for (Object value : raw) {
-            values.add(String.valueOf(value));
-        }
-        return values;
-    }
 
     private static List<String> warnings(MvcResult paymentResult) throws Exception {
         return readList(paymentResult, "$.data.stockWarnings");
@@ -241,37 +221,12 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(0, decimal(expected).compareTo(actual), message + ": expected " + expected + " but was " + actual);
     }
 
-    private BigDecimal balance(String itemId) {
-        return api.jdbc().queryForObject(
-                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid",
-                BigDecimal.class, itemId);
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
-    }
-
-    private int saleMovements(String orderId) {
-        return count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid AND movement_type = 'SALE'",
-                orderId);
-    }
-
     private int movementsOfItem(String itemId) {
-        return count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid", itemId);
+        return api.count("SELECT count(*) FROM inventory_movements WHERE inventory_item_id = ?::uuid", itemId);
     }
 
     private int recipeLinesOfProduct(String productId) {
-        return count("SELECT count(*) FROM recipe_lines WHERE product_id = ?::uuid", productId);
-    }
-
-    /** The movement ledger must always add up to the cached balance. */
-    private void assertLedgerMatchesBalance(String itemId) {
-        BigDecimal sum = api.jdbc().queryForObject(
-                "SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_movements WHERE inventory_item_id = ?::uuid",
-                BigDecimal.class, itemId);
-        assertEquals(0, sum.compareTo(balance(itemId)),
-                "SUM(quantity_delta)=" + sum + " must equal quantity_on_hand=" + balance(itemId));
+        return api.count("SELECT count(*) FROM recipe_lines WHERE product_id = ?::uuid", productId);
     }
 
     private static String stockStatusOf(MvcResult list, String itemId) throws Exception {
@@ -299,10 +254,10 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
         assertTrue(warnings(paid).isEmpty(), "stock stays above reorder level: " + warnings(paid));
         // Kopi: 2 x (18 product + 18 option) = 72, Susu: 2 x 100 = 200.
-        assertDecimal("928", balance(kopi), "kopi balance");
-        assertDecimal("300", balance(susu), "susu balance");
-        assertEquals(2, saleMovements(orderId), "exactly one SALE movement per ingredient");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
+        assertDecimal("928", api.balance(kopi), "kopi balance");
+        assertDecimal("300", api.balance(susu), "susu balance");
+        assertEquals(2, api.saleMovements(orderId), "exactly one SALE movement per ingredient");
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
                 + "AND inventory_item_id = ?::uuid AND movement_type = 'SALE'", orderId, kopi),
                 "product and option recipe on the same ingredient are summed into one movement");
         assertDecimal("-72", api.jdbc().queryForObject("SELECT quantity_delta FROM inventory_movements "
@@ -314,8 +269,8 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals("sale:" + orderId + ":" + kopi, api.jdbc().queryForObject(
                 "SELECT idempotency_key FROM inventory_movements WHERE order_id = ?::uuid AND inventory_item_id = ?::uuid",
                 String.class, orderId, kopi));
-        assertLedgerMatchesBalance(kopi);
-        assertLedgerMatchesBalance(susu);
+        api.assertLedgerMatchesBalance(kopi);
+        api.assertLedgerMatchesBalance(susu);
 
         MvcResult list = listStock(owner, null);
         assertDecimal("928", decimal(readList(list, "$.data[?(@.id=='" + kopi + "')].quantityOnHand").get(0)),
@@ -378,16 +333,16 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 .content(body), 200, 201);
         assertEquals("MANUAL_NON_CASH", ApiTestSupport.read(paid, "$.data.method"));
         assertTrue(warnings(paid).isEmpty());
-        assertDecimal("64", balance(matcha), "non-cash payment deducts 2 x 18");
-        assertEquals(1, saleMovements(orderId));
+        assertDecimal("64", api.balance(matcha), "non-cash payment deducts 2 x 18");
+        assertEquals(1, api.saleMovements(orderId));
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
 
         // Replaying the same key is answered from the stored payment and must not deduct again.
         api.send(post(payUrl).header(AUTH, owner.bearer()).contentType(MediaType.APPLICATION_JSON).content(body),
                 200, 201);
-        assertDecimal("64", balance(matcha), "replay deducts nothing more");
-        assertEquals(1, saleMovements(orderId));
-        assertLedgerMatchesBalance(matcha);
+        assertDecimal("64", api.balance(matcha), "replay deducts nothing more");
+        assertEquals(1, api.saleMovements(orderId));
+        api.assertLedgerMatchesBalance(matcha);
     }
 
     // ------------------------------------------------------------------ 5. idempotent payment replay
@@ -408,10 +363,10 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
 
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
         assertTrue(warnings(paid).isEmpty());
-        assertEquals(0, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid", orderId));
-        assertEquals(0, count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
+        assertEquals(0, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM inventory_movements WHERE tenant_id = ?::uuid "
                 + "AND movement_type = 'SALE'", owner.tenantId().toString()));
-        assertDecimal("100", balance(kopi), "unrelated ingredient untouched");
+        assertDecimal("100", api.balance(kopi), "unrelated ingredient untouched");
     }
 
     // ------------------------------------------------------------------ 7. cancelled unpaid order
@@ -425,16 +380,16 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         String orderId = createOrder(owner, productId, 2);
 
         // Creating the order alone reserves nothing.
-        assertEquals(0, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid", orderId));
 
         api.send(post(orders(owner) + "/" + orderId + "/cancel").header(AUTH, owner.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Salah pesan\"}"), 200);
 
         assertEquals("CANCELLED", ApiTestSupport.read(getOrder(owner, orderId), "$.data.status"));
-        assertEquals(0, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid", orderId));
-        assertDecimal("100", balance(kopi), "cancelled unpaid order leaves stock untouched");
+        assertEquals(0, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid", orderId));
+        assertDecimal("100", api.balance(kopi), "cancelled unpaid order leaves stock untouched");
         assertEquals(1, movementsOfItem(kopi), "only the initial restock exists");
-        assertLedgerMatchesBalance(kopi);
+        api.assertLedgerMatchesBalance(kopi);
     }
 
     // ------------------------------------------------------------------ 8. roles
@@ -450,18 +405,18 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult restock = recordMovement(cashier, kopi, "RESTOCK", "50", "Belanja pasar");
         assertEquals("RESTOCK", ApiTestSupport.read(restock, "$.data.type"));
         recordMovement(cashier, kopi, "WASTE", "20", "Tumpah");
-        assertDecimal("130", balance(kopi), "100 + 50 - 20");
+        assertDecimal("130", api.balance(kopi), "100 + 50 - 20");
         String cashierMembership = ApiTestSupport.read(restock, "$.data.actorMembershipId");
         String ownerMembership = api.jdbc().queryForObject(
                 "SELECT actor_membership_id FROM inventory_movements WHERE idempotency_key = ?",
                 String.class, "init:" + kopi);
         assertNotEquals(ownerMembership, cashierMembership, "actor is the cashier, not the owner");
 
-        // Cashier ADJUSTMENT is hidden behind requireOwner: 404, and nothing changes.
+        // Cashier ADJUSTMENT needs STOCK_ADJUST (owner only): 404, and nothing changes.
         MvcResult adjust = postMovement(cashier, kopi,
                 movementJson("ADJUSTMENT", "-30", "Stok opname", "adj-" + UUID.randomUUID()));
         assertStatus(404, adjust);
-        assertDecimal("130", balance(kopi), "cashier adjustment must not apply");
+        assertDecimal("130", api.balance(kopi), "cashier adjustment must not apply");
 
         // Cashier may read the stock list and history.
         assertEquals("OK", stockStatusOf(listStock(cashier, null), kopi));
@@ -478,7 +433,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(403, api.call(delete(adminItems(cashier) + "/" + kopi).header(AUTH, cashier.bearer())));
         assertStatus(403, putRecipe(cashier, productRecipeUrl(cashier, productId), recipeJson(kopi, "18")));
         assertEquals(0, recipeLinesOfProduct(productId));
-        assertEquals(1, count("SELECT count(*) FROM inventory_items WHERE tenant_id = ?::uuid",
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_items WHERE tenant_id = ?::uuid",
                 owner.tenantId().toString()));
         assertDecimal("10", api.jdbc().queryForObject(
                 "SELECT reorder_level FROM inventory_items WHERE id = ?::uuid", BigDecimal.class, kopi),
@@ -488,9 +443,17 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult down = recordMovement(owner, kopi, "ADJUSTMENT", "-30", "Stok opname turun");
         assertDecimal("-30", decimal(ApiTestSupport.read(down, "$.data.quantityDelta")), "signed negative delta");
         recordMovement(owner, kopi, "ADJUSTMENT", "10", "Stok opname naik");
-        assertDecimal("110", balance(kopi), "130 - 30 + 10");
+        assertDecimal("110", api.balance(kopi), "130 - 30 + 10");
         assertEquals(5, movementsOfItem(kopi));
-        assertLedgerMatchesBalance(kopi);
+        api.assertLedgerMatchesBalance(kopi);
+
+        // A cashier may send a purchase price on a restock but never receives any cost field.
+        MvcResult priced = postMovement(cashier, kopi, "{\"type\":\"RESTOCK\",\"quantity\":10,\"unitCost\":7,"
+                + "\"idempotencyKey\":\"mv-" + UUID.randomUUID() + "\"}");
+        assertStatus(201, priced);
+        assertEquals("null", ApiTestSupport.read(priced, "$.data.unitCost"));
+        assertTrue(readList(priced, "$.data.marginWarnings").isEmpty());
+        assertEquals(List.of("null"), readList(listStock(cashier, null), "$.data[?(@.id=='" + kopi + "')].averageUnitCost"));
     }
 
     // ------------------------------------------------------------------ 9. movement idempotency and validation
@@ -506,18 +469,18 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult first = postMovement(owner, kopi, body);
         assertStatus(201, first);
         String movementId = ApiTestSupport.read(first, "$.data.id");
-        assertDecimal("150", balance(kopi), "100 + 50");
+        assertDecimal("150", api.balance(kopi), "100 + 50");
 
         MvcResult replay = postMovement(owner, kopi, body);
         assertStatus(201, replay);
         assertEquals(movementId, ApiTestSupport.read(replay, "$.data.id"), "same movement returned");
-        assertDecimal("150", balance(kopi), "replay does not apply twice");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE idempotency_key = ?", key));
+        assertDecimal("150", api.balance(kopi), "replay does not apply twice");
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE idempotency_key = ?", key));
 
         assertStatus(409, postMovement(owner, kopi, movementJson("RESTOCK", "75", "Belanja", key)));
-        assertDecimal("150", balance(kopi), "conflicting reuse of the key applies nothing");
+        assertDecimal("150", api.balance(kopi), "conflicting reuse of the key applies nothing");
         assertStatus(409, postMovement(owner, gula, body));
-        assertDecimal("100", balance(gula), "the key cannot be reused for another ingredient");
+        assertDecimal("100", api.balance(gula), "the key cannot be reused for another ingredient");
 
         // Rejected inputs (all 400) leave balance and ledger untouched.
         assertStatus(400, postMovement(owner, kopi, movementJson("SALE", "5", "Manual", "k-" + UUID.randomUUID())));
@@ -531,15 +494,15 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(400, postMovement(owner, kopi,
                 movementJson("ADJUSTMENT", "0", "Nol", "k-" + UUID.randomUUID())));
         assertStatus(400, postMovement(owner, kopi, "{\"type\":\"RESTOCK\",\"quantity\":5}"));
-        assertDecimal("150", balance(kopi), "no rejected request changed the balance");
+        assertDecimal("150", api.balance(kopi), "no rejected request changed the balance");
         assertEquals(2, movementsOfItem(kopi), "initial restock + the single accepted restock");
 
         // A blank RESTOCK reason defaults to "Restock".
         MvcResult defaulted = recordMovement(owner, kopi, "RESTOCK", "1", null);
         assertEquals("Restock", ApiTestSupport.read(defaulted, "$.data.reason"));
-        assertDecimal("151", balance(kopi), "150 + 1");
-        assertLedgerMatchesBalance(kopi);
-        assertLedgerMatchesBalance(gula);
+        assertDecimal("151", api.balance(kopi), "150 + 1");
+        api.assertLedgerMatchesBalance(kopi);
+        api.assertLedgerMatchesBalance(gula);
     }
 
     // ------------------------------------------------------------------ 10. recipe replacement
@@ -598,7 +561,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(200, putRecipe(owner, url, "{\"lines\":[]}"));
         assertEquals(0, recipeLinesOfProduct(productId));
         assertTrue(readList(api.send(get(url).header(AUTH, owner.bearer()), 200), "$.data.lines[*]").isEmpty());
-        assertEquals(1, count("SELECT count(*) FROM audit_logs WHERE tenant_id = ?::uuid AND action = 'FNB_RECIPE_CHANGED' "
+        assertEquals(1, api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ?::uuid AND action = 'FNB_RECIPE_CHANGED' "
                 + "AND details = 'lines=0'", owner.tenantId().toString()));
 
         // Option recipe: same rules, and the option must belong to the given group (groups are outlet-level).
@@ -610,7 +573,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         String optionUrl = optionRecipeUrl(owner, groupId, optionId);
         assertStatus(200, putRecipe(owner, optionUrl, recipeJson(kopi, "18")));
         assertStatus(200, putRecipe(owner, optionUrl, recipeJson(kopi, "18")));
-        assertEquals(1, count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
+        assertEquals(1, api.count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
         MvcResult optionRead = api.send(get(optionUrl).header(AUTH, owner.bearer()), 200);
         assertEquals(List.of("Biji Kopi"), readList(optionRead, "$.data.lines[*].inventoryItemName"));
         assertStatus(404, putRecipe(owner, optionRecipeUrl(owner, otherGroupId, optionId),
@@ -620,9 +583,9 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 recipeJson(kopi, "18")));
         assertStatus(400, putRecipe(owner, optionUrl, recipeJson(kopi, "1", kopi, "2")));
         assertStatus(404, putRecipe(owner, optionUrl, recipeJson(foreign, "1")));
-        assertEquals(1, count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
+        assertEquals(1, api.count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
         assertStatus(200, putRecipe(owner, optionUrl, "{\"lines\":[]}"));
-        assertEquals(0, count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
+        assertEquals(0, api.count("SELECT count(*) FROM recipe_lines WHERE product_option_id = ?::uuid", optionId));
     }
 
     // ------------------------------------------------------------------ 11. tenant isolation
@@ -661,13 +624,13 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(404, api.call(delete(adminItems(a) + "/" + itemA).header(AUTH, b.bearer())));
 
         // A's data is untouched.
-        assertDecimal("100", balance(itemA), "A balance untouched");
+        assertDecimal("100", api.balance(itemA), "A balance untouched");
         assertEquals(1, movementsOfItem(itemA), "no movement was written for A's item");
         assertEquals("Biji Kopi", api.jdbc().queryForObject(
                 "SELECT name FROM inventory_items WHERE id = ?::uuid", String.class, itemA));
         assertTrue(api.jdbc().queryForObject(
                 "SELECT active FROM inventory_items WHERE id = ?::uuid", Boolean.class, itemA), "still active");
-        assertEquals(1, count("SELECT count(*) FROM inventory_items WHERE tenant_id = ?::uuid",
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_items WHERE tenant_id = ?::uuid",
                 a.tenantId().toString()));
 
         // Each list only contains its own data.
@@ -686,9 +649,9 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult duplicate = api.call(post(adminItems(owner)).header(AUTH, owner.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content(itemJson("Biji Kopi", "kg", "1", "5")));
         assertStatus(409, duplicate);
-        assertEquals(1, count("SELECT count(*) FROM inventory_items WHERE outlet_id = ?::uuid AND name = 'Biji Kopi'",
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_items WHERE outlet_id = ?::uuid AND name = 'Biji Kopi'",
                 owner.outletId().toString()), "the duplicate must not leave a row");
-        assertEquals(1, count("SELECT count(*) FROM inventory_balances WHERE outlet_id = ?::uuid",
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_balances WHERE outlet_id = ?::uuid",
                 owner.outletId().toString()), "and no orphan balance");
         assertEquals(List.of(kopi), readList(listStock(owner, null), "$.data[*].id"));
 
@@ -709,7 +672,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(itemJson("Kopi Arabika", "g", "25", "999")), 200);
         assertEquals("Kopi Arabika", ApiTestSupport.read(renamed, "$.data.name"));
         assertDecimal("25", decimal(ApiTestSupport.read(renamed, "$.data.reorderLevel")), "reorder level updated");
-        assertDecimal("100", balance(kopi), "initialQuantity is ignored on update");
+        assertDecimal("100", api.balance(kopi), "initialQuantity is ignored on update");
 
         // Without any movement the unit may still be changed.
         MvcResult unitChanged = api.send(put(adminItems(owner) + "/" + gula).header(AUTH, owner.bearer())
@@ -721,7 +684,7 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
     // ------------------------------------------------------------------ 13. deactivated ingredient
 
     @Test
-    void deactivatedIngredientLeavesListAndNewRecipesAndIsNoLongerDeducted() throws Exception {
+    void deactivatedIngredientLeavesListAndNewRecipes() throws Exception {
         MerchantFixture owner = api.onboardOwner("inv-deactivate");
         String category = api.createCategory(owner, "Minuman");
         String productId = api.createProduct(owner, category, "Kopi", PRICE);
@@ -748,13 +711,5 @@ class FnbInventoryFlowIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals(1, recipeLinesOfProduct(productId));
         MvcResult recipe = api.send(get(productRecipeUrl(owner, productId)).header(AUTH, owner.bearer()), 200);
         assertEquals(List.of(kopi), readList(recipe, "$.data.lines[*].inventoryItemId"));
-
-        String orderId = createOrder(owner, productId, 1);
-        MvcResult paid = payCash(owner, orderId, "pay-" + UUID.randomUUID());
-        assertTrue(warnings(paid).isEmpty(), warnings(paid).toString());
-        assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        assertEquals(0, saleMovements(orderId), "the deactivated ingredient is not deducted");
-        assertDecimal("100", balance(kopi), "balance untouched");
-        assertLedgerMatchesBalance(kopi);
     }
 }

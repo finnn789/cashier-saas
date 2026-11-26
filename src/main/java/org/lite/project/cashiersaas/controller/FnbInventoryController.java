@@ -4,9 +4,12 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.request.FnbInventoryItemRequest;
+import org.lite.project.cashiersaas.dto.request.FnbPurchaseRequest;
 import org.lite.project.cashiersaas.dto.request.FnbStockCountRequest;
 import org.lite.project.cashiersaas.dto.request.FnbStockMovementRequest;
 import org.lite.project.cashiersaas.dto.response.FnbInventoryItemResponse;
+import org.lite.project.cashiersaas.dto.response.FnbPurchaseResponse;
+import org.lite.project.cashiersaas.dto.response.FnbPurchaseSummaryResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStockCountResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStockMovementResponse;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
@@ -25,7 +28,7 @@ import java.util.UUID;
 public class FnbInventoryController {
     private final FnbInventoryService service;
 
-    @PostMapping("/merchant/outlets/{outletId}/fnb/inventory/items")
+    @PostMapping({"/merchant/outlets/{outletId}/fnb/inventory/items", "/cashier/outlets/{outletId}/fnb/inventory/items"})
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<FnbInventoryItemResponse> createItem(@AuthenticationPrincipal TenantPrincipal principal,
                                                             @PathVariable UUID outletId,
@@ -79,5 +82,28 @@ public class FnbInventoryController {
                                                          @PathVariable UUID outletId,
                                                          @Valid @RequestBody FnbStockCountRequest request) {
         return ApiResponse.created("Stok opname dicatat.", service.stockCount(principal, outletId, request));
+    }
+
+    @PostMapping({"/merchant/outlets/{outletId}/fnb/inventory/purchases", "/cashier/outlets/{outletId}/fnb/inventory/purchases"})
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<FnbPurchaseResponse> purchase(@AuthenticationPrincipal TenantPrincipal principal,
+                                                     @PathVariable UUID outletId,
+                                                     @Valid @RequestBody FnbPurchaseRequest request) {
+        return ApiResponse.created("Pembelian dicatat.", service.purchase(principal, outletId, request));
+    }
+
+    @GetMapping({"/merchant/outlets/{outletId}/fnb/inventory/purchases/{purchaseId}", "/cashier/outlets/{outletId}/fnb/inventory/purchases/{purchaseId}"})
+    public ApiResponse<FnbPurchaseResponse> purchase(@AuthenticationPrincipal TenantPrincipal principal,
+                                                     @PathVariable UUID outletId,
+                                                     @PathVariable UUID purchaseId) {
+        return ApiResponse.success("Pembelian diambil.", service.purchase(principal, outletId, purchaseId));
+    }
+
+    @GetMapping({"/merchant/outlets/{outletId}/fnb/inventory/purchases", "/cashier/outlets/{outletId}/fnb/inventory/purchases"})
+    public ApiResponse<List<FnbPurchaseSummaryResponse>> purchases(@AuthenticationPrincipal TenantPrincipal principal,
+                                                                   @PathVariable UUID outletId,
+                                                                   @RequestParam(defaultValue = "0") int page,
+                                                                   @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Pembelian diambil.", service.purchases(principal, outletId, page, size));
     }
 }

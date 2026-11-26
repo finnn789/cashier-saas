@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -80,6 +81,32 @@ class JwtTokenServiceTest {
         assertEquals(expiresAt, parameters.getClaims().getExpiresAt());
         assertNotNull(parameters.getClaims().getId());
         assertDoesNotThrowUuidParsing(parameters.getClaims().getId());
+    }
+
+    @Test
+    void platformTokenCarriesSuperadminRoleAndNoTenantClaims() {
+        JwtEncoder encoder = mock(JwtEncoder.class);
+        JwtTokenService service = new JwtTokenService(encoder, jwtProperties());
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        Instant expiresAt = Instant.now().plusSeconds(600);
+        when(encoder.encode(any(JwtEncoderParameters.class))).thenReturn(jwt("platform-token", Instant.now()));
+
+        String token = service.generatePlatformAccessToken(userId, "admin@example.com", sessionId, expiresAt);
+
+        ArgumentCaptor<JwtEncoderParameters> parametersCaptor = ArgumentCaptor.forClass(JwtEncoderParameters.class);
+        verify(encoder).encode(parametersCaptor.capture());
+        var claims = parametersCaptor.getValue().getClaims();
+        assertEquals("platform-token", token);
+        assertEquals(userId.toString(), claims.getSubject());
+        assertEquals(sessionId.toString(), claims.getClaim("session_id"));
+        assertEquals("PLATFORM", claims.getClaim("scope"));
+        assertEquals("admin@example.com", claims.getClaim("email"));
+        assertEquals(List.of("SUPERADMIN"), claims.getClaim("roles"));
+        assertEquals(expiresAt, claims.getExpiresAt());
+        for (String tenantClaim : List.of("tenant_id", "outlet_id", "membership_id")) {
+            assertNull(claims.getClaim(tenantClaim), tenantClaim);
+        }
     }
 
     @Test

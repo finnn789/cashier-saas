@@ -24,10 +24,12 @@ import org.lite.project.cashiersaas.entity.shared.catalog.OptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.RecipeLineEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -89,10 +91,15 @@ class FnbCatalogRecipeServiceTest {
     private final UUID itemBId = UUID.randomUUID();
     private final TenantPrincipal owner = new TenantPrincipal(userId, tenantId, outletId,
             UUID.randomUUID(), UUID.randomUUID(), Set.of(Role.OWNERMERCHANT));
+    private final TenantPrincipal cashier = new TenantPrincipal(UUID.randomUUID(), tenantId, outletId,
+            UUID.randomUUID(), UUID.randomUUID(), Set.of(Role.CASHIER));
     private final TenantEntity tenant = new TenantEntity();
     private final OutletEntity outlet = OutletEntity.open(tenant, "Outlet", "Asia/Jakarta", null, null);
     private final StaffUserEntity user = new StaffUserEntity();
-    private final MerchantAccessContext context = new MerchantAccessContext(tenant, outlet, null);
+    private final MerchantAccessContext context = new MerchantAccessContext(tenant, outlet,
+            TenantMembershipEntity.grantOwner(null, tenant));
+    private final MerchantAccessContext cashierContext = new MerchantAccessContext(tenant, outlet,
+            TenantMembershipEntity.grantCashier(null, tenant));
 
     private CategoryEntity category;
     private ProductEntity product;
@@ -121,30 +128,36 @@ class FnbCatalogRecipeServiceTest {
         void run(FnbCatalogRecipeServiceTest test);
     }
 
-    static Stream<Arguments> ownerOnlyCalls() {
+    /** Each call with the permission its guard must ask for; null means owner-only (recipes). */
+    static Stream<Arguments> guardedCalls() {
         return Stream.of(
                 Arguments.of(Named.of("replaceProductRecipe", (Call) t -> t.service.replaceProductRecipe(
-                        t.owner, t.outletId, t.productId, t.recipeRequest(t.line(t.itemAId, "18"))))),
+                        t.owner, t.outletId, t.productId, t.recipeRequest(t.line(t.itemAId, "18")))), null),
                 Arguments.of(Named.of("replaceOptionRecipe", (Call) t -> t.service.replaceOptionRecipe(
-                        t.owner, t.outletId, t.groupId, t.optionId, t.recipeRequest(t.line(t.itemAId, "50"))))),
+                        t.owner, t.outletId, t.groupId, t.optionId, t.recipeRequest(t.line(t.itemAId, "50")))), null),
                 Arguments.of(Named.of("productRecipe", (Call) t -> t.service.productRecipe(
-                        t.owner, t.outletId, t.productId))),
+                        t.owner, t.outletId, t.productId)), null),
                 Arguments.of(Named.of("optionRecipe", (Call) t -> t.service.optionRecipe(
-                        t.owner, t.outletId, t.groupId, t.optionId))),
+                        t.owner, t.outletId, t.groupId, t.optionId)), null),
                 Arguments.of(Named.of("updateOption", (Call) t -> t.service.updateOption(
-                        t.owner, t.outletId, t.groupId, t.optionId, t.optionRequest("Boba", "3000.00", null)))),
+                        t.owner, t.outletId, t.groupId, t.optionId, t.optionRequest("Boba", "3000.00", null))),
+                        Permission.CATALOG_EDIT),
                 Arguments.of(Named.of("updateProduct", (Call) t -> t.service.updateProduct(
-                        t.owner, t.outletId, t.productId, t.productRequest("Latte", "10000.00", null)))));
+                        t.owner, t.outletId, t.productId, t.productRequest("Latte", "10000.00", null))),
+                        Permission.CATALOG_EDIT));
     }
 
     @ParameterizedTest
-    @MethodSource("ownerOnlyCalls")
-    void ownerOnlyUseCasesRequireOwnerGuardAndTouchNothingWhenDenied(Call call) {
-        when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
+    @MethodSource("guardedCalls")
+    void useCasesAskTheirGuardAndTouchNothingWhenDenied(Call call, Permission permission) {
+        if (permission == null) {
+            when(guard.requireOwner(owner, outletId)).thenThrow(new ResourceNotFoundException());
+        } else {
+            when(guard.require(owner, outletId, permission)).thenThrow(new ResourceNotFoundException());
+        }
 
         assertThrows(ResourceNotFoundException.class, () -> call.run(this));
 
-        verify(guard).requireOwner(owner, outletId);
         verifyNoInteractions(catalog, inventory, audit, references);
     }
 
@@ -528,7 +541,7 @@ class FnbCatalogRecipeServiceTest {
     @NullSource
     @ValueSource(strings = {"   "})
     void updateOptionPriceChangeWithoutOrBlankReasonIsRejectedAndNothingIsAudited(String reason) {
-        stubOwner();
+        stubCatalogEdit();
         stubOption();
 
         InvalidOperationException error = assertThrows(InvalidOperationException.class,
@@ -541,7 +554,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateOptionPriceChangeWithReasonRecordsOptionPriceAuditWithTrimmedReason() {
-        stubOwner();
+        stubCatalogEdit();
         stubOption();
         stubAuditReferences();
 
@@ -560,7 +573,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateOptionAuditDetailsUsePlainOldAndNewPrices() {
-        stubOwner();
+        stubCatalogEdit();
         stubOption();
         stubAuditReferences();
 
@@ -573,7 +586,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateOptionPriceChangeAppliesNewValuesAfterAuditing() {
-        stubOwner();
+        stubCatalogEdit();
         stubOption();
         stubAuditReferences();
 
@@ -589,7 +602,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateOptionWithUnchangedPriceWritesNoAuditEvenWhenScaleDiffers() {
-        stubOwner();
+        stubCatalogEdit();
         stubOption();
 
         FnbOptionResponse response = service.updateOption(owner, outletId, groupId, optionId,
@@ -606,7 +619,7 @@ class FnbCatalogRecipeServiceTest {
         OptionGroupEntity otherGroup = OptionGroupEntity.create(tenant, outlet,
                 new OptionGroupEntity.Details("Size", false, 0, 1, 1));
         ReflectionTestUtils.setField(otherGroup, "id", otherGroupId);
-        stubOwner();
+        stubCatalogEdit();
         when(catalog.group(tenantId, outletId, otherGroupId)).thenReturn(Optional.of(otherGroup));
         when(catalog.option(tenantId, outletId, optionId)).thenReturn(Optional.of(option));
 
@@ -625,7 +638,7 @@ class FnbCatalogRecipeServiceTest {
     @NullSource
     @ValueSource(strings = {"  "})
     void updateProductPriceChangeWithoutOrBlankReasonIsRejectedAndNothingIsAudited(String reason) {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubCategory();
 
@@ -639,7 +652,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateProductPriceChangeWithReasonRecordsProductPriceAuditWithTrimmedReason() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubCategory();
         stubAuditReferences();
@@ -659,7 +672,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateProductAuditDetailsUsePlainOldAndNewPrices() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubCategory();
         stubAuditReferences();
@@ -671,7 +684,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateProductPriceChangeAppliesNewValuesAfterAuditing() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubCategory();
         stubAuditReferences();
@@ -689,7 +702,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateProductWithUnchangedPriceWritesNoAuditEvenWhenScaleDiffers() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubCategory();
 
@@ -703,7 +716,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateProductRejectsUnknownProductId() {
-        stubOwner();
+        stubCatalogEdit();
         when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
@@ -714,7 +727,7 @@ class FnbCatalogRecipeServiceTest {
 
     @Test
     void updateProductRejectsUnknownCategoryWithoutAuditing() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         when(catalog.category(tenantId, outletId, categoryId)).thenReturn(Optional.empty());
 
@@ -725,10 +738,56 @@ class FnbCatalogRecipeServiceTest {
         assertEquals(0, new BigDecimal("10000.00").compareTo(product.getPrice()));
     }
 
+    // ---------------------------------------------------------------- cashier catalog edits (no price changes)
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void cashierCannotChangeAProductOrOptionPriceAndNothingIsAudited(boolean forProduct) {
+        when(guard.require(cashier, outletId, Permission.CATALOG_EDIT)).thenReturn(cashierContext);
+        if (forProduct) {
+            stubProduct();
+            stubCategory();
+        } else {
+            stubOption();
+        }
+
+        InvalidOperationException error = assertThrows(InvalidOperationException.class, () -> {
+            if (forProduct) service.updateProduct(cashier, outletId, productId, productRequest("Latte", "12000.00", "Naik"));
+            else service.updateOption(cashier, outletId, groupId, optionId, optionRequest("Boba", "4000.00", "Naik"));
+        });
+
+        assertEquals("Kasir tidak dapat mengubah harga.", error.getMessage());
+        verifyNoInteractions(audit, references);
+        assertEquals(0, new BigDecimal("10000.00").compareTo(product.getPrice()));
+        assertEquals(0, new BigDecimal("3000.00").compareTo(option.getPriceAdjustment()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void cashierCanEditEverythingButThePriceOfAProductOrOption(boolean forProduct) {
+        when(guard.require(cashier, outletId, Permission.CATALOG_EDIT)).thenReturn(cashierContext);
+        if (forProduct) {
+            stubProduct();
+            stubCategory();
+            service.updateProduct(cashier, outletId, productId, productRequest("Latte Baru", "10000", null));
+            assertEquals("Latte Baru", product.getName());
+        } else {
+            stubOption();
+            service.updateOption(cashier, outletId, groupId, optionId, optionRequest("Boba Baru", "3000", null));
+            assertEquals("Boba Baru", option.getName());
+        }
+
+        verifyNoInteractions(audit, references);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void stubOwner() {
         when(guard.requireOwner(owner, outletId)).thenReturn(context);
+    }
+
+    private void stubCatalogEdit() {
+        when(guard.require(owner, outletId, Permission.CATALOG_EDIT)).thenReturn(context);
     }
 
     private void stubProduct() {

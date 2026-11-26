@@ -43,6 +43,26 @@ Active role policy is exactly SUPERADMIN, OWNERMERCHANT and CASHIER. Platform ro
 
 MerchantAccessGuard checks principal outlet and reloads authorized membership/outlet access through MerchantAccessRepository. Failed ownership/access checks use ResourceNotFoundException to avoid disclosing another tenant's records. Protected data context comes from the principal, public context from validated QR. This review sampled boundaries; exhaustive tenant-isolation proof remains pending.
 
+### RBAC permission matrix (TASK-103, user decision 2026-11-25; fixed per role, no per-user table)
+
+Two layers, both required: (1) URL prefix in `SecurityConfiguration` (`/merchant/**` OWNERMERCHANT, `/cashier/**` OWNERMERCHANT+CASHIER); (2) a `Permission` check in the service via `MerchantAccessGuard.require(principal, outletId, Permission)` (denied = 404). An action open to CASHIER is exposed on a `/cashier/...` path (same controller method, also mapped on the old `/merchant/...` path); owner-only actions stay on `/merchant/...` only. The UI mirrors the same matrix in `src/constants/permissions.ts` (`can(role, permission)`, `useAuth().can`, `PermissionRoute`); the UI is convenience, the server decides.
+
+| Permission | OWNER | CASHIER | Covers |
+|---|---|---|---|
+| CATALOG_EDIT | yes | yes | create/rename category, edit existing product non-price fields (name, description, category, image, availability, display order), create/edit option group, edit existing option non-price fields + availability, attach option groups to a product |
+| CATALOG_PRICE | yes | no | create product, create option (both set a price), change product `price`, change option `priceAdjustment` |
+| CATALOG_ARCHIVE | yes | no | archive category / product / option group |
+| RECIPE_MANAGE | yes | no | read/write product and option recipes (HPP) |
+| INVENTORY_ITEM_CREATE | yes | yes | create inventory item (with initial quantity) |
+| INVENTORY_ITEM_MANAGE | yes | no | update / deactivate inventory item |
+| STOCK_MOVE | yes | yes | RESTOCK and WASTE movements |
+| STOCK_ADJUST | yes | no | ADJUSTMENT movement, stock count (opname) |
+| PURCHASE_RECORD | yes | yes | record purchase, list/detail purchases (cashier: no margin warnings) |
+| ORDER_DISCOUNT | yes | capped | discount an unpaid order; CASHIER only up to `tenants.cashier_max_discount_pct` (default 0 = none) |
+| everything else | yes | no | refund, reports, leakage, margins, audit log, staff, invitations, business settings, outlets, subscription, payment-label management, shift force-close |
+
+Cost data (average unit cost, HPP, margins) stays owner-only through the existing `showCost` rule. POS order, hold, pay, cancel unpaid (reason), shifts, receipts and transaction list stay open to both roles as before.
+
 ## Pay First state and consistency
 
 ```text

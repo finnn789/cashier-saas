@@ -25,4 +25,5 @@ public class MerchantBusinessSettingsResponse {
     private String timeZone;
     private String receiptFooter;
     private BigDecimal targetMarginPct;
+    private BigDecimal cashierMaxDiscountPct;
 }

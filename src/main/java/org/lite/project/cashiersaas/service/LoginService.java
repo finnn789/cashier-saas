@@ -56,7 +56,20 @@ public class LoginService {
         if (!staffUser.isPendingProfile() && !staffUser.isActive()) {
             throw new InvalidCredentialsException();
         }
-        return toLoginResponse(authSessionService.start(staffUser));
+        LoginResponse response = toLoginResponse(authSessionService.start(staffUser));
+        response.setPlatformAdmin(staffUser.isPlatformAdmin());
+        return response;
+    }
+
+    /** SUPERADMIN entry: an active account with the platform flag; anyone else gets the same 404 as an unknown resource. */
+    @Transactional(readOnly = true)
+    public LoginResponse startPlatformSession(AccountPrincipal principal) {
+        StaffUserEntity user = staffUserRepository.findById(principal.getUserId())
+                .filter(value -> value.isActive() && value.isPlatformAdmin())
+                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.RESOURCE_UNAVAILABLE.getMessage()));
+        LoginResponse response = toLoginResponse(authSessionService.issuePlatform(principal, user));
+        response.setPlatformAdmin(true);
+        return response;
     }
 
     @Transactional

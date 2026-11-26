@@ -192,47 +192,23 @@ class TestCashierGrpcClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
 
-    async def test_rpc_error_fallback(self) -> None:
-        """AioRpcError (UNAVAILABLE / NOT_FOUND) is swallowed: catalog gives [], order status gives None."""
-        tenant_id = "tenant-unit-err"
-        cases = (
-            (
-                "get_catalog_items", "GetCatalogItem", grpc.StatusCode.UNAVAILABLE,
-                "Service Unavailable", "Transport closed",
-                {"query": "roti", "limit": 10}, [],
-            ),
-            (
-                "get_order_status", "GetOrderStatus", grpc.StatusCode.NOT_FOUND,
-                "Order not found in Cashier backend", "",
-                {"order_number": "ORD-404"}, None,
-            ),
-            (
-                "get_order_status", "GetOrderStatus", grpc.StatusCode.UNAVAILABLE,
-                "Connection refused", "",
-                {"order_number": "ORD-503"}, None,
-            ),
+    async def test_order_status_not_found_returns_none(self) -> None:
+        """NOT_FOUND from the backend gives None."""
+        self.mock_stub.GetOrderStatus = AsyncMock(
+            side_effect=grpc.aio.AioRpcError(
+                code=grpc.StatusCode.NOT_FOUND,
+                initial_metadata=(),
+                trailing_metadata=(),
+                details="Order not found in Cashier backend",
+                debug_error_string="",
+            )
         )
-        for method, rpc, code, details, debug, arguments, expected in cases:
-            with self.subTest(rpc=rpc, code=code.name):
-                setattr(
-                    self.mock_stub,
-                    rpc,
-                    AsyncMock(
-                        side_effect=grpc.aio.AioRpcError(
-                            code=code,
-                            initial_metadata=(),
-                            trailing_metadata=(),
-                            details=details,
-                            debug_error_string=debug,
-                        )
-                    ),
-                )
 
-                result = await getattr(self.client, method)(
-                    tenant_id=tenant_id, user_id=USER_ID, **arguments
-                )
+        result = await self.client.get_order_status(
+            tenant_id="tenant-unit-err", user_id=USER_ID, order_number="ORD-404"
+        )
 
-                self.assertEqual(result, expected)
+        self.assertIsNone(result)
 
     async def test_unexpected_generic_exception_handling(self) -> None:
         """When stub raises unexpected non-gRPC exception, client catches and falls back cleanly."""

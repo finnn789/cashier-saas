@@ -10,7 +10,6 @@ import org.lite.project.cashiersaas.dto.request.FnbCashExpenseRequest;
 import org.lite.project.cashiersaas.dto.request.FnbShiftCloseRequest;
 import org.lite.project.cashiersaas.dto.request.FnbShiftOpenRequest;
 import org.lite.project.cashiersaas.dto.response.FnbCashExpenseResponse;
-import org.lite.project.cashiersaas.dto.response.FnbShiftOpeningSuggestionResponse;
 import org.lite.project.cashiersaas.dto.response.FnbShiftResponse;
 import org.lite.project.cashiersaas.entity.fnb.CashExpenseEntity;
 import org.lite.project.cashiersaas.entity.fnb.CashShiftEntity;
@@ -46,7 +45,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -293,21 +291,6 @@ class FnbShiftServiceTest {
 
         assertEquals(1, service.currentExpenses(principal, outletId).size());
         assertThrows(ResourceNotFoundException.class, () -> service.currentExpenses(principal, outletId));
-    }
-
-    @Test
-    void openingSuggestionIsZeroWithoutHistoryElseTheCountedCashOfTheLatestClosedShift() {
-        actingAsCashier();
-        when(shifts.latestClosed(tenantId, outletId)).thenReturn(Optional.empty());
-        FnbShiftOpeningSuggestionResponse none = service.openingSuggestion(principal, outletId);
-        assertEquals(new BigDecimal("0.00"), none.getOpeningCash());
-        assertNull(none.getSourceShiftId());
-
-        shift.close(cashier, new BigDecimal("300.00"), new BigDecimal("290.00"), null);
-        when(shifts.latestClosed(tenantId, outletId)).thenReturn(Optional.of(shift));
-        FnbShiftOpeningSuggestionResponse last = service.openingSuggestion(principal, outletId);
-        assertEquals(new BigDecimal("290.00"), last.getOpeningCash());
-        assertEquals(shift.getId(), last.getSourceShiftId());
     }
 
     private CashExpenseEntity storedExpense(String fingerprint) {

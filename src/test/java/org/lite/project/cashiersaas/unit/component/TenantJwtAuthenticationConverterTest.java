@@ -3,8 +3,10 @@ package org.lite.project.cashiersaas.unit.component;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.lite.project.cashiersaas.component.PlatformPrincipal;
 import org.lite.project.cashiersaas.component.TenantJwtAuthenticationConverter;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.enums.Role;
@@ -79,11 +81,39 @@ class TenantJwtAuthenticationConverterTest {
         assertEquals("JWT contains an unsupported role.", exception.getMessage());
     }
 
+    @Test
+    void platformTokenWithSuperadminBecomesPlatformPrincipalWithOnlyTheSuperadminAuthority() {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        Jwt jwt = jwt(Map.of("scope", "PLATFORM", "sub", userId.toString(), "session_id", sessionId.toString(),
+                "email", "admin@example.com", "roles", List.of("SUPERADMIN")));
+
+        AbstractAuthenticationToken authentication = converter.convert(jwt);
+
+        PlatformPrincipal principal = assertInstanceOf(PlatformPrincipal.class, authentication.getPrincipal());
+        assertEquals(userId, principal.getUserId());
+        assertEquals("admin@example.com", principal.getEmail());
+        assertEquals(sessionId, principal.getSessionId());
+        assertEquals(Set.of(new SimpleGrantedAuthority("ROLE_SUPERADMIN")), Set.copyOf(authentication.getAuthorities()));
+    }
+
+    // SUPERADMIN lives only in a PLATFORM token; a tenant membership must never reach platform access.
+    @ParameterizedTest
+    @CsvSource({"PLATFORM,OWNERMERCHANT", "MERCHANT,SUPERADMIN"})
+    void rejectsPlatformScopeWithoutSuperadminAndMerchantScopeWithSuperadmin(String scope, String role) {
+        Jwt jwt = jwt(Map.of("scope", scope, "sub", UUID.randomUUID().toString(), "tenant_id", UUID.randomUUID().toString(),
+                "email", "user@example.com", "roles", List.of(role)));
+
+        BadCredentialsException exception = assertThrows(BadCredentialsException.class, () -> converter.convert(jwt));
+
+        assertEquals("JWT contains an unsupported role.", exception.getMessage());
+    }
+
     private Jwt jwt(Map<String, Object> claims) {
         Instant issuedAt = Instant.now();
         Map<String, Object> scopedClaims = new HashMap<>(claims);
-        scopedClaims.put("scope", "MERCHANT");
-        scopedClaims.put("session_id", UUID.randomUUID().toString());
+        scopedClaims.putIfAbsent("scope", "MERCHANT");
+        scopedClaims.putIfAbsent("session_id", UUID.randomUUID().toString());
         scopedClaims.put("outlet_id", UUID.randomUUID().toString());
         scopedClaims.put("membership_id", UUID.randomUUID().toString());
         return new Jwt("token-value", issuedAt, issuedAt.plusSeconds(60), Map.of("alg", "HS256"), scopedClaims);

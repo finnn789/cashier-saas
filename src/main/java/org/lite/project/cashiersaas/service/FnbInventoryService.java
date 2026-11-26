@@ -5,27 +5,39 @@ import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
 import org.lite.project.cashiersaas.dto.FnbInventoryMapper;
 import org.lite.project.cashiersaas.dto.request.FnbInventoryItemRequest;
+import org.lite.project.cashiersaas.dto.request.FnbPurchaseLineRequest;
+import org.lite.project.cashiersaas.dto.request.FnbPurchaseRequest;
 import org.lite.project.cashiersaas.dto.request.FnbStockCountLineRequest;
 import org.lite.project.cashiersaas.dto.request.FnbStockCountRequest;
 import org.lite.project.cashiersaas.dto.request.FnbStockMovementRequest;
 import org.lite.project.cashiersaas.dto.response.FnbInventoryItemResponse;
+import org.lite.project.cashiersaas.dto.response.FnbPurchaseResponse;
+import org.lite.project.cashiersaas.dto.response.FnbPurchaseSummaryResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStockCountLineResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStockCountResponse;
 import org.lite.project.cashiersaas.dto.response.FnbStockMovementResponse;
+import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryMovementEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.PurchaseEntity;
+import org.lite.project.cashiersaas.entity.shared.inventory.PurchaseLineEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.StockCountEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.StockCountLineEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -44,10 +56,11 @@ public class FnbInventoryService {
     private final FnbInventoryRepository inventory;
     private final DigestService tokens;
     private final FnbMenuMarginService margins;
+    private final AuditLogRepository audit;
 
     @Transactional
     public FnbInventoryItemResponse createItem(TenantPrincipal principal, UUID outletId, FnbInventoryItemRequest request) {
-        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.INVENTORY_ITEM_CREATE);
         UUID tenantId = principal.getTenantId();
         InventoryItemEntity item = InventoryItemEntity.create(context.getTenant(), context.getOutlet(),
                 sku(request), request.getName().trim(), request.getUnit().trim(), request.getReorderLevel());
@@ -103,8 +116,8 @@ public class FnbInventoryService {
     @Transactional
     public FnbStockMovementResponse recordMovement(TenantPrincipal principal, UUID outletId, UUID itemId, FnbStockMovementRequest request) {
         InventoryMovementEntity.Type type = request.getType();
-        MerchantAccessContext context = type == InventoryMovementEntity.Type.ADJUSTMENT
-                ? guard.requireOwner(principal, outletId) : guard.requireOutlet(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId,
+                type == InventoryMovementEntity.Type.ADJUSTMENT ? Permission.STOCK_ADJUST : Permission.STOCK_MOVE);
         UUID tenantId = principal.getTenantId();
         BigDecimal delta = delta(type, request.getQuantity());
         BigDecimal unitCost = request.getUnitCost();
@@ -127,6 +140,10 @@ public class FnbInventoryService {
                 reason, request.getIdempotencyKey(), fingerprint, context.getMembership().getId(), null, movementCost);
         inventory.persist(movement);
         inventory.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(),
+                context.getMembership().getUser(), AuditLogEntity.Action.FNB_STOCK_MOVEMENT_RECORDED, movement.getId(), reason,
+                "type=" + type + " item=" + itemId + " quantity=" + delta.toPlainString()
+                        + " unitCost=" + (unitCost == null ? "-" : unitCost.toPlainString())));
         FnbStockMovementResponse response = FnbInventoryMapper.movement(movement, showCost(context), actorName(tenantId, movement));
         // Cost data is owner-only; only a restock priced above can move the average.
         if (unitCost != null && showCost(context)
@@ -181,6 +198,7 @@ public class FnbInventoryService {
             inventory.persist(header);
         }
         List<FnbStockCountLineResponse> result = new ArrayList<>();
+        int changed = 0;
         for (int i = 0; i < lines.size(); i++) {
             FnbStockCountLineRequest line = lines.get(i);
             InventoryItemEntity item = items.get(i);
@@ -193,6 +211,7 @@ public class FnbInventoryService {
                 previous = balance.getQuantityOnHand();
                 delta = counted.subtract(previous);
                 if (delta.signum() != 0) {
+                    changed++;
                     movement = InventoryMovementEntity.record(tenantId, outletId, item, null,
                             InventoryMovementEntity.Type.ADJUSTMENT, delta, reason, key(request, line), fingerprint,
                             context.getMembership().getId(), null, balance.getAverageUnitCost());
@@ -213,10 +232,105 @@ public class FnbInventoryService {
             result.add(response);
         }
         inventory.flush();
+        if (header != null)
+            audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(),
+                    context.getMembership().getUser(), AuditLogEntity.Action.FNB_STOCK_COUNT_RECORDED, header.getId(),
+                    note.isEmpty() ? null : note, "lines=" + lines.size() + " changed=" + changed));
         FnbStockCountResponse response = new FnbStockCountResponse();
         response.setStockCountId(header == null ? null : header.getId());
         response.setLines(result);
         return response;
+    }
+
+    @Transactional
+    public FnbPurchaseResponse purchase(TenantPrincipal principal, UUID outletId, FnbPurchaseRequest request) {
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.PURCHASE_RECORD);
+        UUID tenantId = principal.getTenantId();
+        if (request.getPurchasedOn().isAfter(LocalDate.now(ZoneId.of(context.getTenant().getTimeZone()))))
+            throw new InvalidOperationException("Tanggal pembelian tidak boleh di masa depan.");
+        List<FnbPurchaseLineRequest> lines = request.getLines().stream()
+                .sorted(Comparator.comparing(FnbPurchaseLineRequest::getInventoryItemId)).toList();
+        if (new HashSet<>(lines.stream().map(FnbPurchaseLineRequest::getInventoryItemId).toList()).size() != lines.size())
+            throw new InvalidOperationException("Bahan duplikat dalam pembelian.");
+        String supplier = request.getSupplierName() == null || request.getSupplierName().isBlank() ? null : request.getSupplierName().trim();
+        String note = request.getNote() == null || request.getNote().isBlank() ? null : request.getNote().trim();
+        String fingerprint = tokens.digest(lines.stream().map(line -> line.getInventoryItemId() + "="
+                + line.getQuantity().stripTrailingZeros().toPlainString() + "@" + line.getUnitCost().stripTrailingZeros().toPlainString())
+                .collect(Collectors.joining(";")) + "|" + request.getPurchasedOn() + "|" + (supplier == null ? "" : supplier)
+                + "|" + (note == null ? "" : note));
+        PurchaseEntity recorded = inventory.purchaseByKey(tenantId, request.getIdempotencyKey()).orElse(null);
+        if (recorded != null) {
+            if (!recorded.getOutletId().equals(outletId) || !recorded.getRequestFingerprint().equals(fingerprint))
+                throw new OperationConflictException("Kunci idempotensi telah digunakan.");
+            return purchaseResponse(tenantId, recorded);
+        }
+        List<InventoryItemEntity> items = lines.stream().map(line -> item(tenantId, outletId, line.getInventoryItemId())).toList();
+        List<InventoryBalanceEntity> balances = items.stream().map(item -> lockedBalance(tenantId, outletId, item)).toList();
+        List<BigDecimal> lineTotals = lines.stream()
+                .map(line -> line.getQuantity().multiply(line.getUnitCost()).setScale(2, RoundingMode.HALF_UP)).toList();
+        PurchaseEntity header = PurchaseEntity.record(tenantId, outletId, supplier, request.getPurchasedOn(), note,
+                lineTotals.stream().reduce(BigDecimal.ZERO, BigDecimal::add), request.getIdempotencyKey(), fingerprint,
+                context.getMembership().getId());
+        inventory.persist(header);
+        String reason = supplier == null ? "Pembelian" : "Pembelian: " + supplier;
+        List<PurchaseLineEntity> saved = new ArrayList<>();
+        List<UUID> changedItems = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            FnbPurchaseLineRequest line = lines.get(i);
+            InventoryItemEntity item = items.get(i);
+            InventoryBalanceEntity balance = balances.get(i);
+            BigDecimal averageBefore = balance.getAverageUnitCost();
+            balance.receive(line.getQuantity(), line.getUnitCost());
+            if (averageBefore == null || averageBefore.compareTo(balance.getAverageUnitCost()) != 0) changedItems.add(item.getId());
+            // The key is hashed so a 128-char purchase key still fits the 128-char movement key column.
+            InventoryMovementEntity movement = InventoryMovementEntity.record(tenantId, outletId, item, null,
+                    InventoryMovementEntity.Type.RESTOCK, line.getQuantity(), reason,
+                    "purchase:" + tokens.digest(request.getIdempotencyKey()) + ":" + item.getId(), fingerprint,
+                    context.getMembership().getId(), null, line.getUnitCost());
+            inventory.persist(movement);
+            PurchaseLineEntity saving = PurchaseLineEntity.record(tenantId, header, item, line.getQuantity(), line.getUnitCost(),
+                    lineTotals.get(i), movement.getId());
+            inventory.persist(saving);
+            saved.add(saving);
+        }
+        inventory.flush();
+        audit.persist(AuditLogEntity.recordAction(context.getTenant(), context.getOutlet(), context.getMembership().getUser(),
+                AuditLogEntity.Action.FNB_PURCHASE_RECORDED, header.getId(), note,
+                "supplier=" + (supplier == null ? "-" : supplier) + " lines=" + lines.size() + " total=" + header.getTotal().toPlainString()));
+        FnbPurchaseResponse response = FnbInventoryMapper.purchase(header, saved.stream()
+                .sorted(Comparator.comparing((PurchaseLineEntity l) -> l.getInventoryItem().getName())
+                        .thenComparing(l -> l.getInventoryItem().getId())).toList(),
+                actorName(tenantId, header.getActorMembershipId()));
+        if (showCost(context))
+            response.setMarginWarnings(changedItems.stream().flatMap(id -> margins.restockWarnings(tenantId, outletId, id,
+                    context.getTenant().getTargetMarginPct()).stream()).distinct().toList());
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public FnbPurchaseResponse purchase(TenantPrincipal principal, UUID outletId, UUID id) {
+        guard.require(principal, outletId, Permission.PURCHASE_RECORD);
+        return purchaseResponse(principal.getTenantId(), inventory.purchase(principal.getTenantId(), outletId, id)
+                .orElseThrow(ResourceNotFoundException::new));
+    }
+
+    @Transactional(readOnly = true)
+    public List<FnbPurchaseSummaryResponse> purchases(TenantPrincipal principal, UUID outletId, int page, int size) {
+        if (page < 0 || page > 1_000_000 || size < 1 || size > 50)
+            throw new InvalidOperationException("Parameter halaman tidak valid.");
+        guard.require(principal, outletId, Permission.PURCHASE_RECORD);
+        UUID tenantId = principal.getTenantId();
+        List<PurchaseEntity> purchases = inventory.purchases(tenantId, outletId, page, size);
+        Map<UUID, Integer> counts = inventory.purchaseLineCounts(tenantId, purchases.stream().map(PurchaseEntity::getId).toList());
+        Map<UUID, String> names = inventory.memberNames(tenantId, purchases.stream()
+                .map(PurchaseEntity::getActorMembershipId).distinct().toList());
+        return purchases.stream().map(purchase -> FnbInventoryMapper.purchaseSummary(purchase,
+                counts.getOrDefault(purchase.getId(), 0), names.get(purchase.getActorMembershipId()))).toList();
+    }
+
+    private FnbPurchaseResponse purchaseResponse(UUID tenantId, PurchaseEntity purchase) {
+        return FnbInventoryMapper.purchase(purchase, inventory.purchaseLines(tenantId, purchase.getId()),
+                actorName(tenantId, purchase.getActorMembershipId()));
     }
 
     @Transactional(readOnly = true)
@@ -233,8 +347,12 @@ public class FnbInventoryService {
     }
 
     private String actorName(UUID tenantId, InventoryMovementEntity movement) {
-        if (movement.getActorMembershipId() == null) return null;
-        return inventory.memberNames(tenantId, List.of(movement.getActorMembershipId())).get(movement.getActorMembershipId());
+        return actorName(tenantId, movement.getActorMembershipId());
+    }
+
+    private String actorName(UUID tenantId, UUID membershipId) {
+        if (membershipId == null) return null;
+        return inventory.memberNames(tenantId, List.of(membershipId)).get(membershipId);
     }
 
     private InventoryItemEntity item(UUID tenant, UUID outlet, UUID id) {

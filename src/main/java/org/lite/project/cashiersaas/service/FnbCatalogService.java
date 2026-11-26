@@ -13,6 +13,7 @@ import org.lite.project.cashiersaas.entity.shared.catalog.ProductEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -49,14 +50,14 @@ public class FnbCatalogService {
 
     @Transactional
     public FnbCategoryResponse createCategory(TenantPrincipal principal, UUID outletId, FnbCategoryRequest request) {
-        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.CATALOG_EDIT);
         CategoryEntity entity = CategoryEntity.create(context.getTenant(), context.getOutlet(), request.getName().trim(), request.getDisplayOrder());
         catalog.persist(entity);
         return FnbCatalogMapper.category(entity);
     }
     @Transactional
     public FnbCategoryResponse updateCategory(TenantPrincipal principal, UUID outletId, UUID id, FnbCategoryRequest request) {
-        guard.requireOwner(principal, outletId);
+        guard.require(principal, outletId, Permission.CATALOG_EDIT);
         CategoryEntity entity = category(principal.getTenantId(), outletId, id);
         entity.update(request.getName().trim(), request.getDisplayOrder());
         return FnbCatalogMapper.category(entity);
@@ -84,10 +85,11 @@ public class FnbCatalogService {
     }
     @Transactional
     public FnbProductResponse updateProduct(TenantPrincipal principal, UUID outletId, UUID id, FnbProductRequest request) {
-        guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.CATALOG_EDIT);
         ProductEntity entity = product(principal.getTenantId(), outletId, id);
         CategoryEntity category = category(principal.getTenantId(), outletId, request.getCategoryId());
         if (entity.getPrice().compareTo(request.getPrice()) != 0) {
+            requirePriceRole(context);
             requirePriceReason(request.getPriceChangeReason());
             recordPrice(principal, outletId, id, AuditLogEntity.Action.FNB_PRODUCT_PRICE_CHANGED,
                     request.getPriceChangeReason(), entity.getPrice(), request.getPrice());
@@ -110,7 +112,7 @@ public class FnbCatalogService {
     }
     @Transactional
     public FnbOptionGroupResponse createGroup(TenantPrincipal principal, UUID outletId, FnbOptionGroupRequest request) {
-        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.CATALOG_EDIT);
         validateGroup(request);
         OptionGroupEntity entity = OptionGroupEntity.create(context.getTenant(), context.getOutlet(), groupDetails(request));
         catalog.persist(entity);
@@ -118,7 +120,7 @@ public class FnbCatalogService {
     }
     @Transactional
     public FnbOptionGroupResponse updateGroup(TenantPrincipal principal, UUID outletId, UUID id, FnbOptionGroupRequest request) {
-        guard.requireOwner(principal, outletId);
+        guard.require(principal, outletId, Permission.CATALOG_EDIT);
         validateGroup(request);
         OptionGroupEntity entity = group(principal.getTenantId(), outletId, id);
         entity.update(groupDetails(request));
@@ -148,7 +150,7 @@ public class FnbCatalogService {
     @Transactional
     public List<FnbOptionGroupResponse> replaceProductGroups(TenantPrincipal principal, UUID outletId, UUID productId,
                                                              FnbProductOptionGroupsRequest request) {
-        MerchantAccessContext context = guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.CATALOG_EDIT);
         ProductEntity product = product(principal.getTenantId(), outletId, productId);
         Set<UUID> seen = new HashSet<>();
         List<OptionGroupEntity> groups = new ArrayList<>();
@@ -173,9 +175,10 @@ public class FnbCatalogService {
     }
     @Transactional
     public FnbOptionResponse updateOption(TenantPrincipal principal, UUID outletId, UUID groupId, UUID id, FnbOptionRequest request) {
-        guard.requireOwner(principal, outletId);
+        MerchantAccessContext context = guard.require(principal, outletId, Permission.CATALOG_EDIT);
         ProductOptionEntity entity = option(principal.getTenantId(), outletId, groupId, id);
         if (entity.getPriceAdjustment().compareTo(request.getPriceAdjustment()) != 0) {
+            requirePriceRole(context);
             requirePriceReason(request.getPriceChangeReason());
             recordPrice(principal, outletId, id, AuditLogEntity.Action.FNB_OPTION_PRICE_CHANGED,
                     request.getPriceChangeReason(), entity.getPriceAdjustment(), request.getPriceAdjustment());
@@ -278,6 +281,10 @@ public class FnbCatalogService {
     private OptionGroupEntity.Details groupDetails(FnbOptionGroupRequest request) {
         return new OptionGroupEntity.Details(request.getName().trim(), request.isRequired(),
                 request.getMinimumSelections(), request.getMaximumSelections(), request.getDisplayOrder());
+    }
+    private void requirePriceRole(MerchantAccessContext context) {
+        if (!Permission.CATALOG_PRICE.allows(context.getMembership().getRole()))
+            throw new InvalidOperationException("Kasir tidak dapat mengubah harga.");
     }
     private void requirePriceReason(String reason) {
         if (reason == null || reason.isBlank()) throw new InvalidOperationException("Alasan perubahan harga wajib diisi.");

@@ -90,6 +90,10 @@ public class PlanEntitlementService {
         }
     }
 
+    public int activeOutletCount(UUID tenantId) {
+        return activeOutletIds(tenantId).size();
+    }
+
     private List<UUID> activeOutletIds(UUID tenantId) {
         return entityManager.createQuery("select o.id from OutletEntity o where o.tenant.id = :tenantId and o.active = true "
                 + "order by o.createdAt, o.id", UUID.class).setParameter("tenantId", tenantId).getResultList();

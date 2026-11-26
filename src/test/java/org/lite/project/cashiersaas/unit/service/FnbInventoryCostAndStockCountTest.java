@@ -22,10 +22,12 @@ import org.lite.project.cashiersaas.entity.shared.inventory.StockCountEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.StockCountLineEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.service.DigestService;
 import org.lite.project.cashiersaas.service.FnbInventoryService;
@@ -68,6 +70,7 @@ class FnbInventoryCostAndStockCountTest {
     @Mock private FnbInventoryRepository inventory;
     @Mock private DigestService tokens;
     @Mock private FnbMenuMarginService margins;
+    @Mock private AuditLogRepository audit;
     @InjectMocks private FnbInventoryService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -186,8 +189,8 @@ class FnbInventoryCostAndStockCountTest {
     void wasteAndAdjustmentRecordTheAverageBeforeTheChangeAndNeverMoveIt() {
         InventoryItemEntity item = item(itemId, "Susu");
         InventoryBalanceEntity balance = balance(item, "10", "5");
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(cashierContext);
-        when(guard.requireOwner(owner, outletId)).thenReturn(ownerContext);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(cashierContext);
+        when(guard.require(owner, outletId, Permission.STOCK_ADJUST)).thenReturn(ownerContext);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.of(balance));
         when(tokens.digest(anyString())).thenAnswer(invocation -> "fp(" + invocation.getArgument(0) + ")");
@@ -209,8 +212,8 @@ class FnbInventoryCostAndStockCountTest {
 
     @Test
     void unitCostIsRejectedOnWasteAndAdjustmentBeforeAnyStockLookup() {
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(cashierContext);
-        when(guard.requireOwner(owner, outletId)).thenReturn(ownerContext);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(cashierContext);
+        when(guard.require(owner, outletId, Permission.STOCK_ADJUST)).thenReturn(ownerContext);
 
         InvalidOperationException waste = assertThrows(InvalidOperationException.class, () ->
                 service.recordMovement(cashier, outletId, itemId,
@@ -229,7 +232,7 @@ class FnbInventoryCostAndStockCountTest {
         InventoryItemEntity item = item(itemId, "Susu");
         InventoryMovementEntity existing = existingMovement(item, "10", "Kulakan", "k-price",
                 "fp(RESTOCK|" + itemId + "|10|Kulakan|7)", "7");
-        when(guard.requireOutlet(owner, outletId)).thenReturn(ownerContext);
+        when(guard.require(owner, outletId, Permission.STOCK_MOVE)).thenReturn(ownerContext);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movementByKey(tenantId, "k-price")).thenReturn(Optional.of(existing));
         when(tokens.digest(anyString())).thenAnswer(invocation -> "fp(" + invocation.getArgument(0) + ")");
@@ -252,7 +255,7 @@ class FnbInventoryCostAndStockCountTest {
         InventoryItemEntity item = item(itemId, "Susu");
         InventoryMovementEntity existing = existingMovement(item, "10", "Kulakan", "k-hide",
                 "fp(RESTOCK|" + itemId + "|10|Kulakan|7)", "7");
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(cashierContext);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(cashierContext);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movementByKey(tenantId, "k-hide")).thenReturn(Optional.of(existing));
         when(tokens.digest(anyString())).thenAnswer(invocation -> "fp(" + invocation.getArgument(0) + ")");
@@ -680,7 +683,7 @@ class FnbInventoryCostAndStockCountTest {
 
     private void stubMovementPath(TenantPrincipal principal, MerchantAccessContext context,
                                   InventoryItemEntity item, InventoryBalanceEntity balance) {
-        when(guard.requireOutlet(principal, outletId)).thenReturn(context);
+        when(guard.require(principal, outletId, Permission.STOCK_MOVE)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.ofNullable(balance));
         stubDigest();

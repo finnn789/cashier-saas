@@ -31,6 +31,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -88,10 +89,6 @@ class FnbLeakageAndMarginIntegrationTest extends AbstractPostgresIntegrationTest
 
     private static void assertDec(String expected, Object actual, String message) {
         assertEquals(0, new BigDecimal(expected).compareTo(dec(actual)), message + ": expected " + expected + " but was " + actual);
-    }
-
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, result.getResponse().getStatus(), result.getResponse().getContentAsString());
     }
 
     @SuppressWarnings("unchecked")

@@ -19,10 +19,12 @@ import org.lite.project.cashiersaas.entity.shared.inventory.InventoryItemEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryMovementEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
+import org.lite.project.cashiersaas.repository.AuditLogRepository;
 import org.lite.project.cashiersaas.repository.FnbInventoryRepository;
 import org.lite.project.cashiersaas.service.FnbInventoryService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
@@ -62,6 +64,7 @@ class FnbInventoryServiceTest {
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbInventoryRepository inventory;
     @Mock private DigestService tokens;
+    @Mock private AuditLogRepository audit;
     @InjectMocks private FnbInventoryService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -130,15 +133,15 @@ class FnbInventoryServiceTest {
     /** Stubs everything a brand-new (non-replayed) movement needs, with the guard chosen like the service does. */
     private void stubNewMovementPath(InventoryMovementEntity.Type type, TenantPrincipal principal,
                                      InventoryItemEntity item, InventoryBalanceEntity balance) {
-        if (type == InventoryMovementEntity.Type.ADJUSTMENT) {
-            when(guard.requireOwner(principal, outletId)).thenReturn(context);
-        } else {
-            when(guard.requireOutlet(principal, outletId)).thenReturn(context);
-        }
+        when(guard.require(principal, outletId, movementPermission(type))).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movementByKey(eq(tenantId), anyString())).thenReturn(Optional.empty());
         when(inventory.balance(tenantId, outletId, itemId)).thenReturn(Optional.ofNullable(balance));
         stubDigest();
+    }
+
+    private static Permission movementPermission(InventoryMovementEntity.Type type) {
+        return type == InventoryMovementEntity.Type.ADJUSTMENT ? Permission.STOCK_ADJUST : Permission.STOCK_MOVE;
     }
 
     private InventoryMovementEntity persistedMovement() {
@@ -158,15 +161,15 @@ class FnbInventoryServiceTest {
     // ---------------------------------------------------------------- 1. createItem
 
     @Test
-    void createItemRequiresOwnerPersistsItemThenBalanceAndRecordsInitialRestock() {
-        when(guard.requireOwner(owner, outletId)).thenReturn(context);
+    void createItemRequiresItemCreatePermissionPersistsItemThenBalanceAndRecordsInitialRestock() {
+        when(guard.require(owner, outletId, Permission.INVENTORY_ITEM_CREATE)).thenReturn(context);
         stubItemCreationIds();
         stubDigest();
 
         FnbInventoryItemResponse response = service.createItem(owner, outletId,
                 itemRequest(" Biji Kopi ", "KOPI-01", " g ", "100", "1000.000"));
 
-        verify(guard).requireOwner(owner, outletId);
+        verify(guard).require(owner, outletId, Permission.INVENTORY_ITEM_CREATE);
         verify(guard, never()).requireOutlet(any(TenantPrincipal.class), any(UUID.class));
 
         ArgumentCaptor<InventoryItemEntity> itemCaptor = ArgumentCaptor.forClass(InventoryItemEntity.class);
@@ -211,7 +214,7 @@ class FnbInventoryServiceTest {
 
     @Test
     void createItemFlushesAfterPersistingTheItemAndBeforeTheBalance() {
-        when(guard.requireOwner(owner, outletId)).thenReturn(context);
+        when(guard.require(owner, outletId, Permission.INVENTORY_ITEM_CREATE)).thenReturn(context);
         stubItemCreationIds();
         stubDigest();
 
@@ -228,7 +231,7 @@ class FnbInventoryServiceTest {
     @CsvSource({"Susu,SUSU,ml,500,", "Gula,,g,50,0.000"})
     void createItemWithoutOrZeroInitialQuantityPersistsZeroBalanceAndNoMovement(String name, String sku, String unit,
                                                                               String reorderLevel, String initialQuantity) {
-        when(guard.requireOwner(owner, outletId)).thenReturn(context);
+        when(guard.require(owner, outletId, Permission.INVENTORY_ITEM_CREATE)).thenReturn(context);
         stubItemCreationIds();
 
         FnbInventoryItemResponse response = service.createItem(owner, outletId,
@@ -245,7 +248,7 @@ class FnbInventoryServiceTest {
 
     @Test
     void createItemStoresBlankSkuAsNullAndTrimsRealSku() {
-        when(guard.requireOwner(owner, outletId)).thenReturn(context);
+        when(guard.require(owner, outletId, Permission.INVENTORY_ITEM_CREATE)).thenReturn(context);
         stubItemCreationIds();
 
         service.createItem(owner, outletId, itemRequest("Teh", "   ", "g", "10", null));
@@ -512,7 +515,7 @@ class FnbInventoryServiceTest {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
         InventoryMovementEntity existing = existingMovement(item, InventoryMovementEntity.Type.WASTE, "-5",
                 "Basi", "k-replay", "fp(WASTE|" + itemId + "|-5|Basi)");
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movementByKey(tenantId, "k-replay")).thenReturn(Optional.of(existing));
         stubDigest();
@@ -535,7 +538,7 @@ class FnbInventoryServiceTest {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
         InventoryMovementEntity existing = existingMovement(item, InventoryMovementEntity.Type.WASTE, "-5",
                 "Basi", "k-conflict", "fp(WASTE|" + itemId + "|-5|Basi)");
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movementByKey(tenantId, "k-conflict")).thenReturn(Optional.of(existing));
         stubDigest();
@@ -554,7 +557,7 @@ class FnbInventoryServiceTest {
         InventoryItemEntity item = item(itemId, "Susu", "ml", "100");
         InventoryMovementEntity existing = existingMovement(item, InventoryMovementEntity.Type.WASTE, "-5",
                 "Basi", "k-ws", "fp(WASTE|" + itemId + "|-5|Basi)");
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.of(item));
         when(inventory.movementByKey(tenantId, "k-ws")).thenReturn(Optional.of(existing));
         stubDigest();
@@ -627,7 +630,7 @@ class FnbInventoryServiceTest {
 
     @Test
     void movementForUnknownItemIsNotFoundAndTouchesNoBalance() {
-        when(guard.requireOutlet(cashier, outletId)).thenReturn(context);
+        when(guard.require(cashier, outletId, Permission.STOCK_MOVE)).thenReturn(context);
         when(inventory.item(tenantId, outletId, itemId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> service.recordMovement(cashier, outletId, itemId,

@@ -23,6 +23,7 @@ import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionEntity;
 import org.lite.project.cashiersaas.entity.shared.catalog.ProductOptionGroupEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
+import org.lite.project.cashiersaas.enums.Permission;
 import org.lite.project.cashiersaas.enums.Role;
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
@@ -115,13 +116,13 @@ class FnbOptionGroupServiceTest {
     // ---------------------------------------------------------------- 1. createGroup
 
     @Test
-    void createGroupUsesOwnerGuardAndPersistsOutletLevelGroupWithTrimmedName() {
-        stubOwner();
+    void createGroupUsesCatalogEditGuardAndPersistsOutletLevelGroupWithTrimmedName() {
+        stubCatalogEdit();
 
         FnbOptionGroupResponse response = service.createGroup(owner, outletId,
                 groupRequest("  Topping  ", false, 0, 3, 2));
 
-        verify(guard).requireOwner(owner, outletId);
+        verify(guard).require(owner, outletId, Permission.CATALOG_EDIT);
         ArgumentCaptor<OptionGroupEntity> captor = ArgumentCaptor.forClass(OptionGroupEntity.class);
         verify(catalog).persist(captor.capture());
         OptionGroupEntity saved = captor.getValue();
@@ -139,7 +140,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void createGroupAcceptsRequiredGroupWithMinimumOne() {
-        stubOwner();
+        stubCatalogEdit();
 
         FnbOptionGroupResponse response = service.createGroup(owner, outletId, groupRequest("Size", true, 1, 1, 0));
 
@@ -151,7 +152,7 @@ class FnbOptionGroupServiceTest {
     @ParameterizedTest
     @CsvSource({"Topping,true,3,2", "Size,true,0,1", "Topping,false,1,2"})
     void createGroupRejectsInvalidSelectionLimits(String name, boolean required, int minimum, int maximum) {
-        stubOwner();
+        stubCatalogEdit();
 
         assertThrows(InvalidOperationException.class,
                 () -> service.createGroup(owner, outletId, groupRequest(name, required, minimum, maximum, 0)));
@@ -161,7 +162,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void updateGroupRejectsInvalidLimitsAndLeavesGroupUntouched() {
-        stubOwner();
+        stubCatalogEdit();
         lenient().when(catalog.group(tenantId, outletId, groupAId)).thenReturn(Optional.of(groupA));
 
         assertThrows(InvalidOperationException.class,
@@ -176,7 +177,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void updateGroupUnknownIdIsNotFound() {
-        stubOwner();
+        stubCatalogEdit();
         when(catalog.group(tenantId, outletId, groupAId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
@@ -185,7 +186,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void updateGroupAppliesDetailsWithTrimmedNameWithoutProductLookup() {
-        stubOwner();
+        stubCatalogEdit();
         stubGroup(groupA);
 
         FnbOptionGroupResponse response = service.updateGroup(owner, outletId, groupAId,
@@ -242,7 +243,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void replaceProductGroupsClearsFirstThenPersistsOneLinkPerIdWithDisplayOrderEqualToIndex() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubGroup(groupA);
         stubGroup(groupB);
@@ -268,7 +269,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void replaceProductGroupsReturnsGroupsInRequestOrder() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubGroup(groupA);
         stubGroup(groupB);
@@ -285,7 +286,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void replaceProductGroupsRejectsDuplicateIdsAndNothingIsDeletedOrPersisted() {
-        stubOwner();
+        stubCatalogEdit();
         lenient().when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.of(product));
         lenient().when(catalog.group(tenantId, outletId, groupAId)).thenReturn(Optional.of(groupA));
 
@@ -298,7 +299,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void replaceProductGroupsRejectsUnknownGroupIdAndNothingIsDeletedOrPersisted() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
         stubGroup(groupA);
         when(catalog.group(tenantId, outletId, groupBId)).thenReturn(Optional.empty());
@@ -311,7 +312,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void replaceProductGroupsWithEmptyListOnlyClearsTheProductLinks() {
-        stubOwner();
+        stubCatalogEdit();
         stubProduct();
 
         List<FnbOptionGroupResponse> response = service.replaceProductGroups(owner, outletId, productId,
@@ -325,7 +326,7 @@ class FnbOptionGroupServiceTest {
 
     @Test
     void replaceProductGroupsRejectsUnknownProductWithoutDeleting() {
-        stubOwner();
+        stubCatalogEdit();
         when(catalog.product(tenantId, outletId, productId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
@@ -340,26 +341,30 @@ class FnbOptionGroupServiceTest {
         void run(FnbOptionGroupServiceTest test);
     }
 
-    static Stream<Arguments> cashierDeniedCalls() {
+    /** Group edits are open to cashiers (CATALOG_EDIT); archiving stays owner-only (null permission). */
+    static Stream<Arguments> guardedCalls() {
         return Stream.of(
                 Arguments.of(Named.of("createGroup", (Call) t -> t.service.createGroup(
-                        t.cashier, t.outletId, t.groupRequest("Topping", false, 0, 2, 0)))),
+                        t.cashier, t.outletId, t.groupRequest("Topping", false, 0, 2, 0))), Permission.CATALOG_EDIT),
                 Arguments.of(Named.of("updateGroup", (Call) t -> t.service.updateGroup(
-                        t.cashier, t.outletId, t.groupAId, t.groupRequest("Topping", false, 0, 2, 0)))),
+                        t.cashier, t.outletId, t.groupAId, t.groupRequest("Topping", false, 0, 2, 0))), Permission.CATALOG_EDIT),
                 Arguments.of(Named.of("archiveGroup", (Call) t -> t.service.archiveGroup(
-                        t.cashier, t.outletId, t.groupAId))),
+                        t.cashier, t.outletId, t.groupAId)), null),
                 Arguments.of(Named.of("replaceProductGroups", (Call) t -> t.service.replaceProductGroups(
-                        t.cashier, t.outletId, t.productId, t.groupsRequest(t.groupAId)))));
+                        t.cashier, t.outletId, t.productId, t.groupsRequest(t.groupAId))), Permission.CATALOG_EDIT));
     }
 
     @ParameterizedTest
-    @MethodSource("cashierDeniedCalls")
-    void cashierCannotUseOwnerOnlyGroupUseCases(Call call) {
-        when(guard.requireOwner(cashier, outletId)).thenThrow(new ResourceNotFoundException());
+    @MethodSource("guardedCalls")
+    void groupUseCasesAskTheirGuardForTheCashierAndTouchNothingWhenDenied(Call call, Permission permission) {
+        if (permission == null) {
+            when(guard.requireOwner(cashier, outletId)).thenThrow(new ResourceNotFoundException());
+        } else {
+            when(guard.require(cashier, outletId, permission)).thenThrow(new ResourceNotFoundException());
+        }
 
         assertThrows(ResourceNotFoundException.class, () -> call.run(this));
 
-        verify(guard).requireOwner(cashier, outletId);
         verifyNoInteractions(catalog, inventory, audit, references);
         assertEquals("Topping", groupA.getName());
         assertFalse(groupA.isArchived());
@@ -467,6 +472,10 @@ class FnbOptionGroupServiceTest {
 
     private void stubOwner() {
         when(guard.requireOwner(owner, outletId)).thenReturn(context);
+    }
+
+    private void stubCatalogEdit() {
+        when(guard.require(owner, outletId, Permission.CATALOG_EDIT)).thenReturn(context);
     }
 
     private void stubProduct() {

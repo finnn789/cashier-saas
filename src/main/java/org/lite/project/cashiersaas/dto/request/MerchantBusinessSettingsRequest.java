@@ -28,4 +28,5 @@ public class MerchantBusinessSettingsRequest {
     @NotBlank @Size(max = 64) private String timeZone;
     @Size(max = 200) private String receiptFooter;
     @DecimalMin("0.00") @DecimalMax("99.99") @Digits(integer = 2, fraction = 2) private BigDecimal targetMarginPct;
+    @DecimalMin("0.00") @DecimalMax("100.00") @Digits(integer = 3, fraction = 2) private BigDecimal cashierMaxDiscountPct;
 }

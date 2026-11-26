@@ -22,15 +22,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertMoney;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.assertStatus;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.money;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.orders;
+import static org.lite.project.cashiersaas.integration.support.ApiTestSupport.runInParallel;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -72,10 +72,6 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         return "/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/shifts";
     }
 
-    private static String orders(MerchantFixture merchant) {
-        return "/api/v1/cashier/outlets/" + merchant.outletId() + "/fnb/orders";
-    }
-
     private static String refundUrl(MerchantFixture merchant, String orderId) {
         return "/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/orders/" + orderId + "/refund";
     }
@@ -93,33 +89,12 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         return "refund-" + UUID.randomUUID();
     }
 
-    private static BigDecimal money(MvcResult result, String path) throws Exception {
-        return new BigDecimal(ApiTestSupport.read(result, path));
-    }
-
     private static int status(MvcResult result) {
         return result.getResponse().getStatus();
     }
 
-    private static void assertStatus(int expected, MvcResult result) throws Exception {
-        assertEquals(expected, status(result), result.getResponse().getContentAsString());
-    }
-
     private static void assertSuccess(MvcResult result) throws Exception {
         assertTrue(status(result) == 200 || status(result) == 201, result.getResponse().getContentAsString());
-    }
-
-    private static void assertMoney(String expected, BigDecimal actual, String message) {
-        assertEquals(0, new BigDecimal(expected).compareTo(actual), message + ": expected " + expected + " but was " + actual);
-    }
-
-    private static void assertMoney(BigDecimal expected, BigDecimal actual, String message) {
-        assertEquals(0, expected.compareTo(actual), message + ": expected " + expected + " but was " + actual);
-    }
-
-    private int count(String sql, Object... args) {
-        Integer value = api.jdbc().queryForObject(sql, Integer.class, args);
-        return value == null ? -1 : value;
     }
 
     private String createProductWithRecipe(MerchantFixture owner, String ingredientQuantity, String perUnit, String[] itemOut)
@@ -199,13 +174,8 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private int auditRows(MerchantFixture merchant, String action, String entityId) {
-        return count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = ? AND entity_id = ?::uuid",
+        return api.count("SELECT count(*) FROM audit_logs WHERE tenant_id = ? AND action = ? AND entity_id = ?::uuid",
                 merchant.tenantId(), action, entityId);
-    }
-
-    private BigDecimal balance(String itemId) {
-        return api.jdbc().queryForObject(
-                "SELECT quantity_on_hand FROM inventory_balances WHERE inventory_item_id = ?::uuid", BigDecimal.class, itemId);
     }
 
     private MvcResult salesReport(MerchantFixture merchant) throws Exception {
@@ -213,32 +183,6 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         return api.send(get("/api/v1/merchant/outlets/" + merchant.outletId() + "/fnb/reports/sales")
                 .param("startDate", today.minusDays(1).toString()).param("endDate", today.plusDays(1).toString())
                 .header(AUTH, merchant.bearer()), 200);
-    }
-
-    private List<MvcResult> runInParallel(List<Callable<MvcResult>> tasks) throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
-        CountDownLatch ready = new CountDownLatch(tasks.size());
-        CountDownLatch go = new CountDownLatch(1);
-        List<Future<MvcResult>> futures = new ArrayList<>();
-        try {
-            for (Callable<MvcResult> task : tasks) {
-                futures.add(pool.submit(() -> {
-                    ready.countDown();
-                    go.await();
-                    return task.call();
-                }));
-            }
-            assertTrue(ready.await(30, TimeUnit.SECONDS), "all threads must reach the start gate");
-            go.countDown();
-            List<MvcResult> results = new ArrayList<>();
-            for (Future<MvcResult> future : futures) {
-                results.add(future.get(60, TimeUnit.SECONDS));
-            }
-            return results;
-        } finally {
-            go.countDown();
-            pool.shutdownNow();
-        }
     }
 
     // ------------------------------------------------------------------ schema
@@ -257,7 +201,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertMoney("100000", money(opened, "$.data.openingCash"), "opening cash");
         assertStatus(409, api.call(post(cashierShifts(owner)).header(AUTH, owner.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"openingCash\":5}")));
-        assertEquals(1, count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ? AND status = 'OPEN'", owner.tenantId()));
+        assertEquals(1, api.count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ? AND status = 'OPEN'", owner.tenantId()));
 
         String cashOrder = createOrder(owner, productId, 2);
         String nonCashOrder = createOrder(owner, productId, 1);
@@ -320,14 +264,14 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult noShift = payCall(owner, orderId, "CASH", total, "pay-" + UUID.randomUUID());
         assertStatus(409, noShift);
         assertTrue(noShift.getResponse().getContentAsString().contains(SHIFT_REQUIRED));
-        assertEquals(0, count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
         assertEquals("UNPAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
 
         // Shifts are per member: the owner's open shift does not let the cashier take payments.
         api.openShift(owner, "0.00");
         assertStatus(409, payCall(cashier, orderId, "CASH", total, "pay-" + UUID.randomUUID()));
         assertStatus(409, payCall(cashier, orderId, "MANUAL_NON_CASH", total, "pay-" + UUID.randomUUID()));
-        assertEquals(0, count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
 
         String cashierShift = ApiTestSupport.read(api.openShift(cashier, "0.00"), "$.data.id");
         String key = "pay-" + UUID.randomUUID();
@@ -342,7 +286,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertSuccess(replay);
         assertEquals(ApiTestSupport.read(paid, "$.data.receiptNumber"), ApiTestSupport.read(replay, "$.data.receiptNumber"),
                 "replay returns the stored payment although the shift is closed");
-        assertEquals(1, count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(1, api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
 
         String another = createOrder(owner, productId, 1);
         assertStatus(409, payCall(cashier, another, "CASH", total(owner, another), "pay-" + UUID.randomUUID()));
@@ -359,7 +303,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(409, noShift);
         assertTrue(noShift.getResponse().getContentAsString().contains(SHIFT_REQUIRED));
         assertEquals("UNPAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        assertEquals(0, count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM payments WHERE sales_order_id = ?::uuid", orderId));
 
         String shiftId = ApiTestSupport.read(api.openShift(owner, "0.00"), "$.data.id");
         assertSuccess(payCall(owner, orderId, "MANUAL_NON_CASH", total, "nc-" + UUID.randomUUID()));
@@ -400,7 +344,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(closeJson("0", null))));
         assertStatus(404, api.call(post(merchantShifts(other) + "/" + shiftId + "/close").header(AUTH, other.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content(closeJson("0", null))));
-        assertEquals(1, count("SELECT count(*) FROM cash_shifts WHERE id = ?::uuid AND status = 'OPEN'", shiftId));
+        assertEquals(1, api.count("SELECT count(*) FROM cash_shifts WHERE id = ?::uuid AND status = 'OPEN'", shiftId));
 
         BigDecimal counted = new BigDecimal("50000").add(total).add(new BigDecimal("2500"));
         MvcResult forced = api.send(post(merchantShifts(owner) + "/" + shiftId + "/close").header(AUTH, owner.bearer())
@@ -416,7 +360,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(409, api.call(post(merchantShifts(owner) + "/" + shiftId + "/close").header(AUTH, owner.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content(closeJson("1", null))));
         assertStatus(404, currentShift(cashier));
-        assertEquals(0, count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ? AND status = 'OPEN'", owner.tenantId()));
+        assertEquals(0, api.count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ? AND status = 'OPEN'", owner.tenantId()));
     }
 
     @Test
@@ -436,7 +380,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"openingCash\":-1}")));
         assertStatus(400, api.call(post(cashierShifts(owner)).header(AUTH, owner.bearer())
                 .contentType(MediaType.APPLICATION_JSON).content("{}")));
-        assertEquals(1, count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(1, api.count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ?", owner.tenantId()));
         assertEquals("OPEN", ApiTestSupport.read(currentShift(cashier), "$.data.status"));
     }
 
@@ -462,7 +406,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         }
         assertEquals(1, created, "exactly one open succeeds");
         assertEquals(3, conflicts, "all others are conflicts, never a server error");
-        assertEquals(1, count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ? AND status = 'OPEN'", owner.tenantId()));
+        assertEquals(1, api.count("SELECT count(*) FROM cash_shifts WHERE tenant_id = ? AND status = 'OPEN'", owner.tenantId()));
     }
 
     // ------------------------------------------------------------------ refunds
@@ -476,7 +420,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         String orderId = createOrder(owner, productId, 3);
         BigDecimal total = total(owner, orderId);
         payCash(owner, orderId, "1000");
-        assertMoney("970", balance(item[0]), "stock after the sale");
+        assertMoney("970", api.balance(item[0]), "stock after the sale");
         assertEquals("1", ApiTestSupport.read(salesReport(owner), "$.data.summary.transactionCount"));
         assertMoney(new BigDecimal("20000").add(total), money(currentShift(owner), "$.data.expectedCash"), "before refund");
 
@@ -497,18 +441,18 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertEquals("0", ApiTestSupport.read(salesReport(owner), "$.data.summary.transactionCount"),
                 "refunded orders drop out of the sales report");
 
-        assertMoney("1000", balance(item[0]), "stock is back to the pre-sale balance");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
+        assertMoney("1000", api.balance(item[0]), "stock is back to the pre-sale balance");
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
                 + "AND movement_type = 'SALE_REVERSAL'", orderId));
         assertMoney("30", api.jdbc().queryForObject("SELECT quantity_delta FROM inventory_movements WHERE order_id = ?::uuid "
                 + "AND movement_type = 'SALE_REVERSAL'", BigDecimal.class, orderId), "reversal delta");
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements r JOIN inventory_movements s "
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements r JOIN inventory_movements s "
                 + "ON s.id = r.reversal_of_movement_id WHERE r.order_id = ?::uuid AND r.movement_type = 'SALE_REVERSAL' "
                 + "AND s.movement_type = 'SALE'", orderId), "reversal points at the sale movement");
         assertEquals("sale-reversal:" + orderId + ":" + item[0], api.jdbc().queryForObject(
                 "SELECT idempotency_key FROM inventory_movements WHERE order_id = ?::uuid AND movement_type = 'SALE_REVERSAL'",
                 String.class, orderId));
-        assertMoney(balance(item[0]), api.jdbc().queryForObject("SELECT sum(quantity_delta) FROM inventory_movements "
+        assertMoney(api.balance(item[0]), api.jdbc().queryForObject("SELECT sum(quantity_delta) FROM inventory_movements "
                 + "WHERE inventory_item_id = ?::uuid", BigDecimal.class, item[0]), "ledger matches balance");
 
         assertEquals(1, auditRows(owner, "FNB_ORDER_REFUNDED", orderId));
@@ -532,11 +476,11 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(409, api.call(refundRequest(owner, owner, orderId, key, "{\"reason\":\"Alasan lain\"}")));
         // A second refund under a new key is a conflict, not a duplicate effect.
         assertStatus(409, refundCall(owner, orderId, refundKey(), "Pelanggan komplain"));
-        assertEquals(1, count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid", orderId));
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
                 + "AND movement_type = 'SALE_REVERSAL'", orderId));
         assertEquals(1, auditRows(owner, "FNB_ORDER_REFUNDED", orderId));
-        assertMoney("1000", balance(item[0]), "stock restored once");
+        assertMoney("1000", api.balance(item[0]), "stock restored once");
     }
 
     @Test
@@ -570,7 +514,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(409, noShift);
         assertTrue(noShift.getResponse().getContentAsString().contains(SHIFT_REQUIRED));
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, cashOrder), "$.data.paymentStatus"));
-        assertEquals(0, count("SELECT count(*) FROM payment_refunds WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(0, api.count("SELECT count(*) FROM payment_refunds WHERE tenant_id = ?", owner.tenantId()));
         assertEquals(0, auditRows(owner, "FNB_ORDER_REFUNDED", cashOrder));
 
         // A non-cash refund needs no shift and is recorded without one.
@@ -578,7 +522,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
                 "{\"reason\":\"salah metode\"}"), 200);
         assertEquals("MANUAL_NON_CASH", ApiTestSupport.read(nonCashRefund, "$.data.method"));
         assertEquals("REFUNDED", ApiTestSupport.read(getOrder(owner, nonCashOrder), "$.data.paymentStatus"));
-        assertEquals(1, count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid "
                 + "AND cash_shift_id IS NULL", nonCashOrder));
 
         // With an open owner shift the cash refund works and lands on the owner's shift, not the cashier's.
@@ -593,7 +537,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         MvcResult cashierCurrent = currentShift(cashier);
         assertMoney("0", money(cashierCurrent, "$.data.cashRefunds"), "cashier shift is untouched by the refund");
         assertMoney(cashTotal, money(cashierCurrent, "$.data.cashIn"), "cashier cash in");
-        assertEquals(2, count("SELECT count(*) FROM payment_refunds WHERE tenant_id = ?", owner.tenantId()));
+        assertEquals(2, api.count("SELECT count(*) FROM payment_refunds WHERE tenant_id = ?", owner.tenantId()));
     }
 
     @Test
@@ -609,7 +553,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertStatus(404, api.call(refundRequest(other, owner, orderId, refundKey(), "{\"reason\":\"outlet orang lain\"}")));
 
         assertEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
-        assertEquals(0, count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(0, api.count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid", orderId));
         assertEquals(0, auditRows(owner, "FNB_ORDER_REFUNDED", orderId));
     }
 
@@ -621,7 +565,7 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         api.openShift(owner, "0.00");
         String orderId = createOrder(owner, productId, 2);
         payCash(owner, orderId, "0");
-        assertMoney("460", balance(item[0]), "stock after the sale");
+        assertMoney("460", api.balance(item[0]), "stock after the sale");
 
         List<Callable<MvcResult>> tasks = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
@@ -641,11 +585,11 @@ class FnbShiftRefundIntegrationTest extends AbstractPostgresIntegrationTest {
         }
         assertEquals(1, ok, "exactly one refund succeeds");
         assertEquals(3, conflicts, "all others conflict, never a server error");
-        assertEquals(1, count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid", orderId));
-        assertEquals(1, count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
+        assertEquals(1, api.count("SELECT count(*) FROM payment_refunds WHERE sales_order_id = ?::uuid", orderId));
+        assertEquals(1, api.count("SELECT count(*) FROM inventory_movements WHERE order_id = ?::uuid "
                 + "AND movement_type = 'SALE_REVERSAL'", orderId));
         assertEquals(1, auditRows(owner, "FNB_ORDER_REFUNDED", orderId));
-        assertMoney("500", balance(item[0]), "stock restored exactly once");
+        assertMoney("500", api.balance(item[0]), "stock restored exactly once");
         assertNotEquals("PAID", ApiTestSupport.read(getOrder(owner, orderId), "$.data.paymentStatus"));
     }
 }
