@@ -62,7 +62,7 @@ public class SecurityConfiguration {
                                 .requestMatchers("/api/v1/auth/select-merchant", "/api/v1/auth/outlets", "/api/v1/auth/platform").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/api/v1/onboarding/**").hasAuthority("SCOPE_ACCOUNT")
                                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                                .requestMatchers(HttpMethod.GET, "/api/v1/public/plans").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/api/v1/public/plans", "/media/**").permitAll()
                                 .requestMatchers("/api/v1/platform/**").hasRole(Role.SUPERADMIN.name())
                                 .requestMatchers("/api/v1/merchant/**").hasRole(Role.OWNERMERCHANT.name())
                                 .requestMatchers("/api/v1/cashier/**").hasAnyRole(Role.OWNERMERCHANT.name(),

@@ -29,6 +29,9 @@ import org.lite.project.cashiersaas.service.MerchantBusinessSettingsService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
+import org.junit.jupiter.api.BeforeEach;
+import org.lite.project.cashiersaas.configuration.MediaProperties;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -55,7 +58,13 @@ class MerchantBusinessSettingsServiceTest {
     @Mock private FnbOrderRepository orders;
     @Mock private MerchantBusinessSettingsRepository settings;
     @Mock private AuditLogRepository auditLogs;
+    @Spy private MediaProperties media = new MediaProperties();
     @InjectMocks private MerchantBusinessSettingsService service;
+
+    @BeforeEach
+    void mediaBaseUrl() {
+        media.setPublicBaseUrl("http://localhost:8080");
+    }
 
     private final UUID tenantId = UUID.randomUUID();
     private final UUID outletId = UUID.randomUUID();
@@ -313,6 +322,19 @@ class MerchantBusinessSettingsServiceTest {
         assertTrue(parsed.path("after").path("logoUrl").isNull());
         assertEquals(beforeName, parsed.path("before").path("businessName").asText());
         assertEquals(afterName, parsed.path("after").path("businessName").asText());
+    }
+
+    @Test
+    void acceptsOwnMediaLogoUrl() {
+        Fixture fixture = fixture();
+        when(guard.requireOwner(owner, outletId)).thenReturn(fixture.context());
+        String url = "http://localhost:8080/media/" + tenantId + "/" + UUID.randomUUID() + ".png";
+        MerchantBusinessSettingsRequest request = validRequest();
+        request.setLogoUrl(url);
+
+        service.update(owner, outletId, request);
+
+        assertEquals(url, fixture.tenant().getLogoUrl());
     }
 
     @Test

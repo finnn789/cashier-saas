@@ -1,6 +1,7 @@
 HELP.md
 target/
 backups/
+data/
 .env
 .agents/
 .codex/

@@ -126,6 +126,15 @@ public class FnbCatalogRepository {
                 || !entityManager.createQuery("select g.id from OptionGroupEntity g where g.tenant.id = :tenant and g.outlet.id = :outlet", UUID.class)
                 .setParameter("tenant", tenant).setParameter("outlet", outlet).setMaxResults(1).getResultList().isEmpty();
     }
+    /** Product images (archived included) and the logo of the tenant; the orphan sweep keeps every file listed here. */
+    public List<String> mediaUrls(UUID tenant) {
+        List<String> urls = entityManager.createQuery("select p.imageUrl from ProductEntity p where p.tenant.id = :tenant "
+                + "and p.imageUrl is not null", String.class).setParameter("tenant", tenant).getResultList();
+        List<String> all = new java.util.ArrayList<>(urls);
+        all.addAll(entityManager.createQuery("select t.logoUrl from TenantEntity t where t.id = :tenant and t.logoUrl is not null",
+                String.class).setParameter("tenant", tenant).getResultList());
+        return all;
+    }
     public void persist(CategoryEntity category) { entityManager.persist(category); }
     public void lock(CategoryEntity category) { entityManager.refresh(category, jakarta.persistence.LockModeType.PESSIMISTIC_READ); }
     public void lock(ProductEntity product) { entityManager.refresh(product, jakarta.persistence.LockModeType.PESSIMISTIC_READ); }

@@ -3,6 +3,7 @@ package org.lite.project.cashiersaas.service;
 import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.component.TenantPrincipal;
+import org.lite.project.cashiersaas.configuration.MediaProperties;
 import org.lite.project.cashiersaas.dto.MerchantBusinessSettingsMapper;
 import org.lite.project.cashiersaas.dto.request.MerchantBusinessSettingsRequest;
 import org.lite.project.cashiersaas.dto.response.MerchantBusinessSettingsResponse;
@@ -31,6 +32,7 @@ public class MerchantBusinessSettingsService {
     private final FnbOrderRepository orders;
     private final MerchantBusinessSettingsRepository settings;
     private final AuditLogRepository auditLogs;
+    private final MediaProperties media;
 
     @Transactional(readOnly = true)
     public MerchantBusinessSettingsResponse get(TenantPrincipal principal, UUID outletId) {
@@ -120,7 +122,7 @@ public class MerchantBusinessSettingsService {
     }
 
     private void validateLogoUrl(String logoUrl) {
-        if (logoUrl == null) return;
+        if (logoUrl == null || logoUrl.startsWith(media.getPublicBaseUrl() + "/media/")) return;
         try {
             URI uri = URI.create(logoUrl);
             int port = uri.getPort();
