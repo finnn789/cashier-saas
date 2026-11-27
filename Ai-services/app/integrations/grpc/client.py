@@ -267,7 +267,9 @@ class CashierGrpcClient:
             )
             return None
 
-    async def _call_insight(self, rpc_name: str, request: Any) -> dict[str, Any] | None:
+    async def _call_insight(
+        self, rpc_name: str, request: Any, on_permission_denied: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         """Run one read-only owner insight RPC; plain dict on success, None on any error."""
         if not self._has_service_key(rpc_name):
             return None
@@ -284,6 +286,8 @@ class CashierGrpcClient:
             return _message_to_dict(response)
         except grpc.aio.AioRpcError as err:
             self._log_rpc_error(rpc_name, err)  # PERMISSION_DENIED (non-owner) lands here too
+            if err.code() == grpc.StatusCode.PERMISSION_DENIED:
+                return on_permission_denied
             return None
         except Exception as err:
             logger.warning(
@@ -349,15 +353,28 @@ class CashierGrpcClient:
             ),
         )
 
+    async def get_product_performance(
+        self, *, tenant_id: str, user_id: str, start_date: str, end_date: str
+    ) -> dict[str, Any] | None:
+        """Owner-only per-product sales/COGS per outlet for an inclusive ISO date range."""
+        return await self._call_insight(
+            "GetProductPerformance",
+            cashier_service_pb2.GetProductPerformanceRequest(
+                tenant_id=tenant_id, user_id=user_id, start_date=start_date, end_date=end_date
+            ),
+        )
+
     async def consume_ai_question(self, *, tenant_id: str, user_id: str) -> dict[str, Any] | None:
         """Owner-only quota check + count of one AI question.
 
-        Dict {allowed, reason, used, limit, warn} on success; None on any gRPC or
-        configuration error, so the caller can fail closed.
+        Dict {allowed, reason, used, limit, warn} on success; PERMISSION_DENIED maps to
+        {allowed: False, reason: OWNER_ONLY}; None on any other gRPC or configuration
+        error, so the caller can fail closed.
         """
         return await self._call_insight(
             "ConsumeAiQuestion",
             cashier_service_pb2.ConsumeAiQuestionRequest(tenant_id=tenant_id, user_id=user_id),
+            on_permission_denied={"allowed": False, "reason": "OWNER_ONLY"},
         )
 
     async def record_ai_usage(

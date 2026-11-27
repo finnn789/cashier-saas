@@ -13,6 +13,8 @@ import com.cashier.grpc.v1.GetMenuMarginsRequest;
 import com.cashier.grpc.v1.GetMenuMarginsResponse;
 import com.cashier.grpc.v1.GetOrderStatusRequest;
 import com.cashier.grpc.v1.GetOrderStatusResponse;
+import com.cashier.grpc.v1.GetProductPerformanceRequest;
+import com.cashier.grpc.v1.GetProductPerformanceResponse;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
@@ -67,6 +69,11 @@ public class CashierGrpcService extends CashierServiceGrpc.CashierServiceImplBas
     @Override
     public void getMenuMargins(GetMenuMarginsRequest request, StreamObserver<GetMenuMarginsResponse> responseObserver) {
         insightHandler.getMenuMargins(request, responseObserver);
+    }
+
+    @Override
+    public void getProductPerformance(GetProductPerformanceRequest request, StreamObserver<GetProductPerformanceResponse> responseObserver) {
+        insightHandler.getProductPerformance(request, responseObserver);
     }
 
     @Override

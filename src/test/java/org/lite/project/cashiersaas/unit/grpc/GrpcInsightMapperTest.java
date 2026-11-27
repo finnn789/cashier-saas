@@ -6,6 +6,7 @@ import com.cashier.grpc.v1.MenuMargin;
 import com.cashier.grpc.v1.OutletAnomalies;
 import com.cashier.grpc.v1.OutletLeakage;
 import com.cashier.grpc.v1.OutletMenuMargins;
+import com.cashier.grpc.v1.OutletProductPerformance;
 import com.cashier.grpc.v1.OutletRestock;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import org.junit.jupiter.api.Tag;
@@ -43,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GrpcInsightMapperTest {
     private final GrpcInsightMapper mapper = new GrpcInsightMapper();
     private final UUID outletId = UUID.randomUUID();
+    private final UUID productId = UUID.randomUUID();
     private final TenantEntity tenant = new TenantEntity();
     private final OutletEntity outlet = outlet("Kedai Mbo");
     private final MerchantAccessContext context = new MerchantAccessContext(tenant, outlet,
@@ -96,6 +98,7 @@ class GrpcInsightMapperTest {
         cash.setNetSales(new BigDecimal("300000.00"));
         report.setPaymentBreakdown(List.of(cash));
         FnbSalesProductResponse product = new FnbSalesProductResponse();
+        product.setProductId(productId);
         product.setProductName("Kopi Susu");
         product.setQuantity(30);
         product.setGrossSales(new BigDecimal("450000.00"));
@@ -134,6 +137,7 @@ class GrpcInsightMapperTest {
         assertEquals(7, result.getLabels(0).getCount());
         assertEquals("300000.00", result.getLabels(0).getNetSales());
         assertEquals(1, result.getTopProductsCount());
+        assertEquals(productId.toString(), result.getTopProducts(0).getProductId());
         assertEquals("Kopi Susu", result.getTopProducts(0).getName());
         assertEquals(30, result.getTopProducts(0).getQuantity());
         assertEquals("450000.00", result.getTopProducts(0).getGrossSales());
@@ -158,6 +162,34 @@ class GrpcInsightMapperTest {
         assertEquals("0", result.getCashDifferenceTotal());
         assertEquals(0, result.getLabelsCount());
         assertEquals(0, result.getTopProductsCount());
+    }
+
+    @Test
+    void productPerformanceMapsTheOutletPeriodAndEveryProductIncludingItsId() {
+        FnbSalesProductResponse product = new FnbSalesProductResponse();
+        product.setProductId(productId);
+        product.setProductName("Kopi Susu");
+        product.setQuantity(30);
+        product.setGrossSales(new BigDecimal("450000.00"));
+        product.setCostOfGoodsSold(new BigDecimal("120000.00"));
+        product.setGrossProfit(new BigDecimal("330000.00"));
+        product.setItemsWithoutCost(1);
+
+        OutletProductPerformance result = mapper.toProductPerformance(context, LocalDate.of(2026, 11, 1),
+                LocalDate.of(2026, 11, 7), List.of(product));
+
+        assertEquals(outletId.toString(), result.getOutletId());
+        assertEquals("Kedai Mbo", result.getOutletName());
+        assertEquals("2026-11-01", result.getStartDate());
+        assertEquals("2026-11-07", result.getEndDate());
+        assertEquals(1, result.getProductsCount());
+        assertEquals(productId.toString(), result.getProducts(0).getProductId());
+        assertEquals("Kopi Susu", result.getProducts(0).getName());
+        assertEquals(30, result.getProducts(0).getQuantity());
+        assertEquals("450000.00", result.getProducts(0).getGrossSales());
+        assertEquals("120000.00", result.getProducts(0).getCostOfGoodsSold());
+        assertEquals("330000.00", result.getProducts(0).getGrossProfit());
+        assertEquals(1, result.getProducts(0).getItemsWithoutCost());
     }
 
     @Test

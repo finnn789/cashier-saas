@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.analysis.money import format_number, format_rupiah
 from app.integrations.grpc.client import CashierGrpcClient
 from app.integrations.grpc.config import load_grpc_settings
 from app.tools.base import BaseTool
@@ -159,8 +160,8 @@ class CashierAnomaliesTool(_InsightTool):
 MAX_LEAKAGE_DAYS = 92  # same cap as the backend GetLeakageReport
 
 
-def _fmt(value: str, prefix: str = "", suffix: str = "") -> str:
-    return f"{prefix}{value}{suffix}" if value else "-"
+def _fmt(value: str, fmt: Any = str, suffix: str = "") -> str:
+    return f"{fmt(value)}{suffix}" if value else "-"
 
 
 class LeakageReportTool(_InsightTool):
@@ -219,13 +220,13 @@ class LeakageReportTool(_InsightTool):
             rows = [
                 f"- {line['name']}: pakai teoritis {_fmt(line['theoretical_usage'], suffix=' ' + line['unit'])}, "
                 f"selisih {_fmt(line['shortage'], suffix=' ' + line['unit'])}, "
-                f"persen {_fmt(line['variance_pct'], suffix='%')}, rugi {_fmt(line['loss_amount'], 'Rp ')}, "
+                f"persen {_fmt(line['variance_pct'], format_number, '%')}, rugi {_fmt(line['loss_amount'], format_rupiah)}, "
                 f"waste {_fmt(line['waste'], suffix=' ' + line['unit'])}"
                 for line in outlet["lines"]
             ] or ["- Tidak ada bahan yang menyimpang."]
             blocks.append(
                 f"Outlet {outlet['outlet_name']}: {outlet['stock_count_count']} opname, "
-                f"total rugi {_fmt(outlet['total_loss'], 'Rp ')}, {outlet['flagged_count']} bahan menyimpang\n"
+                f"total rugi {_fmt(outlet['total_loss'], format_rupiah)}, {outlet['flagged_count']} bahan menyimpang\n"
                 + "\n".join(rows)
             )
         return "\n\n".join(blocks)
@@ -283,13 +284,13 @@ class MenuMarginsTool(_InsightTool):
         blocks = []
         for outlet in result["outlets"]:
             rows = [
-                f"- {menu['name']}: harga {_fmt(menu['price'], 'Rp ')}, HPP {_fmt(menu['hpp'], 'Rp ')}, "
-                f"margin {_fmt(menu['margin_pct'], suffix='%')}, status {menu['status']}, "
-                f"saran harga {_fmt(menu['suggested_price'], 'Rp ')}"
+                f"- {menu['name']}: harga {_fmt(menu['price'], format_rupiah)}, HPP {_fmt(menu['hpp'], format_rupiah)}, "
+                f"margin {_fmt(menu['margin_pct'], format_number, '%')}, status {menu['status']}, "
+                f"saran harga {_fmt(menu['suggested_price'], format_rupiah)}"
                 for menu in outlet["menus"]
             ] or ["- Tidak ada menu yang sesuai."]
             blocks.append(
-                f"Outlet {outlet['outlet_name']} (target margin {_fmt(outlet['target_margin_pct'], suffix='%')})\n"
+                f"Outlet {outlet['outlet_name']} (target margin {_fmt(outlet['target_margin_pct'], format_number, '%')})\n"
                 + "\n".join(rows)
             )
         return "\n\n".join(blocks)

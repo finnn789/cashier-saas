@@ -12,6 +12,7 @@ import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.billing.PlatformInvoiceEntity;
 import org.lite.project.cashiersaas.entity.shared.billing.PlatformPaymentAttemptEntity;
 import org.lite.project.cashiersaas.entity.shared.billing.SubscriptionEntity;
+import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.TenantEntity;
 import org.lite.project.cashiersaas.enums.BillingCycle;
 import org.lite.project.cashiersaas.enums.InvoiceKind;
@@ -52,7 +53,7 @@ public class PlatformBillingService {
     private final DigestService digests;
     private final MembershipPlanCatalogService catalog;
     private final PlatformBillingSettlementService settlement;
-    private final MockPaymentGateway gateway;
+    private final PaymentGateway gateway;
 
     @Transactional(readOnly = true)
     public SubscriptionQuoteResponse quote(TenantPrincipal principal, SubscriptionCheckoutRequest request) {
@@ -91,11 +92,11 @@ public class PlatformBillingService {
                 quote.getPlanCode().name(), quote.getBillingCycle(), quote.getPeriodMonths(), quote.getExtraOutlets(),
                 quote.getAiQuestions(), quote.getTotalAmount(), now);
         billing.persist(invoice);
-        PlatformPaymentAttemptEntity attempt = gateway.newAttempt(invoice, idempotencyKey, fingerprint);
+        PlatformPaymentAttemptEntity attempt = newAttempt(principal, invoice, idempotencyKey, fingerprint);
         audit.persist(AuditLogEntity.recordAction(tenant, null, billing.actor(principal.getUserId()),
                 AuditLogEntity.Action.PLATFORM_INVOICE_ISSUED, invoice.getId(), null,
                 "invoice=" + invoice.getInvoiceNumber() + " kind=" + invoice.getKind() + " amount=" + invoice.getAmountDue().toPlainString()));
-        return PlatformInvoiceMapper.toResponse(invoice, attempt, gateway.isEnabled());
+        return PlatformInvoiceMapper.toResponse(invoice, attempt, gateway.isMockEnabled());
     }
 
     /** Lazy expiry writes, so this is not read-only. */
@@ -106,7 +107,7 @@ public class PlatformBillingService {
         List<PlatformInvoiceEntity> invoices = billing.recent(tenantId, HISTORY_LIMIT);
         Map<UUID, PlatformPaymentAttemptEntity> attempts = billing.latestAttempts(invoices.stream().map(PlatformInvoiceEntity::getId).toList());
         return invoices.stream()
-                .map(invoice -> PlatformInvoiceMapper.toResponse(invoice, attempts.get(invoice.getId()), gateway.isEnabled())).toList();
+                .map(invoice -> PlatformInvoiceMapper.toResponse(invoice, attempts.get(invoice.getId()), gateway.isMockEnabled())).toList();
     }
 
     @Transactional
@@ -120,7 +121,7 @@ public class PlatformBillingService {
     @Transactional(noRollbackFor = OperationConflictException.class)
     public PlatformInvoiceResponse mockPay(TenantPrincipal principal, UUID invoiceId, MockPaymentRequest request) {
         UUID tenantId = owner(principal).getId();
-        if (!gateway.isEnabled()) {
+        if (!gateway.isMockEnabled()) {
             throw new ResourceNotFoundException();
         }
         billing.invoice(tenantId, invoiceId).orElseThrow(ResourceNotFoundException::new);
@@ -128,6 +129,32 @@ public class PlatformBillingService {
                 ? settlement.settle(invoiceId, null, principal.getUserId(), null)
                 : settlement.fail(invoiceId, principal.getUserId());
         return response(invoice);
+    }
+
+    /**
+     * Midtrans only: the payment page of an unpaid invoice. Reuses the open attempt, or starts a new one after the previous
+     * attempt failed. A Snap failure rolls the call back (503).
+     */
+    @Transactional
+    public PlatformInvoiceResponse pay(TenantPrincipal principal, UUID invoiceId) {
+        UUID tenantId = owner(principal).getId();
+        if (!gateway.isMidtrans()) {
+            throw new ResourceNotFoundException();
+        }
+        orders.lockTenant(tenantId);
+        settlement.expireDue(tenantId, Instant.now());
+        PlatformInvoiceEntity invoice = billing.invoice(tenantId, invoiceId).orElseThrow(ResourceNotFoundException::new);
+        billing.refresh(invoice);
+        if (!invoice.isIssued()) {
+            throw new OperationConflictException("Tagihan tidak dapat dibayar.");
+        }
+        PlatformPaymentAttemptEntity attempt = billing.pendingAttempts(invoiceId).stream()
+                .filter(open -> PaymentGateway.MIDTRANS_PROVIDER.equals(open.getProviderCode())).findFirst()
+                .orElseGet(() -> {
+                    String key = "gw-" + UUID.randomUUID();
+                    return newAttempt(principal, invoice, key, digests.digest(invoiceId + "|" + key));
+                });
+        return PlatformInvoiceMapper.toResponse(invoice, attempt, gateway.isMockEnabled());
     }
 
     @Transactional(noRollbackFor = OperationConflictException.class)
@@ -159,9 +186,15 @@ public class PlatformBillingService {
         return guard.requireOwnerIgnoringAllowance(principal, principal.getOutletId()).getTenant();
     }
 
+    /** Midtrans shows the owner's name and email on the payment page; the other providers need neither. */
+    private PlatformPaymentAttemptEntity newAttempt(TenantPrincipal principal, PlatformInvoiceEntity invoice, String key, String fingerprint) {
+        StaffUserEntity user = gateway.isMidtrans() ? billing.actor(principal.getUserId()) : null;
+        return gateway.newAttempt(invoice, key, fingerprint, user == null ? null : user.getEmail(), user == null ? null : user.getFullName());
+    }
+
     private PlatformInvoiceResponse response(PlatformInvoiceEntity invoice) {
         return PlatformInvoiceMapper.toResponse(invoice,
-                billing.latestAttempts(List.of(invoice.getId())).get(invoice.getId()), gateway.isEnabled());
+                billing.latestAttempts(List.of(invoice.getId())).get(invoice.getId()), gateway.isMockEnabled());
     }
 
     private SubscriptionQuoteResponse buildQuote(TenantEntity tenant, SubscriptionCheckoutRequest request, Instant now) {

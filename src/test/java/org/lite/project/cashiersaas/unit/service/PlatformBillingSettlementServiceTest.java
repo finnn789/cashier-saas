@@ -23,7 +23,9 @@ import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.lite.project.cashiersaas.repository.PlatformBillingRepository;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.service.DigestService;
-import org.lite.project.cashiersaas.service.MockPaymentGateway;
+import org.lite.project.cashiersaas.configuration.MidtransProperties;
+import org.lite.project.cashiersaas.service.MidtransClient;
+import org.lite.project.cashiersaas.service.PaymentGateway;
 import org.lite.project.cashiersaas.service.PlatformBillingSettlementService;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -60,6 +62,7 @@ class PlatformBillingSettlementServiceTest {
     @Mock private SubscriptionRepository subscriptions;
     @Mock private AiUsageRepository aiUsage;
     @Mock private AuditLogRepository audit;
+    @Mock private MidtransClient midtrans;
 
     private final UUID tenantId = UUID.randomUUID();
     private final UUID invoiceId = UUID.randomUUID();
@@ -70,7 +73,7 @@ class PlatformBillingSettlementServiceTest {
     @BeforeEach
     void setUp() {
         service = new PlatformBillingSettlementService(orders, billing, subscriptions, aiUsage, audit,
-                new MockPaymentGateway(billing, new DigestService(), true));
+                new PaymentGateway(billing, new DigestService(), midtrans, new MidtransProperties(), "MOCK"));
     }
 
     private SubscriptionEntity liveRow(PlanCode plan, Instant endsAt) {

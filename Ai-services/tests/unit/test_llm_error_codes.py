@@ -2,11 +2,11 @@
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import openai
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.ai.graph.error_codes import LLM_ERROR_CODES, classify_llm_error
 from app.ai.graph.nodes import create_agent_node
@@ -104,6 +104,29 @@ class AgentNodeFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(logs.records), 1)
         self.assertEqual(logs.records[0].__dict__["event"], "llm_invocation_failed")
         self.assertEqual(logs.records[0].__dict__["error_code"], "AI_HTTP_401")
+
+    async def test_last_allowed_agent_run_forces_a_final_answer_with_tool_choice_none(self) -> None:
+        normal = Mock(ainvoke=AsyncMock(return_value=AIMessage(content="normal")))
+        forced = Mock(ainvoke=AsyncMock(return_value=AIMessage(content="jawaban akhir")))
+
+        def bind_tools(tools: object, **kwargs: object) -> Mock:
+            return forced if kwargs.get("tool_choice") == "none" else normal
+
+        cases = (
+            ({"messages": [HumanMessage(content="halo")]}, normal, 1, "normal"),
+            ({"messages": [HumanMessage(content="halo")], "agent_runs": 3}, forced, 4, "jawaban akhir"),
+        )
+        for state, used, runs, answer in cases:
+            with self.subTest(agent_runs=state.get("agent_runs")):
+                with patch("app.ai.graph.nodes.adapt_tool_registry", return_value=[Mock()]), patch(
+                    "langchain_openai.ChatOpenAI.bind_tools", side_effect=bind_tools
+                ):
+                    node = create_agent_node("sk-test", "model", tools=[Mock()])
+                    result = await node(state)
+
+                used.ainvoke.assert_awaited_once()
+                self.assertEqual(result["agent_runs"], runs)
+                self.assertEqual(result["final_response"], answer)
 
 
 if __name__ == "__main__":

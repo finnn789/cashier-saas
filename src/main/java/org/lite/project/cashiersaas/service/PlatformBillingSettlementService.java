@@ -39,7 +39,7 @@ public class PlatformBillingSettlementService {
     private final SubscriptionRepository subscriptions;
     private final AiUsageRepository aiUsage;
     private final AuditLogRepository audit;
-    private final MockPaymentGateway gateway;
+    private final PaymentGateway gateway;
 
     /**
      * Marks the invoice paid and activates what it bought. {@code providerPaymentRef} null keeps the attempt's own reference (mock);
@@ -166,7 +166,7 @@ public class PlatformBillingSettlementService {
 
     /** Only simulated payments produce a gateway event; a manual transfer has no provider callback. */
     private void recordGatewayEvent(PlatformPaymentAttemptEntity attempt, String status, Instant now) {
-        if (MockPaymentGateway.MOCK_PROVIDER.equals(attempt.getProviderCode())) {
+        if (PaymentGateway.MOCK_PROVIDER.equals(attempt.getProviderCode())) {
             gateway.recordEvent(attempt, status, now);
         }
     }

@@ -79,6 +79,11 @@ class CashierServiceStub(object):
                 request_serializer=cashier__service__pb2.GetMenuMarginsRequest.SerializeToString,
                 response_deserializer=cashier__service__pb2.GetMenuMarginsResponse.FromString,
                 _registered_method=True)
+        self.GetProductPerformance = channel.unary_unary(
+                '/cashier.v1.CashierService/GetProductPerformance',
+                request_serializer=cashier__service__pb2.GetProductPerformanceRequest.SerializeToString,
+                response_deserializer=cashier__service__pb2.GetProductPerformanceResponse.FromString,
+                _registered_method=True)
 
 
 class CashierServiceServicer(object):
@@ -138,6 +143,12 @@ class CashierServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetProductPerformance(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_CashierServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -185,6 +196,11 @@ def add_CashierServiceServicer_to_server(servicer, server):
                     servicer.GetMenuMargins,
                     request_deserializer=cashier__service__pb2.GetMenuMarginsRequest.FromString,
                     response_serializer=cashier__service__pb2.GetMenuMarginsResponse.SerializeToString,
+            ),
+            'GetProductPerformance': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetProductPerformance,
+                    request_deserializer=cashier__service__pb2.GetProductPerformanceRequest.FromString,
+                    response_serializer=cashier__service__pb2.GetProductPerformanceResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -430,6 +446,33 @@ class CashierService(object):
             '/cashier.v1.CashierService/GetMenuMargins',
             cashier__service__pb2.GetMenuMarginsRequest.SerializeToString,
             cashier__service__pb2.GetMenuMarginsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetProductPerformance(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cashier.v1.CashierService/GetProductPerformance',
+            cashier__service__pb2.GetProductPerformanceRequest.SerializeToString,
+            cashier__service__pb2.GetProductPerformanceResponse.FromString,
             options,
             channel_credentials,
             insecure,

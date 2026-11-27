@@ -205,7 +205,7 @@ class DefaultToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(order_tool, OrderStatusTool)
 
         schemas = registry.get_openrouter_schemas()
-        self.assertEqual(len(schemas), 7)
+        self.assertEqual(len(schemas), 8)
         names = {s["function"]["name"] for s in schemas}
         self.assertEqual(
             names,
@@ -217,5 +217,6 @@ class DefaultToolRegistryTests(unittest.IsolatedAsyncioTestCase):
                 "cashier_anomalies",
                 "leakage_report",
                 "menu_margins",
+                "product_analysis",
             },
         )

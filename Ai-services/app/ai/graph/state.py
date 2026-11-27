@@ -18,6 +18,7 @@ class AgentState(TypedDict, total=False):
         display_name: Human user's display name or nickname.
         final_response: Plain-text final response ready for delivery.
         error_code: Error identifier if processing encountered an issue.
+        agent_runs: Number of agent node runs so far (missing = 0).
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -28,3 +29,4 @@ class AgentState(TypedDict, total=False):
     display_name: str
     final_response: str | None
     error_code: str | None
+    agent_runs: int

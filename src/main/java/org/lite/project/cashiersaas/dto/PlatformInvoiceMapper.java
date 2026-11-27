@@ -32,6 +32,9 @@ public final class PlatformInvoiceMapper {
         if (latestAttempt != null) {
             response.setProviderCode(latestAttempt.getProviderCode());
             response.setProviderPaymentRef(latestAttempt.getProviderPaymentRef());
+            if (latestAttempt.isPending() && PlatformInvoiceEntity.ISSUED.equals(invoice.getStatus())) {
+                response.setPaymentUrl(latestAttempt.getPaymentUrl());
+            }
         }
         if (invoice.getKind() == InvoiceKind.SUBSCRIPTION && PlatformInvoiceEntity.PAID.equals(invoice.getStatus())) {
             response.setSubscriptionStartsAt(invoice.getSubscription().getStartsAt());

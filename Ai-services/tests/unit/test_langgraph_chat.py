@@ -93,6 +93,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             "first_name": "Customer",
             "kind": "TEXT",
             "content": "Status pesanan saya bagaimana?",
+            "java_user_id": uuid4(),  # AI questions need a verified staff user
         }
 
     def _record(self, name: str, connection: Mock) -> None:
@@ -181,9 +182,8 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             [("begin", 1), ("commit", 1), ("begin", 2), ("commit", 2)],
         )
 
-        # Without a verified Java user the question is consumed with an empty user_id.
         self.grpc.consume_ai_question.assert_awaited_once_with(
-            tenant_id=str(self.tenant_id), user_id=""
+            tenant_id=str(self.tenant_id), user_id=str(self.input["java_user_id"])
         )
 
         # History is loaded for this conversation only, before the just inserted USER message.
@@ -335,6 +335,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
             ("PLAN_PREMIUM_REQUIRED", "paket Premium"),
             ("MONTHLY_QUOTA_EXHAUSTED", "Kuota pertanyaan AI bulan ini sudah habis"),
             ("DAILY_CAP_REACHED", "Batas harian 40 pertanyaan"),
+            ("OWNER_ONLY", "hanya tersedia untuk pemilik"),
         )
         for reason, expected in cases:
             with self.subTest(reason=reason):
@@ -354,6 +355,18 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.grpc.record_ai_usage.assert_not_awaited()
                 self.assertEqual(self._assistant_inserts(), [])
                 self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
+
+    async def test_unverified_user_is_refused_without_consuming_quota_or_calling_the_graph(self) -> None:
+        mock_graph = AsyncMock()
+        service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
+
+        result = await service.handle(**{**self.input, "java_user_id": None})
+
+        self.assertIn("belum terverifikasi", result)
+        self.grpc.consume_ai_question.assert_not_awaited()
+        mock_graph.ainvoke.assert_not_awaited()
+        self.assertEqual(self._assistant_inserts(), [])
+        self.assertEqual(self.boundary.events, [("begin", 1), ("commit", 1)])
 
     async def test_quota_check_failure_fails_closed_without_calling_the_graph(self) -> None:
         self.grpc.consume_ai_question.return_value = None
@@ -418,7 +431,7 @@ class LangGraphChatServiceTests(unittest.IsolatedAsyncioTestCase):
         }
         service = ChatService(self.database, self.channels, graph=mock_graph, grpc_client=self.grpc)
 
-        await service.handle(**self.input, java_user_id=java_user)
+        await service.handle(**{**self.input, "java_user_id": java_user})
 
         self.grpc.consume_ai_question.assert_awaited_once_with(
             tenant_id=str(self.tenant_id), user_id=str(java_user)

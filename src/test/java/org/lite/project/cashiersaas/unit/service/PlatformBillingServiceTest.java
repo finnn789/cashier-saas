@@ -34,7 +34,10 @@ import org.lite.project.cashiersaas.repository.SubscriptionRepository;
 import org.lite.project.cashiersaas.service.DigestService;
 import org.lite.project.cashiersaas.service.MembershipPlanCatalogService;
 import org.lite.project.cashiersaas.service.MerchantAccessGuard;
-import org.lite.project.cashiersaas.service.MockPaymentGateway;
+import org.lite.project.cashiersaas.configuration.MidtransProperties;
+import org.lite.project.cashiersaas.exception.runtime.PaymentGatewayUnavailableException;
+import org.lite.project.cashiersaas.service.MidtransClient;
+import org.lite.project.cashiersaas.service.PaymentGateway;
 import org.lite.project.cashiersaas.service.PlatformBillingService;
 import org.lite.project.cashiersaas.service.PlatformBillingSettlementService;
 import org.mockito.ArgumentCaptor;
@@ -52,7 +55,11 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.lenient;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -65,6 +72,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class PlatformBillingServiceTest {
     private static final String KEY = "checkout-key-0000001";
+    private static final String SNAP_URL = "https://app.sandbox.midtrans.com/snap/v4/redirection/tok-1";
 
     @Mock private MerchantAccessGuard guard;
     @Mock private FnbOrderRepository orders;
@@ -72,6 +80,7 @@ class PlatformBillingServiceTest {
     @Mock private SubscriptionRepository subscriptions;
     @Mock private AiUsageRepository aiUsage;
     @Mock private AuditLogRepository audit;
+    @Mock private MidtransClient midtrans;
     private final DigestService digests = new DigestService();
     private final MembershipPlanCatalogService catalog = new MembershipPlanCatalogService();
 
@@ -88,7 +97,15 @@ class PlatformBillingServiceTest {
     }
 
     private PlatformBillingService serviceWith(boolean mockGateway) {
-        MockPaymentGateway gateway = new MockPaymentGateway(billing, digests, mockGateway);
+        return serviceWith(mockGateway ? "MOCK" : "MANUAL_TRANSFER");
+    }
+
+    private PlatformBillingService serviceWith(String provider) {
+        MidtransProperties midtransProperties = new MidtransProperties();
+        midtransProperties.setServerKey("SB-Mid-server-test");
+        midtransProperties.setMerchantId("G-test");
+        midtransProperties.setFinishUrl("http://localhost:5173/subscription");
+        PaymentGateway gateway = new PaymentGateway(billing, digests, midtrans, midtransProperties, provider);
         PlatformBillingSettlementService settlement = new PlatformBillingSettlementService(orders, billing, subscriptions, aiUsage, audit, gateway);
         return new PlatformBillingService(guard, orders, billing, subscriptions, audit, digests, catalog, settlement, gateway);
     }
@@ -333,6 +350,91 @@ class PlatformBillingServiceTest {
         assertThrows(ResourceNotFoundException.class, () -> service.mockPay(principal, invoiceId, request));
 
         verify(billing, never()).invoice(any(), any());
+    }
+
+    /** The database assigns the id on persist; the Midtrans order id is that id. */
+    private void persistedAttemptsGetAnId() {
+        doAnswer(call -> {
+            PlatformPaymentAttemptEntity saved = call.getArgument(0);
+            if (saved.getId() == null) {
+                withId(saved, UUID.randomUUID());
+            }
+            return null;
+        }).when(billing).persist(any(PlatformPaymentAttemptEntity.class));
+        // checkout also persists the invoice (pay does not, hence lenient)
+        lenient().doNothing().when(billing).persist(any(PlatformInvoiceEntity.class));
+    }
+
+    @Test
+    void midtransCheckoutUsesTheAttemptIdAsOrderIdAndReturnsTheSnapRedirectUrl() {
+        service = serviceWith("MIDTRANS");
+        ownerCalls();
+        persistedAttemptsGetAnId();
+        when(midtrans.createSnapRedirect(any(), any(), any(), any())).thenReturn(SNAP_URL);
+
+        PlatformInvoiceResponse response = service.checkout(principal, KEY, subscription(PlanCode.PRO, BillingCycle.MONTHLY, 0));
+
+        ArgumentCaptor<PlatformPaymentAttemptEntity> attempt = ArgumentCaptor.forClass(PlatformPaymentAttemptEntity.class);
+        verify(billing).persist(attempt.capture());
+        assertEquals("MIDTRANS", attempt.getValue().getProviderCode());
+        assertEquals("G-test", attempt.getValue().getProviderAccountRef());
+        assertEquals(attempt.getValue().getId().toString(), attempt.getValue().getProviderPaymentRef());
+        assertEquals(SNAP_URL, attempt.getValue().getPaymentUrl());
+        assertEquals("MIDTRANS", response.getProviderCode());
+        assertEquals(SNAP_URL, response.getPaymentUrl());
+        assertFalse(response.isMockPaymentEnabled());
+    }
+
+    @Test
+    void aFailedSnapCallFailsTheCheckoutSoNothingIsKept() {
+        service = serviceWith("MIDTRANS");
+        ownerCalls();
+        persistedAttemptsGetAnId();
+        when(midtrans.createSnapRedirect(any(), any(), any(), any())).thenThrow(new PaymentGatewayUnavailableException("down"));
+
+        assertThrows(PaymentGatewayUnavailableException.class, () -> service.checkout(principal, KEY, subscription(PlanCode.PRO, BillingCycle.MONTHLY, 0)));
+
+        verify(audit, never()).persist(any(AuditLogEntity.class));
+    }
+
+    @Test
+    void payOnAFailedMidtransAttemptOpensANewAttemptWithANewSnapUrl() {
+        service = serviceWith("MIDTRANS");
+        ownerCalls();
+        persistedAttemptsGetAnId();
+        PlatformInvoiceEntity invoice = issuedSubscriptionInvoice(SubscriptionEntity.pending(tenant, PlanCode.PRO, 0));
+        when(billing.invoice(tenantId, invoiceId)).thenReturn(Optional.of(invoice));
+        when(midtrans.createSnapRedirect(any(), any(), any(), any())).thenReturn(SNAP_URL);
+
+        PlatformInvoiceResponse response = service.pay(principal, invoiceId);
+
+        ArgumentCaptor<PlatformPaymentAttemptEntity> attempt = ArgumentCaptor.forClass(PlatformPaymentAttemptEntity.class);
+        verify(billing).persist(attempt.capture());
+        assertEquals("MIDTRANS", attempt.getValue().getProviderCode());
+        assertTrue(attempt.getValue().isPending());
+        assertEquals(SNAP_URL, response.getPaymentUrl());
+    }
+
+    @Test
+    void payOnAnInvoiceThatIsNotIssuedIsAConflict() {
+        service = serviceWith("MIDTRANS");
+        ownerCalls();
+        PlatformInvoiceEntity invoice = issuedSubscriptionInvoice(SubscriptionEntity.pending(tenant, PlanCode.PRO, 0));
+        invoice.markPaid(Instant.now());
+        when(billing.invoice(tenantId, invoiceId)).thenReturn(Optional.of(invoice));
+
+        assertThrows(OperationConflictException.class, () -> service.pay(principal, invoiceId));
+
+        verifyNoInteractions(midtrans);
+    }
+
+    @Test
+    void payIsNotFoundWhenTheProviderIsNotMidtrans() {
+        ownerCalls();
+
+        assertThrows(ResourceNotFoundException.class, () -> service.pay(principal, invoiceId));
+
+        verifyNoInteractions(midtrans);
     }
 
     private static <T> T withId(T entity, UUID id) {

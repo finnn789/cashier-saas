@@ -57,4 +57,9 @@ public class GatewayEventEntity extends BaseEntity {
         event.processingStatus = "PROCESSED";
         return event;
     }
+
+    /** The event was understood but not applied (amount mismatch, invoice no longer payable). */
+    public void reject() {
+        this.processingStatus = "REJECTED";
+    }
 }

@@ -7,6 +7,7 @@ import com.cashier.grpc.v1.MenuMargin;
 import com.cashier.grpc.v1.OutletAnomalies;
 import com.cashier.grpc.v1.OutletMenuMargins;
 import com.cashier.grpc.v1.OutletLeakage;
+import com.cashier.grpc.v1.OutletProductPerformance;
 import com.cashier.grpc.v1.OutletRestock;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import com.cashier.grpc.v1.ProductTotal;
@@ -70,16 +71,35 @@ public class GrpcInsightMapper {
         }
         if (report.getTopProducts() != null) {
             for (FnbSalesProductResponse row : report.getTopProducts()) {
-                builder.addTopProducts(ProductTotal.newBuilder()
-                        .setName(text(row.getProductName()))
-                        .setQuantity(row.getQuantity())
-                        .setGrossSales(money(row.getGrossSales()))
-                        .setCostOfGoodsSold(money(row.getCostOfGoodsSold()))
-                        .setGrossProfit(money(row.getGrossProfit()))
-                        .setItemsWithoutCost(row.getItemsWithoutCost()));
+                builder.addTopProducts(productTotal(row));
             }
         }
         return builder.build();
+    }
+
+    public OutletProductPerformance toProductPerformance(MerchantAccessContext context, LocalDate start, LocalDate end,
+                                                         List<FnbSalesProductResponse> products) {
+        OutletProductPerformance.Builder builder = OutletProductPerformance.newBuilder()
+                .setOutletId(context.getOutlet().getId().toString())
+                .setOutletName(text(context.getOutlet().getName()))
+                .setStartDate(date(start))
+                .setEndDate(date(end));
+        for (FnbSalesProductResponse row : products) {
+            builder.addProducts(productTotal(row));
+        }
+        return builder.build();
+    }
+
+    private static ProductTotal productTotal(FnbSalesProductResponse row) {
+        return ProductTotal.newBuilder()
+                .setProductId(row.getProductId() != null ? row.getProductId().toString() : "")
+                .setName(text(row.getProductName()))
+                .setQuantity(row.getQuantity())
+                .setGrossSales(money(row.getGrossSales()))
+                .setCostOfGoodsSold(money(row.getCostOfGoodsSold()))
+                .setGrossProfit(money(row.getGrossProfit()))
+                .setItemsWithoutCost(row.getItemsWithoutCost())
+                .build();
     }
 
     public OutletRestock toRestock(MerchantAccessContext context, List<FnbRestockSuggestion> items) {

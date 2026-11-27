@@ -14,6 +14,7 @@ service CashierService {
   rpc RecordAiUsage (RecordAiUsageRequest) returns (RecordAiUsageResponse);
   rpc GetLeakageReport (GetLeakageReportRequest) returns (GetLeakageReportResponse);
   rpc GetMenuMargins (GetMenuMarginsRequest) returns (GetMenuMarginsResponse);
+  rpc GetProductPerformance (GetProductPerformanceRequest) returns (GetProductPerformanceResponse);
 }
 
 message GetCatalogItemRequest {
@@ -76,6 +77,27 @@ message ProductTotal {
   string cost_of_goods_sold = 4;
   string gross_profit = 5;
   int64 items_without_cost = 6;
+  string product_id = 7;
+}
+
+message GetProductPerformanceRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string start_date = 3;
+  string end_date = 4;
+}
+
+message OutletProductPerformance {
+  string outlet_id = 1;
+  string outlet_name = 2;
+  string start_date = 3;
+  string end_date = 4;
+  repeated ProductTotal products = 5;
+}
+
+message GetProductPerformanceResponse {
+  string tenant_id = 1;
+  repeated OutletProductPerformance outlets = 2;
 }
 
 message OutletSalesSummary {

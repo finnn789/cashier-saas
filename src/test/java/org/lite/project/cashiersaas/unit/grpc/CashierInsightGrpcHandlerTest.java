@@ -6,6 +6,8 @@ import com.cashier.grpc.v1.GetLeakageReportRequest;
 import com.cashier.grpc.v1.GetLeakageReportResponse;
 import com.cashier.grpc.v1.GetMenuMarginsRequest;
 import com.cashier.grpc.v1.GetMenuMarginsResponse;
+import com.cashier.grpc.v1.GetProductPerformanceRequest;
+import com.cashier.grpc.v1.GetProductPerformanceResponse;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
@@ -13,6 +15,7 @@ import com.cashier.grpc.v1.GetSalesSummaryResponse;
 import com.cashier.grpc.v1.OutletAnomalies;
 import com.cashier.grpc.v1.OutletLeakage;
 import com.cashier.grpc.v1.OutletMenuMargins;
+import com.cashier.grpc.v1.OutletProductPerformance;
 import com.cashier.grpc.v1.OutletRestock;
 import com.cashier.grpc.v1.OutletSalesSummary;
 import io.grpc.Status;
@@ -29,6 +32,7 @@ import org.lite.project.cashiersaas.dto.response.FnbMenuMarginReportResponse;
 import org.lite.project.cashiersaas.dto.response.FnbMenuMarginResponse;
 import org.lite.project.cashiersaas.dto.response.FnbOutletLeakageResponse;
 import org.lite.project.cashiersaas.dto.response.FnbOwnerSalesInsight;
+import org.lite.project.cashiersaas.dto.response.FnbSalesProductResponse;
 import org.lite.project.cashiersaas.entity.shared.identity.StaffUserEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.merchant.OutletEntity;
@@ -88,6 +92,7 @@ class CashierInsightGrpcHandlerTest {
     private StreamObserver<GetAnomaliesResponse> anomalyObserver;
     private StreamObserver<GetLeakageReportResponse> leakageObserver;
     private StreamObserver<GetMenuMarginsResponse> marginObserver;
+    private StreamObserver<GetProductPerformanceResponse> performanceObserver;
 
     @SuppressWarnings("unchecked")
     @BeforeEach
@@ -103,6 +108,7 @@ class CashierInsightGrpcHandlerTest {
         anomalyObserver = mock(StreamObserver.class);
         leakageObserver = mock(StreamObserver.class);
         marginObserver = mock(StreamObserver.class);
+        performanceObserver = mock(StreamObserver.class);
         handler = new CashierInsightGrpcHandler(policy, accessRepository, insightService, leakageService,
                 menuMarginService, mapper);
         when(policy.requireAllowedTenant(TENANT)).thenReturn(tenantId);
@@ -176,6 +182,57 @@ class CashierInsightGrpcHandlerTest {
         ArgumentCaptor<GetSalesSummaryResponse> response = ArgumentCaptor.forClass(GetSalesSummaryResponse.class);
         verify(salesObserver).onNext(response.capture());
         verify(salesObserver).onCompleted();
+        assertEquals(TENANT, response.getValue().getTenantId());
+        assertEquals(List.of(row), response.getValue().getOutletsList());
+    }
+
+    private static GetProductPerformanceRequest performance(String start, String end) {
+        return GetProductPerformanceRequest.newBuilder().setTenantId(TENANT).setUserId(USER).setStartDate(start).setEndDate(end).build();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "not-a-date, 2026-11-07",
+            "2026-11-01, ''",
+            "2026-11-07, 2026-11-01",
+            "2026-01-01, 2027-01-02" // 366 days apart
+    })
+    void productPerformanceRejectsBadDatesReversedAndTooLongRangesAsInvalidArgument(String start, String end) {
+        handler.getProductPerformance(performance(start, end), performanceObserver);
+
+        ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+        verify(performanceObserver).onError(error.capture());
+        assertEquals(Status.Code.INVALID_ARGUMENT, assertInstanceOf(StatusRuntimeException.class, error.getValue()).getStatus().getCode());
+        verify(performanceObserver, never()).onNext(any());
+        verifyNoInteractions(insightService, mapper);
+    }
+
+    @Test
+    void productPerformanceIsDeniedForANonOwnerBeforeArgumentFeedback() {
+        when(policy.requireOwnerOutlets(tenantId, USER)).thenThrow(Status.PERMISSION_DENIED.asRuntimeException());
+
+        handler.getProductPerformance(performance("garbage", "garbage"), performanceObserver);
+
+        ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+        verify(performanceObserver).onError(error.capture());
+        assertEquals(Status.Code.PERMISSION_DENIED, ((StatusRuntimeException) error.getValue()).getStatus().getCode());
+        verifyNoInteractions(insightService, mapper);
+    }
+
+    @Test
+    void productPerformanceReturnsOneRowPerOwnedOutletReadingAtMost500ProductsPerOutlet() {
+        LocalDate start = LocalDate.of(2026, 11, 1);
+        LocalDate end = LocalDate.of(2026, 11, 7);
+        List<FnbSalesProductResponse> products = List.of(new FnbSalesProductResponse());
+        OutletProductPerformance row = OutletProductPerformance.newBuilder().setOutletId(outletId.toString()).build();
+        when(insightService.productPerformance(tenantId, outletId, start, end, 500)).thenReturn(products);
+        when(mapper.toProductPerformance(any(MerchantAccessContext.class), eq(start), eq(end), eq(products))).thenReturn(row);
+
+        handler.getProductPerformance(performance("2026-11-01", "2026-11-07"), performanceObserver);
+
+        ArgumentCaptor<GetProductPerformanceResponse> response = ArgumentCaptor.forClass(GetProductPerformanceResponse.class);
+        verify(performanceObserver).onNext(response.capture());
+        verify(performanceObserver).onCompleted();
         assertEquals(TENANT, response.getValue().getTenantId());
         assertEquals(List.of(row), response.getValue().getOutletsList());
     }

@@ -4,7 +4,11 @@ import lombok.RequiredArgsConstructor;
 import org.lite.project.cashiersaas.component.MerchantAccessContext;
 import org.lite.project.cashiersaas.dto.response.FnbCashierAnomaly;
 import org.lite.project.cashiersaas.dto.response.FnbOwnerSalesInsight;
+import org.lite.project.cashiersaas.dto.FnbSalesReportMapper;
 import org.lite.project.cashiersaas.dto.response.FnbRestockSuggestion;
+import org.lite.project.cashiersaas.dto.response.FnbSalesProductResponse;
+import org.lite.project.cashiersaas.repository.FnbSalesReportRepository;
+import org.lite.project.cashiersaas.repository.MerchantReferenceRepository;
 import org.lite.project.cashiersaas.entity.shared.audit.AuditLogEntity;
 import org.lite.project.cashiersaas.entity.shared.identity.TenantMembershipEntity;
 import org.lite.project.cashiersaas.entity.shared.inventory.InventoryBalanceEntity;
@@ -55,6 +59,8 @@ public class FnbOwnerInsightService {
     private final AuditLogRepository audits;
     private final FnbOrderRepository orders;
     private final TenantMembershipRepository memberships;
+    private final FnbSalesReportRepository salesRepository;
+    private final MerchantReferenceRepository references;
 
     @Transactional(readOnly = true)
     public FnbOwnerSalesInsight salesInsight(MerchantAccessContext context, LocalDate start, LocalDate end) {
@@ -72,6 +78,15 @@ public class FnbOwnerInsightService {
         value.setCashDifferenceTotal(closed.getCashDifference());
         value.setClosedShiftCount(closed.getCount());
         return value;
+    }
+
+    /** Paid products of one outlet, best sales first; dates are read in the outlet time zone like the sales summary. */
+    @Transactional(readOnly = true)
+    public List<FnbSalesProductResponse> productPerformance(UUID tenantId, UUID outletId, LocalDate start, LocalDate end, int limit) {
+        ZoneId zone;
+        try { zone = ZoneId.of(references.outlet(outletId).getTimeZone()); } catch (DateTimeException exception) { throw new InvalidOperationException("Zona waktu outlet tidak valid."); }
+        return FnbSalesReportMapper.products(salesRepository.products(tenantId, outletId, start.atStartOfDay(zone).toInstant(),
+                end.plusDays(1).atStartOfDay(zone).toInstant(), null, null, limit));
     }
 
     @Transactional(readOnly = true)
