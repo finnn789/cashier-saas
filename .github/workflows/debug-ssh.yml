@@ -1,0 +1,22 @@
+name: Debug SSH
+on: workflow_dispatch
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tes SSH
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER_NAME: ${{ secrets.VPS_USER }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_test
+          chmod 600 ~/.ssh/id_test
+          echo "--- sidik jari key di secret ---"
+          ssh-keygen -lf ~/.ssh/id_test || echo "KEY TIDAK VALID"
+          echo "--- sidik jari server yang dituju ---"
+          ssh-keyscan -t ed25519 "$HOST" 2>/dev/null | ssh-keygen -lf - || true
+          echo "--- tes login ---"
+          ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i ~/.ssh/id_test "$USER_NAME@$HOST" "echo BERHASIL" || true
