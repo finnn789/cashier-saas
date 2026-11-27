@@ -12,7 +12,7 @@ import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
 import org.lite.project.cashiersaas.repository.AiUsageRepository;
 import org.lite.project.cashiersaas.repository.PlatformAdminRepository;
 import org.lite.project.cashiersaas.repository.PlatformBillingRepository;
-import org.lite.project.cashiersaas.service.MockPaymentGateway;
+import org.lite.project.cashiersaas.service.PaymentGateway;
 import org.lite.project.cashiersaas.service.PlatformAccessGuard;
 import org.lite.project.cashiersaas.service.PlatformDashboardService;
 import org.mockito.InjectMocks;
@@ -44,7 +44,7 @@ class PlatformDashboardServiceTest {
     @Mock
     private AiUsageRepository aiUsage;
     @Mock
-    private MockPaymentGateway gateway;
+    private PaymentGateway gateway;
     @InjectMocks
     private PlatformDashboardService service;
 

@@ -81,6 +81,20 @@ public class PlatformBillingRepository {
                 .setParameter("tenantId", tenantId).setParameter("key", idempotencyKey).getResultStream().findFirst();
     }
 
+    /** Not tenant scoped: only for provider notifications, which carry the provider's own reference. */
+    public Optional<PlatformPaymentAttemptEntity> attemptByProviderRef(String providerCode, String providerPaymentRef) {
+        return entityManager.createQuery("select a from PlatformPaymentAttemptEntity a where a.providerCode = :code "
+                        + "and a.providerPaymentRef = :ref", PlatformPaymentAttemptEntity.class)
+                .setParameter("code", providerCode).setParameter("ref", providerPaymentRef).setMaxResults(1).getResultStream().findFirst();
+    }
+
+    public boolean gatewayEventExists(String providerCode, String providerAccountRef, String providerEventId) {
+        return !entityManager.createQuery("select e.id from GatewayEventEntity e where e.providerCode = :code "
+                        + "and e.providerAccountRef = :account and e.providerEventId = :event", UUID.class)
+                .setParameter("code", providerCode).setParameter("account", providerAccountRef)
+                .setParameter("event", providerEventId).setMaxResults(1).getResultList().isEmpty();
+    }
+
     public List<PlatformPaymentAttemptEntity> pendingAttempts(UUID invoiceId) {
         return entityManager.createQuery("select a from PlatformPaymentAttemptEntity a where a.platformInvoice.id = :invoiceId "
                         + "and a.status = :pending order by a.createdAt desc", PlatformPaymentAttemptEntity.class)

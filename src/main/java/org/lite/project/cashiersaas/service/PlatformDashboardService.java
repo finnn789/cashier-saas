@@ -51,7 +51,7 @@ public class PlatformDashboardService {
     private final PlatformAdminRepository admin;
     private final PlatformBillingRepository billing;
     private final AiUsageRepository aiUsage;
-    private final MockPaymentGateway gateway;
+    private final PaymentGateway gateway;
 
     @Transactional(readOnly = true)
     public PlatformOverviewResponse overview(PlatformPrincipal principal) {
@@ -121,7 +121,7 @@ public class PlatformDashboardService {
         Map<UUID, PlatformPaymentAttemptEntity> attempts = billing.latestAttempts(invoices.stream().map(PlatformInvoiceEntity::getId).toList());
         PlatformPageResponse<PlatformInvoiceRowResponse> response = new PlatformPageResponse<>();
         response.setItems(invoices.stream()
-                .map(invoice -> PlatformAdminMapper.toInvoiceRow(invoice, attempts.get(invoice.getId()), gateway.isEnabled())).toList());
+                .map(invoice -> PlatformAdminMapper.toInvoiceRow(invoice, attempts.get(invoice.getId()), gateway.isMockEnabled())).toList());
         response.setPage(safePage);
         response.setSize(safeSize);
         response.setTotal(admin.countInvoices(statusFilter, search));
@@ -149,7 +149,7 @@ public class PlatformDashboardService {
         List<PlatformInvoiceEntity> invoices = billing.recent(tenantId, DETAIL_INVOICES);
         Map<UUID, PlatformPaymentAttemptEntity> attempts = billing.latestAttempts(invoices.stream().map(PlatformInvoiceEntity::getId).toList());
         List<PlatformInvoiceResponse> invoiceResponses = invoices.stream()
-                .map(invoice -> PlatformInvoiceMapper.toResponse(invoice, attempts.get(invoice.getId()), gateway.isEnabled())).toList();
+                .map(invoice -> PlatformInvoiceMapper.toResponse(invoice, attempts.get(invoice.getId()), gateway.isMockEnabled())).toList();
         LocalDate today = LocalDate.now(ZoneId.of(tenant.getTimeZone()));
         PlatformAiUsageResponse ai = PlatformAdminMapper.toAiUsage(aiUsage.readUsage(tenantId, today.withDayOfMonth(1), today));
         return PlatformAdminMapper.toTenantDetail(tenant, info.plan, info.activeUntil, info.trialActive,

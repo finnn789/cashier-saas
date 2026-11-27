@@ -8,6 +8,7 @@ import org.lite.project.cashiersaas.exception.runtime.InvalidCredentialsExceptio
 import org.lite.project.cashiersaas.exception.runtime.InvalidOperationException;
 import org.lite.project.cashiersaas.exception.runtime.OperationConflictException;
 import org.lite.project.cashiersaas.exception.runtime.OutletOverAllowanceException;
+import org.lite.project.cashiersaas.exception.runtime.PaymentGatewayUnavailableException;
 import org.lite.project.cashiersaas.exception.runtime.PlanUpgradeRequiredException;
 import org.lite.project.cashiersaas.dto.response.OutletOverAllowanceResponse;
 import org.lite.project.cashiersaas.exception.runtime.ResourceNotFoundException;
@@ -140,6 +141,12 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ApiResponse<Object> handleOperationConflict(OperationConflictException exception) {
         return ApiResponse.error(HttpStatus.CONFLICT.value(), exception.getMessage());
+    }
+
+    @ExceptionHandler(PaymentGatewayUnavailableException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public ApiResponse<Object> handlePaymentGatewayUnavailable(PaymentGatewayUnavailableException exception) {
+        return ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE.value(), exception.getMessage());
     }
 
     @ExceptionHandler(PlanUpgradeRequiredException.class)

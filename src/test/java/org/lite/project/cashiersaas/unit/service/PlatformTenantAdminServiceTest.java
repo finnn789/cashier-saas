@@ -27,7 +27,7 @@ import org.lite.project.cashiersaas.repository.FnbOrderRepository;
 import org.lite.project.cashiersaas.repository.PlatformAdminRepository;
 import org.lite.project.cashiersaas.repository.PlatformBillingRepository;
 import org.lite.project.cashiersaas.repository.SubscriptionRepository;
-import org.lite.project.cashiersaas.service.MockPaymentGateway;
+import org.lite.project.cashiersaas.service.PaymentGateway;
 import org.lite.project.cashiersaas.service.PlatformAccessGuard;
 import org.lite.project.cashiersaas.service.PlatformBillingService;
 import org.lite.project.cashiersaas.service.PlatformBillingSettlementService;
@@ -88,7 +88,7 @@ class PlatformTenantAdminServiceTest {
     @Mock
     private PlatformBillingService billingService;
     @Mock
-    private MockPaymentGateway gateway;
+    private PaymentGateway gateway;
     @InjectMocks
     private PlatformTenantAdminService service;
 

@@ -194,7 +194,7 @@ class TwoTenantConversationTests(unittest.IsolatedAsyncioTestCase):
             TransactionFake(), channels, graph=graph, grpc_client=grpc  # type: ignore[arg-type]
         )
         base = {"external_user_id": "7", "external_chat_id": "71", "username": None,
-                "first_name": "First", "kind": "TEXT"}
+                "first_name": "First", "kind": "TEXT", "java_user_id": uuid4()}
         await service.handle(tenant_id=tenant_a, external_message_id="1", content="rahasia A", **base)
         await service.handle(tenant_id=tenant_b, external_message_id="2", content="halo B", **base)
         await service.handle(tenant_id=tenant_a, external_message_id="3", content="lagi A", **base)

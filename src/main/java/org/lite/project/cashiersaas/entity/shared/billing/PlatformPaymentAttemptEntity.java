@@ -37,6 +37,8 @@ public class PlatformPaymentAttemptEntity extends MutableBaseEntity {
     private String idempotencyKey;
     @Column(name="request_fingerprint",nullable=false,length=64)
     private String requestFingerprint;
+    @Column(name="payment_url",length=500)
+    private String paymentUrl;
 
     public static PlatformPaymentAttemptEntity initiate(PlatformInvoiceEntity invoice, String providerCode, String providerAccountRef,
                                                         String providerPaymentRef, String idempotencyKey, String requestFingerprint) {
@@ -54,6 +56,11 @@ public class PlatformPaymentAttemptEntity extends MutableBaseEntity {
         return attempt;
     }
 
+    /** The hosted payment page of the provider (Midtrans Snap redirect). */
+    public void attachPaymentUrl(String url) {
+        this.paymentUrl = url;
+    }
+
     public boolean isPending() {
         return PENDING.equals(status);
     }
@@ -64,6 +71,11 @@ public class PlatformPaymentAttemptEntity extends MutableBaseEntity {
         if (paymentRef != null) {
             this.providerPaymentRef = paymentRef;
         }
+    }
+
+    /** The provider reference is only known after persist for Midtrans (it is the attempt id). */
+    public void assignProviderPaymentRef(String paymentRef) {
+        this.providerPaymentRef = paymentRef;
     }
 
     public void fail() {

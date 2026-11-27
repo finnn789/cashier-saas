@@ -7,12 +7,15 @@ insight and its failure never blocks the summary (TASK-080 D2).
 import asyncio
 import logging
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 import aiohttp
 
 from app.ai.config import load_ai_settings
+from app.analysis.money import format_number as _number
+from app.analysis.money import format_rupiah
+from app.analysis.money import to_decimal as _decimal
 from app.ai.openrouter import OpenRouterClient
 
 logger = logging.getLogger(__name__)
@@ -34,23 +37,6 @@ _INSIGHT_SYSTEM = (
     "kalimat wawasan singkat (maksimal 25 kata) dalam bahasa Indonesia. Hanya gunakan angka yang "
     "ada di ringkasan, jangan mengarang, tanpa salam dan tanpa daftar."
 )
-
-
-def _decimal(value: Any) -> Decimal:
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return Decimal(0)
-
-
-def format_rupiah(value: Any) -> str:
-    """Whole rupiah with dot thousands separators: 12500 -> Rp12.500, -500 -> -Rp500."""
-    amount = int(_decimal(value).quantize(Decimal(1), rounding=ROUND_HALF_UP))
-    return f"{'-' if amount < 0 else ''}Rp{abs(amount):,}".replace(",", ".")
-
-
-def _number(value: Any) -> str:
-    return format(_decimal(value).normalize(), "f").replace(".", ",")
 
 
 def _int(value: Any) -> int:

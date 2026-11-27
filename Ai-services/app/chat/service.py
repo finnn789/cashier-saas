@@ -43,7 +43,11 @@ _QUOTA_REFUSALS = {
         'Kuota pertanyaan AI bulan ini sudah habis. Silakan top-up +200 pertanyaan.'
     ),
     'DAILY_CAP_REACHED': 'Batas harian 40 pertanyaan AI sudah tercapai. Coba lagi besok.',
+    'OWNER_ONLY': 'Asisten AI hanya tersedia untuk pemilik usaha.',
 }
+NOT_VERIFIED_MESSAGE = (
+    'Akun Anda belum terverifikasi. Kirim /start lalu bagikan nomor Telegram Anda.'
+)
 QUOTA_UNAVAILABLE_MESSAGE = 'Asisten sedang tidak tersedia, coba lagi nanti.'
 TOO_COMPLEX_MESSAGE = 'Pertanyaannya terlalu rumit, coba dipersempit.'
 
@@ -410,10 +414,12 @@ class ChatService:
 
             if self.graph is None:
                 return self._finish_error(started, 'AI_NOT_CONFIGURED', 'ai_not_configured')
+            if java_user_id is None:
+                return self._finish(started, 'not_verified', NOT_VERIFIED_MESSAGE)
             # One question is consumed here; a failure of the check refuses (fail closed).
             quota = await self.grpc_client.consume_ai_question(
                 tenant_id=str(tenant_id),
-                user_id=str(java_user_id) if java_user_id else '',
+                user_id=str(java_user_id),
             )
             if quota is None:
                 return self._finish(started, 'quota_unavailable', QUOTA_UNAVAILABLE_MESSAGE)

@@ -22,6 +22,9 @@ from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+# The last allowed agent run must answer from existing tool results (tool_choice="none").
+MAX_AGENT_RUNS = 4
+
 
 def create_agent_node(
     openrouter_key: str,
@@ -52,8 +55,13 @@ def create_agent_node(
     if tools is not None:
         lc_tools = adapt_tool_registry(tools)
         llm_with_tools = llm.bind_tools(lc_tools) if lc_tools else llm
+        # Tools stay bound: some providers reject tool-call history without declarations.
+        llm_forced_final = (
+            llm.bind_tools(lc_tools, tool_choice="none") if lc_tools else llm
+        )
     else:
         llm_with_tools = llm
+        llm_forced_final = llm
 
     async def agent_node_fn(state: AgentState) -> dict[str, Any]:
         """Invoke LLM with conversation history and bound tools."""
@@ -73,6 +81,8 @@ def create_agent_node(
         else:
             messages_to_send = raw_messages
 
+        agent_runs = int(state.get("agent_runs") or 0) + 1
+        forced_final = agent_runs >= MAX_AGENT_RUNS
         started = time.perf_counter()
         logger.info(
             "Agent node started",
@@ -80,10 +90,14 @@ def create_agent_node(
                 "event": "agent_node_started",
                 "messages_count": len(messages_to_send),
                 "tools_bound": llm_with_tools is not llm,
+                "agent_runs": agent_runs,
+                "forced_final": forced_final,
             },
         )
         try:
-            response: AIMessage = await llm_with_tools.ainvoke(messages_to_send)
+            response: AIMessage = await (
+                llm_forced_final if forced_final else llm_with_tools
+            ).ainvoke(messages_to_send)
 
             tool_calls = getattr(response, "tool_calls", None)
             logger.info(
@@ -108,10 +122,12 @@ def create_agent_node(
                     "messages": [response],
                     "final_response": content_text,
                     "error_code": None,
+                    "agent_runs": agent_runs,
                 }
 
             return {
                 "messages": [response],
+                "agent_runs": agent_runs,
             }
         except Exception as exc:
             code = classify_llm_error(exc)

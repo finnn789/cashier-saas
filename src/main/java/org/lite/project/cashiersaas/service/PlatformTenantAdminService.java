@@ -51,7 +51,7 @@ public class PlatformTenantAdminService {
     private final AiUsageRepository aiUsage;
     private final PlatformBillingSettlementService settlement;
     private final PlatformBillingService billingService;
-    private final MockPaymentGateway gateway;
+    private final PaymentGateway gateway;
 
     /** A complimentary or corrective paid row (no invoice) that starts by the same rule as a paid checkout. */
     @Transactional
@@ -156,7 +156,7 @@ public class PlatformTenantAdminService {
 
     private PlatformInvoiceRowResponse row(PlatformInvoiceEntity invoice) {
         return PlatformAdminMapper.toInvoiceRow(invoice, billing.latestAttempts(List.of(invoice.getId())).get(invoice.getId()),
-                gateway.isEnabled());
+                gateway.isMockEnabled());
     }
 
     /** 404 for an unknown tenant; the lock serializes with the owner's checkout and payment flows. */

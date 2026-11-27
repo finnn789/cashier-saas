@@ -287,10 +287,19 @@ class InsightClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_consume_ai_question_returns_none_on_rpc_error_so_the_caller_fails_closed(self) -> None:
         client = _client()
         client._stub.ConsumeAiQuestion = AsyncMock(
-            side_effect=_rpc_error(grpc.StatusCode.PERMISSION_DENIED)
+            side_effect=_rpc_error(grpc.StatusCode.UNAVAILABLE)
         )
         with self.assertLogs(CLIENT_LOGGER, level="WARNING"):
             self.assertIsNone(await client.consume_ai_question(tenant_id=TENANT, user_id=USER))
+
+    async def test_consume_ai_question_maps_permission_denied_to_owner_only(self) -> None:
+        client = _client()
+        client._stub.ConsumeAiQuestion = AsyncMock(
+            side_effect=_rpc_error(grpc.StatusCode.PERMISSION_DENIED)
+        )
+        with self.assertLogs(CLIENT_LOGGER, level="WARNING"):
+            result = await client.consume_ai_question(tenant_id=TENANT, user_id=USER)
+        self.assertEqual(result, {"allowed": False, "reason": "OWNER_ONLY"})
 
     async def test_record_ai_usage_sends_tenant_and_token_counts(self) -> None:
         client = _client()
@@ -498,7 +507,7 @@ class InsightToolTests(unittest.IsolatedAsyncioTestCase):
             tenant_id=TENANT, user_id=USER
         )
 
-        self.assertIn("Outlet Kedai Senja: 2 opname, total rugi Rp 12500.00, 1 bahan menyimpang", text)
+        self.assertIn("Outlet Kedai Senja: 2 opname, total rugi Rp12.500, 1 bahan menyimpang", text)
         self.assertIn(
             "- Susu: pakai teoritis 10.000 L, selisih 1.250 L, persen -, rugi -, waste -", text
         )
@@ -559,14 +568,14 @@ class InsightToolTests(unittest.IsolatedAsyncioTestCase):
             tenant_id=TENANT, user_id=USER
         )
 
-        self.assertIn("Outlet Kedai Senja (target margin 60.00%)", text)
+        self.assertIn("Outlet Kedai Senja (target margin 60%)", text)
         self.assertIn(
-            "- Latte: harga Rp 25000.00, HPP Rp 12000.00, margin 52.00%, status BELOW_TARGET, "
-            "saran harga Rp 30000.00",
+            "- Latte: harga Rp25.000, HPP Rp12.000, margin 52%, status BELOW_TARGET, "
+            "saran harga Rp30.000",
             text,
         )
         self.assertIn(
-            "- Es Teh: harga Rp 5000.00, HPP -, margin -, status COST_UNKNOWN, saran harga -", text
+            "- Es Teh: harga Rp5.000, HPP -, margin -, status COST_UNKNOWN, saran harga -", text
         )
         self.assertIn("Outlet Kedai Pagi (target margin -)", text)
         self.assertIn("- Tidak ada menu yang sesuai.", text)

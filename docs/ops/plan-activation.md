@@ -1,7 +1,7 @@
 # Runbook operator: aktivasi paket Pro/Premium dan top-up kuota AI
 
 Pemilik: orchestrator. Versi 2 (2026-11-14), TASK-082 (PRD v2.2 bagian 8.15, keputusan E1/E4) dan TASK-083 (add-on outlet tambahan, `subscriptions.extra_outlets`, keputusan M1-M3).
-Untuk masa pilot: pembayaran lewat transfer manual. Sejak TASK-105/106 owner bisa membuat tagihan sendiri (`/merchant/subscription/checkout`, gateway MOCK), dan SUPERADMIN mengonfirmasi transfer lewat `/api/v1/platform` (lihat bagian 8). SQL di runbook ini tetap berlaku sebagai jalur darurat. Belum ada integrasi payment gateway sungguhan.
+Untuk masa pilot: pembayaran lewat transfer manual. Sejak TASK-105/106 owner bisa membuat tagihan sendiri (`/merchant/subscription/checkout`, gateway MOCK), dan SUPERADMIN mengonfirmasi transfer lewat `/api/v1/platform` (lihat bagian 8). SQL di runbook ini tetap berlaku sebagai jalur darurat. Keterangan "belum ada integrasi payment gateway" sudah usang: sejak TASK-117 tersedia Midtrans (lihat bagian 9).
 
 ## Aturan sebelum menjalankan apa pun
 
@@ -272,6 +272,16 @@ SELECT id, email, full_name, status FROM staff_users WHERE platform_admin ORDER 
 ```
 
 Menangguhkan tenant mengubah `tenants.status` menjadi `SUSPENDED` tanpa menghapus data; pemilik dan kasir tidak bisa memilih outlet dan sesi mereka berhenti saat refresh berikutnya (paling lama selama masa berlaku token akses). Gunakan panel, bukan SQL, supaya tercatat di audit.
+
+## 9. Midtrans (Snap, sandbox dulu)
+
+Pembayaran langganan dan top-up AI bisa lewat Midtrans Snap (redirect). Perpanjangan = checkout baru tiap periode (tanpa auto-debit).
+
+1. Dashboard sandbox Midtrans: Settings > Access Keys, salin Server Key dan Merchant ID. Jangan commit nilainya.
+2. Set env backend: `CASHIER_BILLING_PROVIDER=MIDTRANS`, `MIDTRANS_SERVER_KEY`, `MIDTRANS_MERCHANT_ID`, `MIDTRANS_FINISH_URL` (mis. `http://localhost:5173/subscription`), `MIDTRANS_PRODUCTION=false`. Backend gagal start bila ada yang kosong saat provider `MIDTRANS`. Produksi: `MIDTRANS_PRODUCTION=true` dengan key produksi.
+3. Dashboard: Settings > Payment > Notification URL = `https://<host-publik>/api/v1/webhooks/midtrans`. Endpoint ini publik; keabsahan dijamin signature SHA-512 dan pembacaan ulang status dari Midtrans sebelum tagihan dilunasi.
+4. Uji lokal: buka tunnel (mis. `cloudflared tunnel --url http://localhost:8080` atau ngrok), pakai URL tunnel sebagai Notification URL, buat tagihan dari halaman Langganan, bayar di halaman sandbox, lalu cek tagihan berubah PAID.
+5. Webhook dengan jumlah berbeda dari tagihan, atau pembayaran masuk setelah tagihan kedaluwarsa/dibatalkan, dicatat `gateway_events.processing_status = REJECTED` dan audit `PLATFORM_PAYMENT_FAILED`; operator harus refund manual lewat dashboard Midtrans.
 
 ## Pemecahan masalah
 

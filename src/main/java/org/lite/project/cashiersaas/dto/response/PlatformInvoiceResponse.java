@@ -31,6 +31,8 @@ public class PlatformInvoiceResponse {
     private String providerCode;
     private String providerPaymentRef;
     private boolean mockPaymentEnabled;
+    /** Hosted payment page; set only while the invoice is ISSUED and its latest attempt is an open Midtrans one. */
+    private String paymentUrl;
     /** Null until a subscription invoice is paid. */
     private Instant subscriptionStartsAt;
     private Instant subscriptionEndsAt;

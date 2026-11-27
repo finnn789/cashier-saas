@@ -27,7 +27,7 @@ public class MerchantSubscriptionService {
     private final SubscriptionRepository subscriptions;
     private final AiUsageRepository aiUsage;
     private final PlatformBillingRepository billing;
-    private final MockPaymentGateway gateway;
+    private final PaymentGateway gateway;
 
     @Transactional(readOnly = true)
     public MerchantSubscriptionResponse get(TenantPrincipal principal) {
@@ -45,7 +45,7 @@ public class MerchantSubscriptionService {
             response.setAi(ai(tenant, tenantId, now));
         }
         response.setPendingInvoiceId(billing.openInvoice(tenantId, now).map(PlatformInvoiceEntity::getId).orElse(null));
-        response.setMockPaymentEnabled(gateway.isEnabled());
+        response.setMockPaymentEnabled(gateway.isMockEnabled());
         if (plan != PlanCode.FREETIER) {
             response.setOutletAddOnMonthlyPrice(MembershipPlanCatalogService.OUTLET_ADDON_MONTHLY);
         }

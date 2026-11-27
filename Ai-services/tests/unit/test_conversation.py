@@ -78,6 +78,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             "first_name": "Name",
             "kind": "TEXT",
             "content": "current",
+            "java_user_id": uuid4(),  # AI questions need a verified staff user
         }
 
     def record(self, connection: Mock) -> None:

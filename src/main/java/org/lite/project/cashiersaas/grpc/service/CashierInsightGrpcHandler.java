@@ -6,6 +6,8 @@ import com.cashier.grpc.v1.GetLeakageReportRequest;
 import com.cashier.grpc.v1.GetLeakageReportResponse;
 import com.cashier.grpc.v1.GetMenuMarginsRequest;
 import com.cashier.grpc.v1.GetMenuMarginsResponse;
+import com.cashier.grpc.v1.GetProductPerformanceRequest;
+import com.cashier.grpc.v1.GetProductPerformanceResponse;
 import com.cashier.grpc.v1.GetRestockSuggestionsRequest;
 import com.cashier.grpc.v1.GetRestockSuggestionsResponse;
 import com.cashier.grpc.v1.GetSalesSummaryRequest;
@@ -52,6 +54,7 @@ public class CashierInsightGrpcHandler {
     private static final int DEFAULT_LEAKAGE_DAYS = 30;
     private static final int LEAKAGE_TOP_LINES = 10;
     private static final int MAX_MARGIN_MENUS = 30;
+    private static final int MAX_PERFORMANCE_PRODUCTS = 500;
     private static final String BELOW_TARGET = "BELOW_TARGET";
     private static final Set<Role> OWNER_ROLES = Set.of(Role.OWNERMERCHANT);
 
@@ -79,6 +82,31 @@ public class CashierInsightGrpcHandler {
                         GetSalesSummaryResponse.Builder response = GetSalesSummaryResponse.newBuilder().setTenantId(tenantUuid.toString());
                         for (MerchantAccessContext context : contexts) {
                             response.addOutlets(mapper.toSalesSummary(context, insightService.salesInsight(context, start, end)));
+                        }
+                        return response.build();
+                    };
+                });
+    }
+
+    @Transactional(readOnly = true)
+    public void getProductPerformance(GetProductPerformanceRequest request,
+                                      StreamObserver<GetProductPerformanceResponse> responseObserver) {
+        if (request == null) {
+            nullRequest(responseObserver);
+            return;
+        }
+        handle(request.getTenantId(), request.getUserId(), "Internal error retrieving product performance", responseObserver,
+                tenantUuid -> {
+                    LocalDate start = parseDate(request.getStartDate(), "start_date");
+                    LocalDate end = parseDate(request.getEndDate(), "end_date");
+                    if (end.isBefore(start) || ChronoUnit.DAYS.between(start, end) >= MAX_RANGE_DAYS) {
+                        throw Status.INVALID_ARGUMENT.withDescription("date range is invalid").asRuntimeException();
+                    }
+                    return contexts -> {
+                        GetProductPerformanceResponse.Builder response = GetProductPerformanceResponse.newBuilder().setTenantId(tenantUuid.toString());
+                        for (MerchantAccessContext context : contexts) {
+                            response.addOutlets(mapper.toProductPerformance(context, start, end,
+                                    insightService.productPerformance(tenantUuid, context.getOutlet().getId(), start, end, MAX_PERFORMANCE_PRODUCTS)));
                         }
                         return response.build();
                     };

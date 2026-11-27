@@ -65,6 +65,11 @@ public class MerchantSubscriptionController {
         return ApiResponse.success("Simulasi pembayaran diproses.", billingService.mockPay(principal, invoiceId, request));
     }
 
+    @PostMapping("/invoices/{invoiceId}/pay")
+    public ApiResponse<PlatformInvoiceResponse> pay(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID invoiceId) {
+        return ApiResponse.success("Halaman pembayaran disiapkan.", billingService.pay(principal, invoiceId));
+    }
+
     @PostMapping("/invoices/{invoiceId}/cancel")
     public ApiResponse<PlatformInvoiceResponse> cancel(@AuthenticationPrincipal TenantPrincipal principal, @PathVariable UUID invoiceId,
                                                        @Valid @RequestBody(required = false) InvoiceCancelRequest request) {
