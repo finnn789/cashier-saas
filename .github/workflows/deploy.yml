@@ -1,0 +1,84 @@
+name: CI/CD Cashier SaaS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Cegah dua deploy berjalan bersamaan
+concurrency:
+  group: deploy-cashier-saas
+  cancel-in-progress: false
+
+jobs:
+  # ============ CI: build + tes ============
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kode
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build dan jalankan tes
+        run: ./mvnw -B clean package
+        # Kalau tesmu butuh database dan belum disiapkan di CI,
+        # sementara pakai: ./mvnw -B clean package -DskipTests
+
+      - name: Siapkan jar untuk deploy
+        run: cp target/*.jar app-new.jar
+
+      - name: Simpan jar sebagai artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: app-new.jar
+          retention-days: 3
+
+  # ============ CD: deploy ke VPS ============
+  deploy:
+    name: Deploy ke VPS
+    needs: build
+    # Deploy hanya saat push ke main, bukan saat pull request
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ambil jar hasil build
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+
+      - name: Kirim jar ke VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: app-new.jar
+          target: /home/deploy/cashier-saas/
+
+      - name: Ganti jar lalu restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/deploy/cashier-saas
+            mv -f app-new.jar app.jar
+            sudo systemctl restart cashier-saas
+            sleep 15
+            systemctl is-active --quiet cashier-saas \
+              && echo "Deploy berhasil: service aktif" \
+              || (echo "Service gagal aktif" && journalctl -u cashier-saas -n 30 --no-pager && exit 1)
